@@ -1,4 +1,5 @@
 ---
+name: task-driver
 description: "触发关键词：tdr-, task-driver。重任务专用。强制澄清、强制确认、强制按计划执行。未经确认禁止推进，未经验证禁止宣称完成。"
 ---
 
