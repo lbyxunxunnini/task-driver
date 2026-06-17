@@ -104,6 +104,6 @@ task-driver/
 
 ## 版本
 
-当前版本：v0.2.0
+当前版本：v0.2.1
 
 详见 [CHANGELOG.md](CHANGELOG.md)
