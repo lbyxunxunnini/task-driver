@@ -1,0 +1,35 @@
+{
+  "name": "task-driver",
+  "version": "0.4.0",
+  "description": "Task Driver 任务工作流：澄清、spec、plan、可选多 agent、降级执行、验证和交付门禁。",
+  "author": {
+    "name": "task-driver"
+  },
+  "license": "MIT",
+  "keywords": [
+    "task-driver",
+    "agent-workflow",
+    "planning",
+    "verification",
+    "tdd",
+    "code-review"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Task Driver",
+    "shortDescription": "spec-plan-execute agent 工作流",
+    "longDescription": "Task Driver 引导 coding agent 完成事实收集、深度澄清、持久化 spec/plan、可控执行、可选多 agent 交接与单 agent 降级、TDD、review gate、progress ledger 和完成前验证。",
+    "developerName": "task-driver",
+    "category": "Coding",
+    "capabilities": [
+      "Interactive",
+      "Read",
+      "Write"
+    ],
+    "defaultPrompt": [
+      "tdr- 帮我把这个功能想清楚，写 spec 和实施计划。",
+      "task-driver 按已确认计划连续执行，并完成验证门禁。",
+      "tdr- 先诊断这个任务，只问最关键的缺失信息。"
+    ]
+  }
+}

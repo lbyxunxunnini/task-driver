@@ -1,109 +1,182 @@
 # Task Driver
 
-> 重任务专用 skill。先深度澄清与细化计划，一次确认后连续执行到计划终点，自检收尾。
+Task Driver 是面向 agent 重任务的结构化工作流包。目标是把一个任务从“模糊请求”推进到“可验证交付”：事实收集、深度澄清、spec、plan、连续执行、TDD/评审、verification。
 
-## 核心理念
+它的重点不是替 agent 写更多提示词，而是建立可恢复、可验证、可降级的执行协议。
 
-**确认前移，执行后移；计划要细，执行要顺。**
+## 能力边界
 
-大多数 agent 在两种极端之间摇摆：要么每走一步都问用户（低效），要么直接开干不停顿（容易跑偏）。Task Driver 的设计目标是——**把不确定性消灭在执行前，把连续性留给执行中**。
+Task Driver 负责流程治理，不替代具体领域 skill。它解决的问题是：
 
-## 工作模式
+- 模糊任务开工前问不透。
+- 计划太粗，执行中频繁回问。
+- 长任务上下文压缩后丢进度。
+- 没有 spec/plan/ledger，完成标准不可追踪。
+- 没有 fresh verification evidence 就口头宣布完成。
 
-收到任务后固定采用五阶段：
+不追求：
 
-1. **事实收集** — 先查代码/文件/日志/现有 skill，消灭能自行确认的问题
-2. **深度澄清** — 沿决策树逐层追问，**先 Why 再 What**，直到关键分支闭合
-3. **计划确认** — 一次性确认目标、范围、品质层级、步骤、验收、边界
-4. **连续执行** — 确认后直接做完整个计划，不停顿
-5. **自检验收** — 对照验收标准逐项验证，汇报结果
-
-```dot
-digraph task_driver {
-    rankdir=TB;
-    node [shape=box];
-
-    start [label="收到任务" shape=doublecircle];
-    collect [label="1. 事实收集"];
-    clarify [label="2. 深度澄清\n先 Why 再 What"];
-    branch_check [shape=diamond label="分支闭合?"];
-    plan [label="3. 计划确认\n+ 品质层级"];
-    plan_confirm [shape=diamond label="用户确认?"];
-    execute [label="4. 连续执行"];
-    boundary [shape=diamond label="触发停机条件?"];
-    self_check [label="5. 自检验收"];
-    end [shape=doublecircle label="汇报结束"];
-
-    start -> collect -> clarify -> branch_check;
-    branch_check -> clarify [label="未闭合"];
-    branch_check -> plan [label="全部闭合"];
-    plan -> plan_confirm;
-    plan_confirm -> clarify [label="有异议"];
-    plan_confirm -> execute [label="确认"];
-    execute -> boundary;
-    boundary -> clarify [label="超范围"];
-    boundary -> execute [label="正常"];
-    execute -> self_check -> end;
-}
-```
+- 强制所有任务都走重流程。
+- 替代语言、框架、UI、数据库等领域专用 skill。
 
 ## 使用方式
 
-```
-tdr- 你的任务描述
-```
+直接触发：
 
-或
-
-```
-task-driver 你的任务描述
+```text
+tdr- 帮我把这个功能从需求澄清到实现验证完整跑完
 ```
 
-## 铁律（10 条）
+或：
 
-| # | 铁律 | 一句话 |
-|---|------|--------|
-| 1 | 禁止把候选当确认 | 未明确确认的不得执行 |
-| 2 | 禁止浅问即收手 | 必须追问到分支闭合 |
-| 3 | 禁止执行阶段反复讨确认 | 确认后连续执行 |
-| 4 | 禁止任务级猜测 | 能查的先查，只有用户独有的信息才问 |
-| 5 | 多解必须在计划阶段解决 | 方案分歧不得拖到执行中 |
-| 6 | 信息不足禁止出最终计划 | 缺关键信息就继续澄清 |
-| 7 | 发现超范围或新分叉必须停 | 计划外变更必须暂停确认 |
-| 8 | 先查再问，先证据再判断 | 自己能查到的不要问用户 |
-| 9 | 禁止假完成 | 未验证不得说完成 |
-| 10 | 目标未达成禁止结束 | 唯一结束条件：验收通过 |
+```text
+task-driver 根据这个 bug 先查根因，再做计划和修复
+```
 
-## 深挖判定清单
+## 安装方式
 
-澄清阶段必须闭合以下 12 项（每项有操作性定义），**先 Why 再 What**：
+Task Driver 支持两种安装形态。二选一即可，推荐优先使用插件形态。
 
-| 项目 | 判定标准 |
-|------|----------|
-| 为什么做（根本动机） | 能一句话说清用户场景和期望收益 |
-| 做什么 | 能描述具体功能点 + 2-3 个关键子功能 |
-| 为谁做 | 能描述目标用户场景和能力水平 |
-| 解决什么问题 | 能说明痛点和解决后状态对比 |
-| 做成什么样算好 | 用户确认品质层级 + 正面参考 |
-| 输出物是什么 | 能列出交付物清单及格式 |
-| 不做什么 | 能列出 2-3 个排除项 |
-| 关键流程或交互 | 能描述主路径 3-5 个关键步骤 |
-| 内容来源 | 能说明来源方式及质量保障 |
-| 评价或验收方式 | 有可执行的验证步骤 |
-| 约束与禁区 | 能列出技术限制和红线 |
-| 优先级与可妥协项 | 能说明先砍什么、绝不砍什么 |
+### 方式 A：作为 Codex 插件安装（推荐）
+
+适合：Codex 支持插件、本项目需要暴露 5 个阶段 skill、希望后续继续扩展 hooks/MCP/marketplace。
+
+插件入口：
+
+```text
+.codex-plugin/plugin.json
+```
+
+运行时 skill 来源：
+
+```text
+skills/
+```
+
+安装后暴露 5 个 skill：
+
+- `task-driver`：总控入口。
+- `task-driver-brainstorming`：事实收集、澄清、方案比较、spec。
+- `task-driver-planning`：计划、文件映射、任务拆解、验证命令、ledger。
+- `task-driver-executing`：连续执行、TDD、任务评审、ledger 更新。
+- `task-driver-verification`：最终证据、验收审计、残余风险。
+
+如果你用个人插件目录，常见放置方式是：
+
+```text
+~/plugins/task-driver/
+  .codex-plugin/plugin.json
+  skills/
+```
+
+然后通过 Codex 的插件安装/刷新流程加载该插件。插件形态下，根目录 `SKILL.md` 只是兼容文件，不参与插件运行入口。
+
+### 方式 B：作为单 skill 安装
+
+适合：当前工具不支持插件，只支持传统 skill 目录。
+
+单 skill 入口：
+
+```text
+SKILL.md
+```
+
+常见放置方式是把本项目目录作为一个 skill 放到 skill 搜索路径中，例如：
+
+```text
+~/.codex/skills/task-driver/
+  SKILL.md
+```
+
+单 skill 形态只使用根目录 `SKILL.md`。`skills/` 下的 5 个阶段 skill 不会作为独立 skill 暴露，除非你的运行环境额外扫描嵌套目录。
+
+### 不要重复安装
+
+根目录 `SKILL.md` 和 `skills/task-driver/SKILL.md` 都叫 `task-driver`，但它们服务于不同安装形态：
+
+- 插件安装：`.codex-plugin/plugin.json` 指向 `./skills/`，使用 `skills/task-driver/SKILL.md`，根 `SKILL.md` 不参与插件入口。
+- 单 skill 安装：只使用根 `SKILL.md`，适合不支持插件的环境。
+
+不要同时安装“根目录单 skill”和“插件形态”，否则可能出现两个 `task-driver` 入口。
+
+检查点：
+
+- 如果 Codex 里出现一个 `task-driver` 和 4 个阶段 skill，说明你在用插件形态，正常。
+- 如果只出现一个 `task-driver`，说明你在用单 skill 形态，正常。
+- 如果出现两个 `task-driver`，说明重复安装了。保留插件形态时，移除单 skill 安装目录；保留单 skill 形态时，卸载插件。
+
+## 工作流
+
+1. **事实收集**：先查项目、文件、git、日志和已有文档。
+2. **深度澄清**：先 Why，再 scope、success、quality、constraints。
+3. **Spec**：保存到 `docs/task-driver/specs/YYYY-MM-DD--slug.md`。
+4. **Plan**：保存到 `docs/task-driver/plans/YYYY-MM-DD--slug.md`。
+5. **Ledger**：保存到 `docs/task-driver/ledgers/YYYY-MM-DD--slug.md`。
+6. **执行**：确认后连续推进，行为变化优先 TDD。
+7. **评审**：每个有意义任务检查 spec compliance 和质量问题。
+8. **验证**：最终对照验收标准给出证据表。
+
+## 多 Agent 与降级
+
+Task Driver 支持多 agent，但不依赖多 agent。
+
+- 有 subagent/parallel agent 工具时，可以把 review、verification 或互不依赖的实现任务分派出去。
+- 没有 subagent 能力时，自动降级为 single-agent：同一个 agent 按 Brainstormer、Planner、Implementer、Reviewer、Verifier 顺序执行。
+- 两种模式都必须使用同一套结构化交接 packet：`SpecPacket`、`PlanPacket`、`TaskResult`、`ReviewReport`、`VerificationReport`。
+- 多 agent 输出只是证据，不是最终权威；controller 仍负责对照 spec/plan/ledger 做最终判断。
+
+## 反例门禁
+
+需要加入反例。反例能限制 agent 把“看起来像完成”的状态误判为完成。
+
+典型违规：
+
+- 没有 approved spec 就开始多文件实现。
+- plan 写“适当处理异常、补充测试、完善逻辑”，但没有文件、命令和预期结果。
+- plan 已确认后，每完成一个小步骤都问“是否继续”。
+- 没有 fresh verification evidence 就说“已完成”。
+- 没有 subagent 工具却声称“已派发 reviewer agent”。
+- subagent 只返回散文总结，没有结构化 packet，却被当作通过。
+
+## 70 分标准
+
+当前版本补齐了关键工作流能力：
+
+- 持久化 spec/plan/ledger。
+- 多阶段 skill 拆分。
+- TDD 优先规则。
+- 任务级 review gate。
+- 分支/工作区安全前置检查。
+- 上下文恢复规则。
+- 完成前 verification gate。
+- 可选多 agent 执行与 single-agent 降级协议。
+- 运行时 skill 使用中文书写，方便调试，但不限定中文语境。
+- Codex 插件 manifest。
+
+暂未包含：
+
+- 没有完整 hooks/bootstrap 体系。
+- 没有内置脚本生成 review package 或 task brief。
+- 没有专门的 subagent prompt 模板。
+- 没有行为 eval harness。
+- 没有 marketplace 发布配置。
 
 ## 文件结构
 
-```
+```text
 task-driver/
-  SKILL.md      # skill 定义文件（核心）
-  CHANGELOG.md  # 版本说明
-  README.md     # 本文件
+  .codex-plugin/plugin.json
+  SKILL.md
+  skills/
+    task-driver/
+    task-driver-brainstorming/
+    task-driver-planning/
+    task-driver-executing/
+    task-driver-verification/
+  README.md
+  CHANGELOG.md
 ```
 
 ## 版本
 
-当前版本：v0.2.1
-
-详见 [CHANGELOG.md](CHANGELOG.md)
+当前版本：v0.4.0
