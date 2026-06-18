@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.4.1 (2026-06-18)
+
+### 改进
+
+- 根入口更名为 `task-driver-standalone`，避免递归扫描时与 `skills/task-driver/SKILL.md` 同名冲突
+- 根 `SKILL.md` 收敛为薄 bootstrap 入口；完整 packet、多 agent 和阶段交接规则集中到 `skills/task-driver/SKILL.md`
+- 子阶段 skill 去除重复 YAML schema，只声明本阶段产出的 packet 和必填信息
+
 ## v0.4.0 (2026-06-18)
 
 ### 新增

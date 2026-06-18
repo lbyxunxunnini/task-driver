@@ -69,7 +69,7 @@ skills/
   skills/
 ```
 
-然后通过 Codex 的插件安装/刷新流程加载该插件。插件形态下，根目录 `SKILL.md` 只是兼容文件，不参与插件运行入口。
+然后通过 Codex 的插件安装/刷新流程加载该插件。插件形态下，根目录 `SKILL.md` 只是 standalone 兼容入口，不参与插件运行入口。
 
 ### 方式 B：作为单 skill 安装
 
@@ -88,22 +88,31 @@ SKILL.md
   SKILL.md
 ```
 
-单 skill 形态只使用根目录 `SKILL.md`。`skills/` 下的 5 个阶段 skill 不会作为独立 skill 暴露，除非你的运行环境额外扫描嵌套目录。
+根目录入口名是 `task-driver-standalone`，用于避免递归扫描环境中和 `skills/task-driver/SKILL.md` 的 `task-driver` 重名。
+
+如果运行环境不会扫描嵌套目录，根 `SKILL.md` 是最小入口；复杂任务中它会指向 `skills/task-driver/SKILL.md` 获取完整 packet、多 agent 和阶段交接规则。
+
+如果运行环境会扫描嵌套目录，通常会看到：
+
+- `task-driver-standalone`：根目录薄入口。
+- `task-driver`：完整控制器。
+- 4 个阶段 skill。
 
 ### 不要重复安装
 
-根目录 `SKILL.md` 和 `skills/task-driver/SKILL.md` 都叫 `task-driver`，但它们服务于不同安装形态：
+根目录 `SKILL.md` 和 `skills/task-driver/SKILL.md` 服务于不同安装形态：
 
 - 插件安装：`.codex-plugin/plugin.json` 指向 `./skills/`，使用 `skills/task-driver/SKILL.md`，根 `SKILL.md` 不参与插件入口。
-- 单 skill 安装：只使用根 `SKILL.md`，适合不支持插件的环境。
+- 单 skill 安装：使用根 `SKILL.md` 的 `task-driver-standalone`，适合不支持插件的环境。
 
-不要同时安装“根目录单 skill”和“插件形态”，否则可能出现两个 `task-driver` 入口。
+不要同时安装“根目录单 skill”和“插件形态”，否则可能出现重复入口。
 
 检查点：
 
 - 如果 Codex 里出现一个 `task-driver` 和 4 个阶段 skill，说明你在用插件形态，正常。
-- 如果只出现一个 `task-driver`，说明你在用单 skill 形态，正常。
-- 如果出现两个 `task-driver`，说明重复安装了。保留插件形态时，移除单 skill 安装目录；保留单 skill 形态时，卸载插件。
+- 如果只出现一个 `task-driver-standalone`，说明你在用根单 skill 形态，正常。
+- 如果同时出现 `task-driver-standalone`、`task-driver` 和 4 个阶段 skill，说明运行时递归扫描了嵌套目录，入口不会同名冲突；复杂任务优先用 `task-driver`。
+- 如果同时通过插件和单 skill 手动安装了同一份项目，保留一种安装方式即可。
 
 ## 工作流
 
@@ -166,7 +175,7 @@ Task Driver 支持多 agent，但不依赖多 agent。
 ```text
 task-driver/
   .codex-plugin/plugin.json
-  SKILL.md
+  SKILL.md      # task-driver-standalone 薄入口
   skills/
     task-driver/
     task-driver-brainstorming/
@@ -179,4 +188,4 @@ task-driver/
 
 ## 版本
 
-当前版本：v0.4.0
+当前版本：v0.4.1

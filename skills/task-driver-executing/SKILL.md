@@ -69,20 +69,9 @@ description: "执行阶段。用于 approved plan 之后：按计划连续执行
 - review 发现 Critical/Important，但只记录不修复。
 - subagent 没返回结构化 packet，却把它的散文总结当作通过。
 
-## TaskResult
+## 阶段输出：TaskResult
 
-```yaml
-task_result:
-  task_id:
-  status: pass | fail | blocked
-  files_changed:
-  commands_run:
-    - command:
-      result:
-  evidence:
-  deviations_from_plan:
-  open_risks:
-```
+字段以 `skills/task-driver/SKILL.md` 的结构化交接 Packet 为准；本阶段至少写入 task id、状态、修改文件、运行命令、证据、偏离 plan 的地方、未关闭风险。
 
 ## Review Gate
 
@@ -94,18 +83,9 @@ task_result:
 
 Critical 或 Important 问题阻塞继续。必须修复并复审后进入下一个任务。Minor 可以进入 ledger backlog。
 
-ReviewReport：
+## 阶段输出：ReviewReport
 
-```yaml
-review_report:
-  task_id:
-  status: pass | fail
-  findings:
-    - severity: Critical | Important | Minor
-      file:
-      issue:
-      required_fix:
-```
+字段以 `skills/task-driver/SKILL.md` 的结构化交接 Packet 为准；本阶段至少写入 task id、状态、findings、severity、file、issue、required fix。
 
 ## 停机条件
 

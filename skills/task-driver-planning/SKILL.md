@@ -31,7 +31,7 @@ description: "计划阶段。用于 approved spec 之后、执行之前：创建
 - 非代码变化：确定性的验证步骤。
 - 每个任务的 review gate。
 - ledger 路径：`docs/task-driver/ledgers/`。
-- 每个任务需要消费和产出的 packet。
+- 每个任务需要消费和产出的 packet；字段以 `skills/task-driver/SKILL.md` 的 packet contract 为准。
 - 停机条件和回滚说明。
 
 ## 禁止占位
@@ -133,22 +133,9 @@ description: "计划阶段。用于 approved spec 之后、执行之前：创建
 - [decision/source]
 ```
 
-## PlanPacket
+## 阶段输出
 
-```yaml
-plan_packet:
-  plan_path:
-  ledger_path:
-  mode: single-agent | multi-agent-review | multi-agent-parallel
-  tasks:
-    - id:
-      owner_role:
-      objective:
-      files:
-      steps:
-      verification:
-      stop_conditions:
-```
+输出 `PlanPacket` 并创建 ledger。字段以 `skills/task-driver/SKILL.md` 的结构化交接 Packet 为准；本阶段至少填入 plan 路径、ledger 路径、执行模式、任务 id、owner role、objective、files、steps、verification、stop conditions。
 
 ## 自检门禁
 
