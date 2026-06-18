@@ -59,6 +59,18 @@ description: "执行阶段。用于 approved plan 之后：按计划连续执行
 7. 做 Review Gate。
 8. 写 ReviewReport packet。
 
+## 执行-验证循环退出
+
+同一 requirement 最多执行-验证 2 轮。每轮都要在 ledger 记录尝试内容、验证命令、结果、失败原因和下一步假设。
+
+第 2 轮后仍未通过时，停止继续修补，并写入：
+
+- `blocked`：需要用户决策、权限、环境、外部服务或范围调整。
+- `partial`：核心目标满足但存在明确缺口，等待用户接受或拒绝。
+- `plan-revision`：原 plan 假设错误，必须回到计划阶段。
+
+不得无限重复“修一下再测一下”。
+
 ## 执行反例
 
 这些情况必须停止或回退：
@@ -68,6 +80,7 @@ description: "执行阶段。用于 approved plan 之后：按计划连续执行
 - 任务没写 TaskResult，就进入下一个任务。
 - review 发现 Critical/Important，但只记录不修复。
 - subagent 没返回结构化 packet，却把它的散文总结当作通过。
+- 同一 requirement 已失败 2 轮，仍继续盲修。
 
 ## 阶段输出：TaskResult
 

@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.4.2 (2026-06-18)
+
+### 修复
+
+- `APM-WORKFLOW-001`：增加执行-验证循环退出条件；同一 requirement 最多 2 轮，仍失败进入 `blocked`、`partial` 或 `plan-revision`
+- `APM-INSTRUCTION-001`：澄清标准分为必填门禁和按需补充，避免 8 项全阻塞
+- `APM-INSTRUCTION-002`：操作化“重任务”和“明显方案分叉”的判定条件
+- `APM-GOV-001`：验证报告增加证据强度和覆盖范围，避免二元 pass/fail
+- `APM-GOV-002`：补充 MVP、精打磨、生产级的验收差异
+- `APM-DESIGN-001`：说明 packet schema 单点定义是刻意取舍，避免 schema drift
+- `APM-BP-001`：增加 Red Flags，预判“应该好了”“窄验证宣称全完成”等 agent 自欺信号
+
 ## v0.4.1 (2026-06-18)
 
 ### 改进

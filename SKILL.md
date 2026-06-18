@@ -17,6 +17,7 @@ description: "Task Driver 单 skill 兼容入口。触发关键词：tdr-、task
 4. 一次确认：spec 和 plan 确认后，执行阶段不得反复问“是否继续”。
 5. TDD 优先：功能、bugfix、行为变化先写失败测试，除非任务不可测试或用户明确豁免。
 6. 验证收尾：没有 fresh verification evidence，不得说完成、通过、修好、可交付。
+7. 循环退出：同一 requirement 最多执行-验证 2 轮；仍失败则进入 blocked、partial 或 plan-revision。
 
 ## 反例门禁
 
@@ -28,6 +29,7 @@ description: "Task Driver 单 skill 兼容入口。触发关键词：tdr-、task
 - 没有运行验证命令，只根据改动内容说“应该好了”。
 - 没有 subagent 工具，却声称“已派发 reviewer agent”。
 - 发现 scope 扩大，但继续实现新增需求。
+- 同一 requirement 失败 2 轮后仍继续盲修。
 
 ## 工件路径
 

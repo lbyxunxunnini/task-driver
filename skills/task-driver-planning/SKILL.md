@@ -12,6 +12,7 @@ description: "计划阶段。用于 approved spec 之后、执行之前：创建
 - Approved spec，内联或位于 `docs/task-driver/specs/`。
 - 当前项目事实：文件结构、实现模式、测试命令、依赖管理、git 状态。
 - 用户约束和质量层级。
+- 主控定义的重任务判定、明显方案分叉、品质层级和执行-验证循环退出规则。
 
 缺少且本地无法查到的信息，必须先问。
 
@@ -24,6 +25,7 @@ description: "计划阶段。用于 approved spec 之后、执行之前：创建
 - 目标和 spec 路径。
 - 从 spec 复制的全局约束。
 - 执行模式：`single-agent`、`multi-agent-review` 或 `multi-agent-parallel`。
+- 品质层级对应的验收差异。
 - 文件映射：创建/修改/测试/文档路径及职责。
 - 接口：函数、命令、配置键、schema 或公开行为。
 - 任务拆分：每个任务能独立验证和评审。
@@ -33,6 +35,7 @@ description: "计划阶段。用于 approved spec 之后、执行之前：创建
 - ledger 路径：`docs/task-driver/ledgers/`。
 - 每个任务需要消费和产出的 packet；字段以 `skills/task-driver/SKILL.md` 的 packet contract 为准。
 - 停机条件和回滚说明。
+- 同一 requirement 最多 2 轮执行-验证循环；超过后进入 `blocked`、`partial` 或 `plan-revision`。
 
 ## 禁止占位
 
@@ -95,7 +98,7 @@ description: "计划阶段。用于 approved spec 之后、执行之前：创建
 - [ ] Step 5: 写 ReviewReport packet 到 ledger。
 
 ## Verification Plan
-- [最终命令和预期结果]
+- [最终命令、预期结果、覆盖的 requirement、预期 evidence_strength]
 
 ## Stop Conditions
 - [必须暂停回问的情况]

@@ -125,6 +125,15 @@ SKILL.md
 7. **评审**：每个有意义任务检查 spec compliance 和质量问题。
 8. **验证**：最终对照验收标准给出证据表。
 
+## 治理门禁
+
+- **重任务判定**：跨 2 个以上文件/模块，或目标、范围、验收、质量层级不清楚，或涉及数据、权限、安全、发布、迁移、外部服务、破坏性操作时，必须走 Task Driver。
+- **明显方案分叉**：会改变 API、数据模型、用户流程、依赖、验证方式、风险边界、交付范围或回滚方式的选择，必须在 spec/plan 阶段确认。
+- **澄清分层**：Goal、Scope、Non-goals、Acceptance Criteria、Constraints、Quality Level 是必填门禁；User scenario、Risks、Trade-offs、Alternatives 按需补充。
+- **品质层级**：MVP 覆盖核心路径；精打磨覆盖主要边界和错误状态；生产级覆盖安全、权限、性能、兼容、观测、回滚/迁移和完整回归。
+- **执行-验证循环**：同一 requirement 最多 2 轮；仍失败则进入 `blocked`、`partial` 或 `plan-revision`。
+- **证据强度**：`strong` 才能标 `Met`；`medium` 最多 `Partial`；`weak` / `stale` 必须 `Not met` 或 `Blocked`。
+
 ## 多 Agent 与降级
 
 Task Driver 支持多 agent，但不依赖多 agent。
@@ -146,6 +155,7 @@ Task Driver 支持多 agent，但不依赖多 agent。
 - 没有 fresh verification evidence 就说“已完成”。
 - 没有 subagent 工具却声称“已派发 reviewer agent”。
 - subagent 只返回散文总结，没有结构化 packet，却被当作通过。
+- 同一 requirement 失败 2 轮后仍继续盲修。
 
 ## 70 分标准
 
@@ -161,6 +171,7 @@ Task Driver 支持多 agent，但不依赖多 agent。
 - 可选多 agent 执行与 single-agent 降级协议。
 - 运行时 skill 使用中文书写，方便调试，但不限定中文语境。
 - Codex 插件 manifest。
+- APM issue 修复：循环退出、澄清分层、操作化判定、证据强度、品质层级、Red Flags。
 
 暂未包含：
 
@@ -188,4 +199,4 @@ task-driver/
 
 ## 版本
 
-当前版本：v0.4.1
+当前版本：v0.4.2
