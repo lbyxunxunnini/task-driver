@@ -54,10 +54,25 @@ description: "执行阶段。用于 approved plan 之后：按计划连续执行
    - 运行测试和相关回归检查。
    - 只在测试保持通过时重构。
 4. 只有用户或 plan 要求 commit，且任务已验证，才 commit。
-5. 更新 ledger：改动文件、命令、结果、commit、风险。
-6. 写 TaskResult packet。
-7. 做 Review Gate。
-8. 写 ReviewReport packet。
+5. 更新 ledger：改动文件、命令、结果、commit、风险。Evidence 按结构化字段写（见 planning ledger 模板）。
+6. **Scope Drift 检查**：对照 `files_changed` 与 PlanPacket 的 File Map。超出集合则停机回问，不得隐性扩 scope。
+7. 写 TaskResult packet，含 `task_id` (T-NNN) / `status` / `files_changed` / `commands_run` / `evidence` / `ac_coverage`。**`ac_coverage[]`** 逐项填写，`ac_id` 必须引用 SpecPacket 中的 `AC-N`；`covered` 取 `full / partial / none`；`evidence` 引用本轮 Evidence 条目。
+8. 做 Review Gate。
+9. 写 ReviewReport packet。
+
+## Scope Drift Detector
+
+触发时机：每个任务的 TaskResult 写入前，必须执行一次。
+
+比对规则：
+
+- 收集本轮任务实际改动的文件集合 `files_changed`。
+- 取 PlanPacket.tasks[当前任务].files 与全局 File Map（Create / Modify / Test / Doc 路径）的并集，作为允许集合。
+- 判断 `files_changed` 是否为允许集合的子集。
+- 不一致时：在 ledger 记录超出路径、原因、必要性，停机回问用户是否扩 scope；未获批准不得推进。
+- 仅为调试临时产生的中间产物文件不在 File Map 中，应在本轮结束前删除或入 `.gitignore`；否则同视为漂移。
+
+反例：为修一个全局错误顺手改了十幾个不在 File Map 的文件仍推进任务——违规。
 
 ## 执行-验证循环退出
 
@@ -77,14 +92,24 @@ description: "执行阶段。用于 approved plan 之后：按计划连续执行
 
 - 跳过失败测试，直接实现行为变化。
 - 实现时发现需要新接口或新模块，但 plan 没有定义，仍继续扩 scope。
+- `files_changed` 超出 PlanPacket File Map 但继续推进。
 - 任务没写 TaskResult，就进入下一个任务。
+- TaskResult 缺少 `ac_coverage` 字段但 plan 明确要求 AC 增量覆盖。
 - review 发现 Critical/Important，但只记录不修复。
 - subagent 没返回结构化 packet，却把它的散文总结当作通过。
 - 同一 requirement 已失败 2 轮，仍继续盲修。
 
 ## 阶段输出：TaskResult
 
-字段以 `skills/task-driver/SKILL.md` 的结构化交接 Packet 为准；本阶段至少写入 task id、状态、修改文件、运行命令、证据、偏离 plan 的地方、未关闭风险。
+字段以 `skills/task-driver/SKILL.md` 的结构化交接 Packet 为准；本阶段至少写入：
+
+- `task_id`（T-NNN，引用 PlanPacket.tasks[].id）。
+- `status`（pending / in_progress / done / blocked / partial）。
+- `files_changed`（供 Scope Drift Detector 用）。
+- `commands_run`。
+- `evidence`（结构化，与 ledger Evidence 条目一致）。
+- `ac_coverage[]`：列出本任务增量覆盖的 AC，每项 `{ac_id, covered, evidence}`。未覆盖任何 AC 不是错，但必须与 plan 中该任务的 acceptance_ac_ids 一致；不一致时记入 deviations_from_plan。
+- `deviations_from_plan`（含任何 Scope Drift / 接口偏离 / 补充依赖）。
 
 ## Review Gate
 

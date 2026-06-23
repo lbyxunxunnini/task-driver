@@ -1,5 +1,32 @@
 # Changelog
 
+## v0.4.3 (2026-06-23)
+
+### 新增
+
+- `B1 Packet 字段表正式化`：主控 SKILL.md 五种 packet YAML 示例升级为字段表（Field / Type / Required / Enum / Description），保留 YAML 简表作示例。
+- `B2 Task ID 唯一锁定`：PlanPacket.tasks[].id 、 TaskResult.task_id 、 ReviewReport.task_id 统一使用 `T-NNN` 格式；planning Plan 模板任务标题改为 `### Task T-001`。
+- `B3 Packet 状态机`：主控 SKILL.md 新增 “Packet Status & Transitions” 段，为 5 种 packet 定义 status 枚举与合法迁移；VerificationReport 新增 `awaiting_user_acceptance` 与 `accepted_by_user` 状态。
+- `B4 跨 packet 引用规则`：主控 SKILL.md 新增 “Cross-Packet References” 段，明确 TaskResult ↔ PlanPacket / ReviewReport ↔ TaskResult / VerificationReport ↔ Spec.AC 以 ID 引用。
+- `B5 Evidence 子结构化`：planning Ledger 模板 Evidence 段升级为 `timestamp / command / exit_code / output_excerpt / covers_requirement_ids / strength` 多字段列表项。
+- `B6 PlanPacket 单源化`：主控 SKILL.md 新增 “Single Source of Truth: PlanPacket” 段；PlanPacket.tasks[] 为权威，plan markdown 任务清单为渲染产物，漂移以 packet 为准；planning 自检门禁增一一对应校验。
+- `A1 Iteration Packet`：Ledger 模板新增 `## Iteration Log` 段，字段 `attempt / requirement_id / hypothesis / command / result / next_assumption / outcome`；主控、executing、verification 三处循环退出表述统一引用。
+- `A2 User Acceptance Gate`：verification SKILL.md 新增 “User Acceptance Gate” 段；VerificationReport 增 `delivery_acknowledged_by_user` 字段，accept / reject / partial-accept 三选一，仅在验证后触发一次，不与“已确认 plan 后不得每步讨确认”冲突。
+- `A3 AC 增量打点`：brainstorming Spec 模板 Acceptance Criteria 改为带 `AC-N` ID 的表格，自检门禁增 ID 化要求；TaskResult 增 `ac_coverage[]` 字段（元素 `{ac_id, covered: full/partial/none, evidence}`）；executing 执行循环增一步填写。
+- `A4 Scope Drift Detector`：executing SKILL.md 新增 “Scope Drift Detector” 段；每个任务 TaskResult 写入前必须比对 `files_changed` 与 PlanPacket File Map，不一致停机回问；反例门禁追加相关违规项。
+- `A5 Plan Revision Protocol`：planning 与主控 SKILL.md 新增 “Plan Revision Protocol” 段；Plan 模板顶部增 `Plan version` 与 `Predecessor`；v2+ 必填 `## Diff From v[N-1]`；前版状态置 `superseded`；spec 也错误时需回到 brainstorming 重写。
+
+### 改进
+
+- 根 `SKILL.md` 核心契约从 7 条扩展为 11 条，涵盖 ID 化、增量覆盖、范围锁定、计划修订、交付验收；反例门禁同步追加 5 项。
+- verification 完成审计表增 `AC ID` 与 `Strength` 列，与证据强度合并表达。
+- planning ledger 模板 Status / Decisions / Review Findings 段采用 `T-NNN` 与 timestamp 结构化记录。
+
+### 兼容性
+
+- 旧 packet 字段名称未修改，新字段均为增量；旧 plan / spec 不强制回填 ID 与 Plan version，仅从本版本起的新产物适用。
+- 5 阶段、 2 轮循环上限、品质三档、反例门禁主体语义未变。
+
 ## v0.4.2 (2026-06-18)
 
 ### 修复

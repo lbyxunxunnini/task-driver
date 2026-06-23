@@ -65,6 +65,8 @@ description: "计划阶段。用于 approved spec 之后、执行之前：创建
 **Mode:** single-agent | multi-agent-review | multi-agent-parallel
 **Quality level:** MVP | Polished | Production-grade
 **Status:** Draft | Approved
+**Plan version:** v1
+**Predecessor:** 无（首版） | docs/task-driver/plans/YYYY-MM-DD--slug.md（v[N-1] 路径）
 
 ## Goal
 [一句话目标]
@@ -82,10 +84,10 @@ description: "计划阶段。用于 approved spec 之后、执行之前：创建
 
 ## Tasks
 
-### Task 1: [名称]
+### Task T-001: [名称]
 **Owner role:** Implementer
 **Files:** [精确路径]
-**Acceptance:** [来自 spec 的验收]
+**Acceptance:** [引用 spec 的 AC-N 列表]
 **Review gate:** spec compliance + code/content quality
 
 - [ ] Step 1: 在 `path` 写 [行为] 的失败测试。
@@ -98,11 +100,26 @@ description: "计划阶段。用于 approved spec 之后、执行之前：创建
 - [ ] Step 5: 写 ReviewReport packet 到 ledger。
 
 ## Verification Plan
-- [最终命令、预期结果、覆盖的 requirement、预期 evidence_strength]
+- [最终命令、预期结果、覆盖的 AC-N 列表、预期 evidence_strength]
 
 ## Stop Conditions
 - [必须暂停回问的情况]
+
+## Diff From v[N-1]
+仅 plan v2 及以上版本填写。首版（v1）可省略本段。
+- [结构性差异简述：新增/删除/重排的任务 ID、接口变更、File Map 变更]
 ```
+
+## Plan Revision Protocol
+
+触发条件：执行-验证循环 2 轮仍失败、或执行中发现 plan 假设错误（接口、依赖、范围）。
+
+操作：
+
+- **spec 仍正确**：仅升级 plan。`plan_version` 递增（v1 → v2），`predecessor` 指向前版路径，新 plan 必须填写 `## Diff From v[N-1]`。前版 PlanPacket.status 置 `superseded`。
+- **spec 也错误**：回到 brainstorming 重写 spec，旧 SpecPacket.status 置 `superseded`，再产出新 plan v1。
+- 新 plan 必须获得用户 approve；approve 前禁止继续执行。
+- ledger 不重建；Decisions 段记录本次 plan-revision 原因、时间、v号跳转。
 
 ## Ledger 模板
 
@@ -117,23 +134,39 @@ description: "计划阶段。用于 approved spec 之后、执行之前：创建
 **Started:** YYYY-MM-DD
 
 ## Status
-- Task 1: pending
+- T-001: pending
 
 ## Packets
-- SpecPacket: [path or inline summary]
-- PlanPacket: [tasks and verification]
+- SpecPacket: [path or inline summary]、status
+- PlanPacket: [path]、plan_version、status
 - TaskResult: pending
 - ReviewReport: pending
 - VerificationReport: pending
 
+## Iteration Log
+每轮执行-验证循环写一条，最多 2 轮。
+- attempt: 1
+  requirement_id: AC-N | T-NNN
+  hypothesis: [本轮假设]
+  command: [运行的命令]
+  result: [结果摘要 + exit_code]
+  next_assumption: [下轮假设或退出]
+  outcome: pass | fail | blocked | partial | plan-revision
+
 ## Evidence
-- [timestamp] [command] -> [result]
+结构化证据条目；每条一个列表项。
+- timestamp: 2026-06-23T10:00:00
+  command: `pytest tests/test_x.py::test_y`
+  exit_code: 0
+  output_excerpt: "1 passed in 0.42s"
+  covers_requirement_ids: [AC-1, AC-2]
+  strength: strong | medium | weak | stale
 
 ## Review Findings
-- [finding/status]
+- T-NNN: severity / file / issue / required_fix / status
 
 ## Decisions
-- [decision/source]
+- [timestamp] / [source] / [decision]
 ```
 
 ## 阶段输出
@@ -144,8 +177,10 @@ description: "计划阶段。用于 approved spec 之后、执行之前：创建
 
 交给用户确认前：
 
-- 每条 spec 验收必须映射到任务或验证命令。
+- 每条 spec AC-N 必须映射到任务或验证命令；映射以 AC ID 引用。
 - 搜索占位词。
 - 检查任务顺序、接口名称、路径一致。
 - 检查 ledger 路径存在于 plan。
 - 一次性请求完整 plan 确认；确认后执行阶段不逐步讨确认。
+- **PlanPacket 单源校验**：plan markdown 任务条目（`### Task T-NNN`）必须与 PlanPacket.tasks[] 一一对应，字段 id / files / acceptance / verification 完全一致；漂移以 packet 为准，立即同步 markdown。
+- 检查 plan-revision 字段：v1 可省 `## Diff From v[N-1]`；v2+ 必填、`predecessor` 指向前版。
