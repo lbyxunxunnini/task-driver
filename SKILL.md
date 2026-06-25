@@ -1,4 +1,10 @@
 ---
+slug: task-driver-user-88546431
+displayName: Task Driver
+version: 0.4.3
+summary: 重任务驱动框架，按事实收集、spec、plan、ledger、执行、评审、验证推进复杂任务。
+tags: [agent, workflow, task-management]
+license: MIT
 name: task-driver-standalone
 description: "Task Driver 单 skill 兼容入口。触发关键词：tdr-、task-driver。用于不走插件入口的环境：按事实收集、spec、plan、ledger、执行、评审、验证推进重任务；完整协议在 skills/task-driver/SKILL.md。"
 ---

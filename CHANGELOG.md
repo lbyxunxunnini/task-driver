@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.4.3 (2026-06-23) — SkillHub 首次发布
+
+- SkillHub 发布成功：`task-driver-user-88546431@0.4.3`，skillId=`91498`
+- SKILL.md 补齐 SkillHub frontmatter（slug、displayName、version、summary、tags、license）
+
 ## v0.4.3 (2026-06-23)
 
 ### 新增
