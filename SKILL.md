@@ -1,7 +1,7 @@
 ---
 slug: task-driver-user-88546431
 displayName: Task Driver
-version: 0.4.3
+version: 0.4.4
 summary: 重任务驱动框架，按事实收集、spec、plan、ledger、执行、评审、验证推进复杂任务。
 tags: [agent, workflow, task-management]
 license: MIT
