@@ -1,5 +1,54 @@
 # Changelog
 
+## Unreleased
+
+## v0.4.6 (2026-07-02)
+
+### 改进
+
+- **单问题澄清门**：主控、根入口和 brainstorming 阶段新增硬约束：禁止问卷式连续提 1 个以上问题；每轮只能问一个最高影响用户决策点。
+- **推荐答案强制化**：澄清问题必须尽量给 2-3 个互斥选项和推荐答案，禁止只抛开放问题。
+- **重新规划澄清顺序**：用户要求重新规划、整体规划、重构规划、从头梳理或重新设计时，必须先从整体规划视角或大类划分开始，不得直接跳到文件、接口、页面等实现细节。
+- **按需补充 N/A 门禁**：User scenario / Risks / Trade-offs / Alternatives 只有经事实收集和影响判断确认不影响方案或验收时，才可标 `N/A`。
+- **参考答案逃逸收紧**：能给参考答案时不得借口不能给而退回开放式提问；只有用户独占事实类问题可不给选项，并必须说明原因。
+- **默认值使用收紧**：默认值仅允许用于低风险、可逆、行业惯例明确且不影响目标/范围/验收的细节；影响 spec、plan、AC 或风险边界时必须回到单问题澄清。
+- **第一片拆分标准**：任务过大时先识别任务类型；重新规划类任务的第一片必须是规划框架片，功能/bugfix 类任务的第一片必须覆盖可验证端到端价值或最小复现闭环。
+- **小任务内联收紧**：内联 spec/plan 必须满足一轮完成、最多一个非关键文件、无高风险行为且有明确验证；单文件高风险变更也必须走完整 spec/plan/ledger。
+- **质量层级降级白名单**：未指定质量层级时默认精打磨；只有诊断、探索、一次性脚本或临时数据整理且无生产风险时才可降为 MVP，并必须记录降级原因和不覆盖边界。
+- **阶段 skill 降级可追踪**：阶段 skill 不可用时必须记录 `mode: degraded-single-skill`、不可用阶段和原因，补齐所有必需 packet，并在最终报告披露降级及证据影响。
+- **Plan Revision 判定硬化**：只有 Goal、Scope、AC、Constraints、Quality level 和风险边界均不变时，才可仅升级 plan；否则必须回到 brainstorming 重写 spec。
+- **执行模式选择硬化**：PlanPacket.mode 必须记录选择理由；有 subagent 且任务高风险、跨模块或用户要求复核时必须优先 multi-agent-review；并行模式仅在文件不重叠且合并/验证规则明确时允许。
+- **main/master 写入隔离优先**：在 `main`/`master` 上做非小型修改时默认先使用隔离分支/工作区；只有隔离不可行、会丢失上下文、用户要求留在当前分支或隔离本身有风险时才回问。
+- **baseline verification 必建**：执行前必须建立 baseline；plan 未指定时从项目事实推导最小检查，确实无法建立时需记录原因、证据影响和替代检查，并经用户接受风险后才可写入。
+- **Plan 步骤异常受控**：不得静默跳过 plan 步骤；步骤不可能时进入 blocked 或 plan-revision，步骤不安全时停机回问，替代步骤必须不改变 AC、范围、风险边界和验证强度并写入 ledger。
+- **Executing subagent 模式对齐**：执行阶段有 subagent 时必须按 PlanPacket.mode 执行；高风险/跨模块/用户要求复核任务不得自行退回 single-agent，工具能力不一致时必须记录并触发 plan-revision 或停机回问。
+- **Minor finding 白名单**：只有不影响 AC、安全/权限/数据等高风险面、用户可见行为、验证命令和后续风险，且有 owner、处理建议和延期理由时，finding 才可标 Minor 进入 backlog。
+- **TaskResult.ac_coverage 必填**：主 schema 将 `ac_coverage` 改为 required；每个任务必须列出 plan 中 acceptance_ac_ids 的覆盖情况，未覆盖也必须写 `covered: none` 和原因。
+- **VerificationReport 用户验收状态必填**：`delivery_acknowledged_by_user` 改为 required；初次写入必须为 `pending`，用户回复后更新为 `true / false / partial`。
+- **Partial 验收门收紧**：medium 证据只能标 Partial，并必须写 caveat、缺口、影响范围和补强验证命令；Partial 只有在核心目标有证据且未覆盖部分不涉及高风险面时才可进入 User Acceptance Gate。
+- **验证命令跳过受控**：plan 验证命令必须运行；确实无法运行时必须记录命令、原因分类、诊断、替代证据和 AC 影响，未运行原命令的 AC 不得标 Met，无替代验证必须 Blocked。
+- **验证失败路由分类**：验证失败后不得默认回 executing，必须先分类为 executing / blocked / partial / plan-revision / brainstorming，并写入 Iteration Log 的 `next_assumption` 和 `outcome`。
+- **Partial-accept 残余项路由收紧**：partial-accept 后残余项只有在用户明确接受且不影响已接受 AC、高风险面或主要流程时才可进 backlog；否则必须进入 plan-revision 或 blocked。
+- **重新规划 v1 差异说明**：首版 plan 仍可省略 `Diff From v[N-1]`，但重新规划、重构规划或替代方案类 v1 必须新增 `Change From Current State`，说明相对现状的结构变化、保留项、废弃项和迁移风险。
+- **TDD 例外白名单**：功能、bugfix、行为变化默认必须先写失败测试；只有明确豁免、纯非行为变更、无可运行测试框架且无法安全补充，或只能人工/外部系统验收时才可跳过，并必须记录替代验证和证据强度上限。
+- **Review Gate 全任务覆盖**：每个 PlanPacket task 都必须执行 Review Gate，不得因任务小或仅文档/配置/测试改动跳过；只允许按风险调整 review 深度。
+- **最终报告交付路径结构化**：最终报告必须输出 `delivery_acknowledged_by_user` 状态，并按 accepted / awaiting_user_acceptance / partial / rejected_by_user-or-blocked 判定交付路径和 next_action。
+- **Spec 生成路径澄清**：brainstorming 不只问会改变 spec 的问题；重新规划类任务的规划视角、大类划分、范围切片和优先级都视为 spec 生成路径问题，必须逐层闭合。
+- **Planning 信息缺口分类**：planning 阶段缺信息时必须先分类；项目事实继续查，spec 缺口回 brainstorming，用户决策/外部权限才按单问题澄清门回问，禁止一次列多个 planning 问题。
+- **Planning 事实收集细化**：计划阶段不得只读目录结构，必须检查项目规则、代码结构、依赖脚本、现有任务资产、git 状态和当前行为/失败证据，以支撑可执行 plan。
+- **根入口降级同步**：standalone 根入口无法加载子 skill 时必须视为 `mode: degraded-single-skill`，记录不可用阶段、补齐全部 packet、写入 ledger，并在最终报告披露降级和证据影响。
+- **Plan assumption 结构化**：planning 阶段的细节假设必须使用 `ASM-N`，记录内容、依据、验证点、失效处理和影响范围；执行中发现假设失效必须停机并按路由处理。
+- **临时产物处理收紧**：调试中间产物优先写入临时目录；工作区内计划外产物必须先判归属，无法确认不得删除，需保留则触发 Scope Drift；`.gitignore` 修改也视为文件改动。
+- **Review deferred 收紧**：Critical finding 不得 deferred；Important 只有不影响 AC、高风险面和主要流程时才可由用户明确 deferred，并会将相关 AC 最高限制为 Partial。
+- **Verification 失败状态对齐**：验证失败后必须按 executing / blocked / partial / plan-revision / brainstorming 分类选择下一状态；不得使用“调试”作为状态，调试动作必须归入 executing 并受 2 轮上限约束。
+- **SpecPacket 持久化交接**：brainstorming 必须持久化 SpecPacket；ledger 已存在则写 ledger，未创建则写入 spec `## SpecPacket` 或 planning handoff，并在 planning 创建 ledger 时同步复制。
+- **主控 Review Gate 同步**：主控流程同步为每个 PlanPacket task 必须执行 Review Gate，可按风险调整深度但不得跳过。
+- **Schema 状态一致性修复**：`degraded-single-skill` 纳入 PlanPacket/VerificationReport mode 枚举；planning 明确内联 spec 输入也必须先持久化 SpecPacket；用户 reject 对应新增 `rejected_by_user` 状态。
+- **双机制入口同步**：standalone 根入口明确只加载根 `SKILL.md` 时只能执行 minimal protocol，不得声称完整 Task Driver；插件 manifest 版本同步到 `0.4.6`。
+- **主控模板精简**：将错误提示完整模板下沉到 `docs/task-driver/error-templates.md`，主控仅保留强制使用规则和适用关系索引。
+- **中文显示名规范**：主控新增 98 项中英文对照表；面向用户输出时使用“中文显示名（英文标识）”，同时保留字段名、枚举值、路径、JSON/YAML key 等机器契约原值。
+- **版本同步**：根入口、插件 manifest、README 和发布说明同步到 `0.4.6`。
+
 ## v0.4.5 (2026-06-24)
 
 ### 改进

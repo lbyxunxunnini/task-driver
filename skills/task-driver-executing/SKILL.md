@@ -13,8 +13,15 @@ description: "执行阶段。用于 approved plan 之后：按计划连续执行
 
 1. 读取 approved plan 和 ledger。
 2. 检查 git status 和当前分支。
-3. 如果在 `main`/`master` 上做非小型修改，先询问或使用隔离分支/工作区。
-4. 运行 plan 指定的 baseline verification（如果有）。
+3. 如果在 `main`/`master` 上做非小型修改，默认先使用隔离分支/工作区；不得直接在 `main`/`master` 推进。
+   - 若环境允许安全创建分支/工作区，创建后在 ledger 记录分支/工作区名称。
+   - 只有以下情况才停机回问：无法创建隔离环境、当前工作区存在未归属改动且隔离会丢失上下文、用户明确要求留在当前分支、或创建隔离环境本身有风险。
+   - 用户未批准前，不得在 `main`/`master` 执行非小型写入。
+4. 执行前必须建立 baseline verification。
+   - 优先运行 plan 指定的 baseline verification。
+   - 如果 plan 未指定，必须从项目事实中推导最小基线检查，例如测试命令、lint/analyze、build、类型检查、目标文件存在性检查或当前行为复现命令。
+   - 如果确实无法运行任何基线，必须在 ledger 记录原因、影响的证据强度、替代检查方式，并在执行前停机回问是否接受无 baseline 风险。
+   - 未建立 baseline 且未获用户接受风险前，不得进入写入阶段。
 5. 检查 plan 是否有矛盾、缺失依赖或不可执行步骤。
 6. 确认执行模式。没有明确 subagent 工具时，使用 `single-agent`。
 
@@ -34,8 +41,11 @@ description: "执行阶段。用于 approved plan 之后：按计划连续执行
 
 ### 有 subagent 时
 
-可以使用 `multi-agent-review` 或 `multi-agent-parallel`：
+必须按 PlanPacket.mode 执行：
 
+- `multi-agent-review`：按 plan 将 Reviewer 或 Verifier 派给独立 agent；高风险、跨模块或用户要求复核的任务不得退回 single-agent，除非 subagent 工具不可用，并记录降级原因。
+- `multi-agent-parallel`：只有 PlanPacket 明确允许并行，且任务文件集合不重叠、合并规则和最终验证命令已定义时才可并行派发 Implementer。
+- 若执行阶段发现 PlanPacket.mode 与当前工具能力不一致，必须更新 ledger 并触发 plan-revision 或停机回问，不得自行切换模式。
 - 只把相关 packet 和必要文件路径交给 subagent。
 - 要求 subagent 返回 TaskResult 或 ReviewReport。
 - 不接受纯散文总结作为完成证据。
@@ -46,13 +56,18 @@ description: "执行阶段。用于 approved plan 之后：按计划连续执行
 每个任务：
 
 1. 在 ledger 标记 `in_progress`。
-2. 按 plan 步骤执行；除非步骤不可能或不安全。
+2. 按 plan 步骤执行。不得静默跳过 plan 步骤。
+   - 如果步骤不可能执行，必须记录具体原因、受影响的任务/AC、已尝试的替代事实收集，并进入 `blocked` 或 `plan-revision`。
+   - 如果步骤不安全，必须停止执行，说明风险类型、潜在影响和安全替代方案，并按停机回问模板让用户拍板。
+   - 只有替代步骤不改变 AC、范围、风险边界和验证强度时，才可作为同任务内替代执行；替代步骤必须写入 ledger。
+   - 替代步骤改变 plan 假设时，必须触发 Plan Revision Protocol。
 3. 行为变化走 TDD：
    - 先写失败测试。
    - 运行并确认失败原因符合预期。
    - 做最小实现。
    - 运行测试和相关回归检查。
    - 只在测试保持通过时重构。
+   - 不写失败测试时，必须符合主控 TDD 例外，并在 ledger 记录豁免原因、替代验证方式和对应 AC 的 evidence_strength 上限。
 4. 只有用户或 plan 要求 commit，且任务已验证，才 commit。
 5. 更新 ledger：改动文件、命令、结果、commit、风险。Evidence 按结构化字段写（见 planning ledger 模板）。
 6. **Scope Drift 检查**：对照 `files_changed` 与 PlanPacket 的 File Map。超出集合则停机回问，不得隐性扩 scope。
@@ -70,7 +85,12 @@ description: "执行阶段。用于 approved plan 之后：按计划连续执行
 - 取 PlanPacket.tasks[当前任务].files 与全局 File Map（Create / Modify / Test / Doc 路径）的并集，作为允许集合。
 - 判断 `files_changed` 是否为允许集合的子集。
 - 不一致时：在 ledger 记录超出路径、原因、必要性，停机回问用户是否扩 scope；未获批准不得推进。
-- 仅为调试临时产生的中间产物文件不在 File Map 中，应在本轮结束前删除或入 `.gitignore`；否则同视为漂移。
+- 调试临时中间产物必须优先写入系统临时目录或 plan 允许的临时路径。
+- 若临时产物已出现在工作区且不在 File Map 中，必须先判断归属：
+  - 确认为本轮生成且无保留价值：可删除，并在 ledger 记录路径和原因。
+  - 无法确认归属或可能是用户文件：不得删除，必须停机回问。
+  - 需要保留：必须触发 Scope Drift，补入 File Map 或计划修订。
+- 修改 `.gitignore` 视为文件改动；若 `.gitignore` 不在 File Map 中，必须触发 Scope Drift，不得直接写入。
 
 反例：为修一个全局错误顺手改了十幾个不在 File Map 的文件仍推进任务——违规。
 
@@ -113,13 +133,31 @@ description: "执行阶段。用于 approved plan 之后：按计划连续执行
 
 ## Review Gate
 
-每个有意义任务都检查：
+每个 PlanPacket.tasks[] 中的任务都必须执行 Review Gate，不得以“任务太小”或“只是文档/配置/测试改动”为由跳过。
+
+Review Gate 可按任务风险调整深度：
+
+- 低风险文档/静态内容任务：至少检查 scope、AC 映射、文件范围和验证证据。
+- 代码/配置/测试任务：必须检查 spec compliance、代码/内容质量、验证证据和未授权扩张。
+- 高风险任务：必须检查安全、权限、数据、迁移、发布、依赖、构建配置、公共 API、回滚风险。
+
+通用检查项：
 
 - Spec compliance：任务验收是否满足，是否遗漏要求，是否加入未授权行为。
 - Code/content quality：改动是否足够小、命名清楚、符合本地模式、无无关重构、无脆弱测试、无隐藏 TODO。
 - Verification：命令输出是否新鲜，是否覆盖该任务。
 
-Critical 或 Important 问题阻塞继续。必须修复并复审后进入下一个任务。Minor 可以进入 ledger backlog。
+Critical 或 Important 问题阻塞继续。必须修复并复审后进入下一个任务。
+
+只有同时满足以下条件，finding 才可标为 Minor 并进入 ledger backlog：
+
+- 不影响任何 AC 的 Met/Partial 判定。
+- 不影响安全、权限、数据、迁移、发布、依赖、构建配置、公共 API。
+- 不造成用户可见错误、主要流程退化或验证命令失败。
+- 不增加后续任务的实现风险或回滚风险。
+- 有明确 owner、处理建议和可接受的延期理由。
+
+不满足任一条件时，必须标为 Important 或 Critical。
 
 ## 阶段输出：ReviewReport
 

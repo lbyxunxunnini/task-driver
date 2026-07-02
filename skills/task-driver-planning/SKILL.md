@@ -9,12 +9,39 @@ description: "计划阶段。用于 approved spec 之后、执行之前：创建
 
 ## 必要输入
 
-- Approved spec，内联或位于 `docs/task-driver/specs/`。
-- 当前项目事实：文件结构、实现模式、测试命令、依赖管理、git 状态。
+- Approved spec，可内联输入或位于 `docs/task-driver/specs/`；进入 plan 编写前，SpecPacket 必须已持久化到 ledger、spec `## SpecPacket` 或 planning handoff。
+- 当前项目事实必须先收集到足以支撑 plan，不得只读目录结构。至少检查：
+  - 项目规则：CLAUDE.md、README、CONTRIBUTING、docs、.claude/、agent 规则文件。
+  - 代码结构：入口、模块/页面/服务边界、路由、配置、平台目录。
+  - 依赖与脚本：package/pubspec/build 配置、测试/lint/analyze/build 命令。
+  - 现有任务资产：已有 spec/plan/ledger、TODO、issue 记录、错误记录、工作清单。
+  - git 状态：当前分支、未提交改动、主分支风险。
+  - 当前行为或失败证据：日志、报错、复现路径、已有验证结果。
 - 用户约束和质量层级。
 - 主控定义的重任务判定、明显方案分叉、品质层级和执行-验证循环退出规则。
 
-缺少且本地无法查到的信息，必须先问。
+缺少且本地无法查到的信息，不得直接进入计划编写。
+
+处理顺序：
+
+1. 先判断缺口属于哪类：用户决策 / 外部权限或凭据 / spec 缺口 / 项目事实缺口 / plan 细节缺口。
+2. 项目事实缺口：继续读取文件、文档、配置、日志或运行只读诊断命令，不得转嫁给用户。
+3. spec 缺口：回到 brainstorming，用单问题澄清门补齐。
+4. 用户决策或外部权限/凭据：用单问题澄清门回问。
+5. plan 细节缺口：若不改变 spec、AC、范围和风险边界，可在 plan 中提出明确 assumption；否则回到 brainstorming 或停机回问。
+
+Plan assumption 必须包含：
+
+- assumption_id：`ASM-N`
+- 内容：具体假设，不得使用“大概 / 应该 / 常规”。
+- 依据：来自哪些文件、命令、日志或文档。
+- 验证点：在哪个任务或命令中验证该假设。
+- 失效处理：假设不成立时进入 blocked / plan-revision / brainstorming 的哪一路。
+- 影响范围：该假设影响哪些 T-NNN / AC-N。
+
+执行阶段一旦发现 assumption 不成立，必须停止当前任务并按失效处理路由，不得继续执行。
+
+任何回问都必须遵守单问题澄清门，不得一次列多个 planning 问题。
 
 ## Plan 要求
 
@@ -106,13 +133,36 @@ description: "计划阶段。用于 approved spec 之后、执行之前：创建
 - [必须暂停回问的情况]
 
 ## Diff From v[N-1]
-仅 plan v2 及以上版本填写。首版（v1）可省略本段。
+仅 plan v2 及以上版本必填。首版（v1）可省略本段。
+
+但如果 v1 是对已有计划、旧实现、历史文档或现有流程的“重新规划 / 重构规划 / 替代方案”，必须新增 `## Change From Current State`，说明相对当前状态的结构性变化、保留项、废弃项和迁移风险。
 - [结构性差异简述：新增/删除/重排的任务 ID、接口变更、File Map 变更]
 ```
 
 ## Plan Revision Protocol
 
 触发条件：执行-验证循环 2 轮仍失败、或执行中发现 plan 假设错误（接口、依赖、范围）。
+
+判定：
+
+只能在以下条件全部满足时，判定为 “spec 仍正确，仅升级 plan”：
+
+- Goal 不变。
+- Scope / Non-goals 不变。
+- Acceptance Criteria 不变，或只补充验证方式但不改变验收语义。
+- Constraints 不变。
+- Quality level 不变。
+- 风险边界不扩大。
+- 失败原因来自实现路径、任务顺序、文件映射、接口假设、依赖假设或验证命令设计。
+
+出现任一情况，必须判定为 “spec 也错误”，回到 brainstorming：
+
+- 用户目标或真实场景变化。
+- Scope / Non-goals 需要增删。
+- AC 需要新增、删除、降级、改语义。
+- Constraints 或 Quality level 需要变化。
+- 继续执行会扩大风险边界、权限、安全、迁移、发布或数据影响。
+- 原 spec 的 Proposed Design 已经误导 plan。
 
 操作：
 
@@ -177,10 +227,11 @@ description: "计划阶段。用于 approved spec 之后、执行之前：创建
 
 交给用户确认前：
 
+- 检查 SpecPacket 是否已持久化；若只存在于 spec 的 `## SpecPacket` 或 planning handoff，创建 ledger 时必须同步复制；未持久化不得进入 plan 编写。
 - 每条 spec AC-N 必须映射到任务或验证命令；映射以 AC ID 引用。
 - 搜索占位词。
 - 检查任务顺序、接口名称、路径一致。
 - 检查 ledger 路径存在于 plan。
 - 一次性请求完整 plan 确认；确认后执行阶段不逐步讨确认。
 - **PlanPacket 单源校验**：plan markdown 任务条目（`### Task T-NNN`）必须与 PlanPacket.tasks[] 一一对应，字段 id / files / acceptance / verification 完全一致；漂移以 packet 为准，立即同步 markdown。
-- 检查 plan-revision 字段：v1 可省 `## Diff From v[N-1]`；v2+ 必填、`predecessor` 指向前版。
+- 检查 plan-revision 字段：v1 可省 `## Diff From v[N-1]`；v2+ 必填、`predecessor` 指向前版；重新规划类 v1 必须含 `## Change From Current State`。

@@ -1,6 +1,6 @@
 {
   "name": "task-driver",
-  "version": "0.4.2",
+  "version": "0.4.6",
   "description": "Task Driver 任务工作流：澄清、spec、plan、可选多 agent、降级执行、验证和交付门禁。",
   "author": {
     "name": "task-driver"
