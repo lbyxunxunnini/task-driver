@@ -56,6 +56,9 @@ task-driver/
     runtime-protocols.md
     quality-rubric.md
     error-templates.md
+    resume-protocol.md
+    walkthrough.md
+    faq.md
     modes/
       brainstorming.md
       planning.md
@@ -134,15 +137,17 @@ tdr- 帮我把这个 bug 从定位到验证完整跑完
 ## 治理门禁
 
 - **重任务判定**：跨 2 个以上文件/模块，或目标、范围、验收、质量层级不清楚，或涉及数据、权限、安全、发布、迁移、外部服务、破坏性操作时，必须走 Task Driver。
+- **执行模式**：`strict[严格]`（高风险/生产级）、`standard[标准]`（默认）、`lite[轻量]`（中等任务门禁放宽）。详见 SKILL.md。
 - **明显方案分叉**：会改变 API、数据模型、用户流程、依赖、验证方式、风险边界、交付范围或回滚方式的选择，必须在 spec/plan 阶段确认。
 - **澄清分层**：Goal、Scope、Non-goals、Acceptance Criteria、Constraints、Quality Level 是必填门禁；User scenario、Risks、Trade-offs、Alternatives 按需补充。
 - **单问题澄清**：禁止问卷式连续提 1 个以上问题；每轮只问一个最高影响决策点，能给参考答案时必须给 2-3 个互斥选项和推荐。
 - **重新规划顺序**：重新规划、整体规划、重构规划、从头梳理或重新设计类任务，必须先从整体规划视角或大类划分开始，再进入小项目和细节。
 - **品质层级**：MVP 覆盖核心路径；精打磨覆盖主要边界和错误状态；生产级覆盖安全、权限、性能、兼容、观测、回滚/迁移和完整回归。
+- **断点续传**：中断后重新触发时，agent 读取 ledger 的 Resume Checkpoint 判定是否可续传；可恢复错误自动重试 1 次。详见 `references/resume-protocol.md`。
 - **执行-验证循环**：同一 requirement 最多 2 轮；仍失败则进入 `blocked`、`partial` 或 `plan-revision`。
 - **证据强度**：`strong` 才能标 `Met`；`medium` 最多 `Partial`；`weak` / `stale` 必须 `Not met` 或 `Blocked`。
 - **质量评分**：verification 阶段按质量层级判断是否输出 `quality_score`；低于阈值时回到 executing、plan-revision、brainstorming 或 blocked。
-- **中文显示名**：用户可见输出优先使用中文显示名；首次出现英文协议标识时采用“中文显示名（英文标识）”，字段名、枚举值、路径、JSON/YAML key 等机器契约保持原值。
+- **中文显示名**：用户可见输出优先使用中文显示名；首次出现英文协议标识时采用”中文显示名（英文标识）”，字段名、枚举值、路径、JSON/YAML key 等机器契约保持原值。
 
 ## 多 Agent 与降级
 
@@ -164,6 +169,6 @@ Task Driver 支持多 agent，但不依赖多 agent。
 
 ## 当前状态
 
-当前版本：v0.5.1
+当前版本：v0.6.1
 
-v0.5.1 将 Task Driver 收敛为单 skill 多阶段发布形态，补齐阶段反例、协议引用拆分、质量评分闭环、P0/P1/P2 读取优先级和领域 skill 协作规则。
+v0.6.1 新增分级执行模式（strict / standard / lite）、断点续传与自动恢复协议、端到端使用案例（walkthrough）、FAQ，以及错误自分类与自动重试机制。

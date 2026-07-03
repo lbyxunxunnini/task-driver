@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+## v0.6.1 (2026-07-03)
+
+### 新增
+
+- **分级执行模式**：新增 `strict[严格]` / `standard[标准]` / `lite[轻量]` 三种模式，解决"简单任务流程过重"的核心矛盾。Lite 模式对 Review Gate、质量评分、证据强度等门禁按风险放宽，但仍保留 spec/plan/ledger 结构。
+- **断点续传协议**：新增 `references/resume-protocol.md`，定义 Checkpoint 格式、恢复判定规则和预检门禁。中断后重新触发时，agent 自动读取 ledger 判定是否可从断点续传。
+- **自动重试机制**：定义可恢复错误白名单（lint-fix / test-flaky / file-lock / network-retry），每种错误自动重试 1 次后升级。安全/权限/数据/发布相关错误不适用自动重试。
+- **端到端使用案例**：新增 `references/walkthrough.md`，用一个完整的 CLI --verbose flag 任务演示从触发到交付的全流程。
+- **FAQ**：新增 `references/faq.md`，从 counterexamples 提炼常见问题，按触发、澄清、执行、多 Agent、质量验收、术语分类。
+- **错误自分类**：每个错误模板新增 `auto_recovery[自动恢复]` 级别（retryable / escalate / block），定义 agent 首次响应策略。
+
+### 改进
+
+- 根 `SKILL.md` 协议参考表新增 resume-protocol（P1）、faq（P2）、walkthrough（P2）的读取优先级。
+- README 治理门禁新增执行模式和断点续传说明。
+- 错误模板新增自动恢复级别标注。
+- 重写 `SKILL.md` summary，面向 C 端用户强调三级门禁和可恢复特性。
+
 ## v0.5.1 (2026-07-03)
 
 ### 改进

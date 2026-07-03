@@ -2,7 +2,23 @@
 
 遇到异常时，必须使用以下结构化模板输出提示，确保用户能快速定位问题类型、原因和下一步动作。
 
+## 错误自分类
+
+每种错误模板关联一个 `auto_recovery[自动恢复]` 级别，决定 agent 的首次响应策略：
+
+| 级别 | 含义 | 行为 |
+|---|---|---|
+| `retryable[可重试]` | 已知可恢复错误 | 自动重试 1 次 → 成功则继续，失败则升级为 `escalate[升级]` |
+| `escalate[升级]` | 需用户决策 | 使用对应模板输出，停机等待用户 |
+| `block[阻塞]` | 不可自动恢复 | 直接进入 blocked 状态，输出阻塞模板 |
+
+安全、权限、数据、发布相关错误不适用自动重试，直接按 `escalate[升级]` 或 `block[阻塞]` 处理。
+
+自动重试白名单和详细规则见 `references/resume-protocol.md`。
+
 ## 停机回问模板
+
+**auto_recovery[自动恢复]**：`escalate[升级]`
 
 ````markdown
 ⚠️ **停机：[问题类型]**
@@ -31,6 +47,8 @@
 
 ## 验证失败模板
 
+**auto_recovery[自动恢复]**：`retryable[可重试]`（首次）→ `escalate[升级]`（重试后仍失败）
+
 ````markdown
 ❌ **验证失败：[AC-ID / T-NNN]**
 
@@ -52,6 +70,8 @@
 ````
 
 ## 循环退出模板
+
+**auto_recovery[自动恢复]**：`block[阻塞]`
 
 ````markdown
 🔄 **执行-验证循环已达上限**
@@ -76,6 +96,8 @@
 
 ## 范围漂移模板
 
+**auto_recovery[自动恢复]**：`escalate[升级]`
+
 ````markdown
 🛑 **Scope Drift 检测**
 
@@ -97,6 +119,8 @@
 ````
 
 ## 阻塞状态模板
+
+**auto_recovery[自动恢复]**：`block[阻塞]`
 
 ````markdown
 🔒 **状态：Blocked**
