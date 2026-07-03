@@ -105,16 +105,7 @@
 
 ## 执行反例
 
-这些情况必须停止或回退：
-
-- 跳过失败测试，直接实现行为变化。
-- 实现时发现需要新接口或新模块，但 plan 没有定义，仍继续扩 scope。
-- `files_changed` 超出 PlanPacket File Map 但继续推进。
-- 任务没写 TaskResult，就进入下一个任务。
-- TaskResult 缺少 `ac_coverage` 字段但 plan 明确要求 AC 增量覆盖。
-- review 发现 Critical/Important，但只记录不修复。
-- subagent 没返回结构化 packet，却把它的散文总结当作通过。
-- 同一 requirement 已失败 2 轮，仍继续盲修。
+本阶段反例必须读取 `references/counterexamples/executing.md`；命中任一反例时按该文件路由，不得继续推进。
 
 ## 阶段输出：TaskResult
 

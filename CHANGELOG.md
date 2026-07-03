@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+## v0.5.0 (2026-07-03)
+
+### 改进
+
+- **阶段反例门禁拆分**：新增 `references/counterexamples/`，按 brainstorming、planning、executing、verification 拆分反例文件。
+- **根入口轻量索引**：根 `SKILL.md` 的反例门禁改为强制读取对应阶段反例文件，避免主入口继续膨胀。
+- **长协议拆分**：新增 `references/glossary.md`、`references/packet-contract.md`、`references/runtime-protocols.md`，将术语表、Packet schema、状态机、证据强度、TDD 例外和循环协议移出根入口。
+- **质量评分闭环**：新增 `references/quality-rubric.md`，为 verification 阶段补充 1-5 质量评分、质量层级阈值和 improve loop。
+- **读取优先级**：根 `SKILL.md` 将 references 加载规则升级为 P0/P1/P2 优先级，减少每次任务全量读取协议文件的 token 成本。
+- **领域 skill 协作**：新增领域 skill 协作规则，明确 Task Driver 负责流程治理，领域 skill 输出必须回填 TaskResult、ReviewReport 或 VerificationReport。
+- **触发词显式化**：frontmatter 与 SkillHub description 明确写入 `tdr-`、`task-driver`、`/task-driver` 的开头触发规则。
+- **README 同步**：说明反例门禁文件位置、按阶段加载方式、运行时工件忽略建议和最短流程 walkthrough。
+
 ## v0.4.8 (2026-07-03)
 
 ### 破坏性变更
