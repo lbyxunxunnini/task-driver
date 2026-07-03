@@ -1,9 +1,6 @@
----
-name: task-driver-planning
-description: "计划阶段。用于 approved spec 之后、执行之前：创建实施 plan、文件映射、接口、任务拆解、TDD/验证命令、review gate、ledger 和 PlanPacket。"
----
+# Planning Mode
 
-# 计划阶段
+计划阶段。用于 approved spec 之后、执行之前：创建实施 plan、文件映射、接口、任务拆解、TDD/验证命令、review gate、ledger 和 PlanPacket。
 
 写出一个新 agent 也能执行的计划。Plan 是执行契约；确认后不应再靠连续追问推进。
 
@@ -60,7 +57,7 @@ Plan assumption 必须包含：
 - 非代码变化：确定性的验证步骤。
 - 每个任务的 review gate。
 - ledger 路径：`docs/task-driver/ledgers/`。
-- 每个任务需要消费和产出的 packet；字段以 `skills/task-driver/SKILL.md` 的 packet contract 为准。
+- 每个任务需要消费和产出的 packet；字段以 `SKILL.md` 的 packet contract 为准。
 - 停机条件和回滚说明。
 - 同一 requirement 最多 2 轮执行-验证循环；超过后进入 `blocked`、`partial` 或 `plan-revision`。
 
@@ -221,7 +218,7 @@ Plan assumption 必须包含：
 
 ## 阶段输出
 
-输出 `PlanPacket` 并创建 ledger。字段以 `skills/task-driver/SKILL.md` 的结构化交接 Packet 为准；本阶段至少填入 plan 路径、ledger 路径、执行模式、任务 id、owner role、objective、files、steps、verification、stop conditions。
+输出 `PlanPacket` 并创建 ledger。字段以 `SKILL.md` 的结构化交接 Packet 为准；本阶段至少填入 plan 路径、ledger 路径、执行模式、任务 id、owner role、objective、files、steps、verification、stop conditions。
 
 ## 自检门禁
 

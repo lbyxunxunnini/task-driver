@@ -1,9 +1,6 @@
----
-name: task-driver-executing
-description: "执行阶段。用于 approved plan 之后：按计划连续执行、检查分支/工作区、TDD、可选 subagent 派发、single-agent 降级、写 TaskResult/ReviewReport、更新 ledger。"
----
+# Executing Mode
 
-# 执行阶段
+执行阶段。用于 approved plan 之后：按计划连续执行、检查分支/工作区、TDD、可选 subagent 派发、single-agent 降级、写 TaskResult/ReviewReport、更新 ledger。
 
 执行 approved plan，不重新发明需求。按任务推进，更新 ledger，边做边验证，只在定义的停机条件下回问。
 
@@ -121,7 +118,7 @@ description: "执行阶段。用于 approved plan 之后：按计划连续执行
 
 ## 阶段输出：TaskResult
 
-字段以 `skills/task-driver/SKILL.md` 的结构化交接 Packet 为准；本阶段至少写入：
+字段以 `SKILL.md` 的结构化交接 Packet 为准；本阶段至少写入：
 
 - `task_id`（T-NNN，引用 PlanPacket.tasks[].id）。
 - `status`（pending / in_progress / done / blocked / partial）。
@@ -161,7 +158,7 @@ Critical 或 Important 问题阻塞继续。必须修复并复审后进入下一
 
 ## 阶段输出：ReviewReport
 
-字段以 `skills/task-driver/SKILL.md` 的结构化交接 Packet 为准；本阶段至少写入 task id、状态、findings、severity、file、issue、required fix。
+字段以 `SKILL.md` 的结构化交接 Packet 为准；本阶段至少写入 task id、状态、findings、severity、file、issue、required fix。
 
 ## 停机条件
 
@@ -187,4 +184,4 @@ Critical 或 Important 问题阻塞继续。必须修复并复审后进入下一
 
 ## 完成移交
 
-所有 plan 任务完成后，进入 `task-driver-verification`。验证前不得宣称完成。
+所有 plan 任务完成后，进入 `verification` 阶段。验证前不得宣称完成。

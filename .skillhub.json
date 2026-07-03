@@ -1,0 +1,5 @@
+{
+  "name": "task-driver",
+  "description": "单 skill 多阶段重任务驱动框架。用于 tdr-、task-driver、模糊任务、跨文件修改、需要 spec/plan/ledger、连续执行、TDD、review gate 和 verification gate 的场景；内部按 brainstorming、planning、executing、verification 阶段推进。",
+  "version": "v0.4.8"
+}

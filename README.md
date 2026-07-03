@@ -1,6 +1,6 @@
 # Task Driver
 
-Task Driver 是面向 agent 重任务的结构化工作流包。目标是把一个任务从“模糊请求”推进到“可验证交付”：事实收集、深度澄清、spec、plan、连续执行、TDD/评审、verification。
+Task Driver 是面向 agent 重任务的单 skill 多阶段工作流包。目标是把一个任务从“模糊请求”推进到“可验证交付”：事实收集、深度澄清、spec、plan、连续执行、TDD/评审、verification。
 
 它的重点不是替 agent 写更多提示词，而是建立可恢复、可验证、可降级的执行协议。
 
@@ -35,95 +35,58 @@ task-driver 根据这个 bug 先查根因，再做计划和修复
 
 ## 安装方式
 
-Task Driver 支持两种安装形态。二选一即可，推荐优先使用插件形态。
-
-### 方式 A：作为 Codex 插件安装（推荐）
-
-适合：Codex 支持插件、本项目需要暴露 5 个阶段 skill、希望后续继续扩展 hooks/MCP/marketplace。
-
-插件入口：
+Task Driver 现在只保留单 skill 多阶段模式，结构与 `flutter-forge` 类似：宿主只需要安装仓库根目录，运行时只暴露一个 `task-driver` skill。
 
 ```text
-.codex-plugin/plugin.json
-```
-
-运行时 skill 来源：
-
-```text
-skills/
-```
-
-安装后暴露 5 个 skill：
-
-- `task-driver`：总控入口。
-- `task-driver-brainstorming`：事实收集、澄清、方案比较、spec。
-- `task-driver-planning`：计划、文件映射、任务拆解、验证命令、ledger。
-- `task-driver-executing`：连续执行、TDD、任务评审、ledger 更新。
-- `task-driver-verification`：最终证据、验收审计、残余风险。
-
-如果你用个人插件目录，常见放置方式是：
-
-```text
-~/plugins/task-driver/
-  .codex-plugin/plugin.json
-  skills/
-```
-
-然后通过 Codex 的插件安装/刷新流程加载该插件。插件形态下，根目录 `SKILL.md` 只是 standalone 兼容入口，不参与插件运行入口。
-
-### 方式 B：作为单 skill 安装
-
-适合：当前工具不支持插件，只支持传统 skill 目录。
-
-单 skill 入口：
-
-```text
-SKILL.md
-```
-
-常见放置方式是把本项目目录作为一个 skill 放到 skill 搜索路径中，例如：
-
-```text
-~/.codex/skills/task-driver/
+task-driver/
   SKILL.md
+  .skillhub.json
+  VERSION
+  references/
+    modes/
+      brainstorming.md
+      planning.md
+      executing.md
+      verification.md
+  docs/
 ```
 
-根目录入口名是 `task-driver-standalone`，用于避免递归扫描环境中和 `skills/task-driver/SKILL.md` 的 `task-driver` 重名。
+ccswitch / SkillHub / Claude / Codex 这类传统 skill 搜索路径都应安装整个目录：
 
-如果运行环境不会扫描嵌套目录，根 `SKILL.md` 是最小入口；复杂任务中它会指向 `skills/task-driver/SKILL.md` 获取完整 packet、多 agent 和阶段交接规则。
+```bash
+cp -R task-driver ~/.cc-switch/skills/task-driver
+```
 
-如果运行环境会扫描嵌套目录，通常会看到：
+或：
 
-- `task-driver-standalone`：根目录薄入口。
-- `task-driver`：完整控制器。
-- 4 个阶段 skill。
+```bash
+cp -R task-driver ~/.claude/skills/task-driver
+```
 
-### 不要重复安装
+安装后只应该看到一个入口：
 
-根目录 `SKILL.md` 和 `skills/task-driver/SKILL.md` 服务于不同安装形态：
+```text
+task-driver
+```
 
-- 插件安装：`.codex-plugin/plugin.json` 指向 `./skills/`，使用 `skills/task-driver/SKILL.md`，根 `SKILL.md` 不参与插件入口。
-- 单 skill 安装：使用根 `SKILL.md` 的 `task-driver-standalone`，适合不支持插件的环境。
-
-不要同时安装“根目录单 skill”和“插件形态”，否则可能出现重复入口。
-
-检查点：
-
-- 如果 Codex 里出现一个 `task-driver` 和 4 个阶段 skill，说明你在用插件形态，正常。
-- 如果只出现一个 `task-driver-standalone`，说明你在用根单 skill 形态，正常。
-- 如果同时出现 `task-driver-standalone`、`task-driver` 和 4 个阶段 skill，说明运行时递归扫描了嵌套目录，入口不会同名冲突；复杂任务优先用 `task-driver`。
-- 如果同时通过插件和单 skill 手动安装了同一份项目，保留一种安装方式即可。
+不再暴露 `task-driver-standalone`，也不再暴露 `task-driver-brainstorming`、`task-driver-planning`、`task-driver-executing`、`task-driver-verification` 四个子 skill。
 
 ## 工作流
 
-1. **事实收集**：先查项目、文件、git、日志和已有文档。
-2. **深度澄清**：先 Why，再 scope、success、quality、constraints。
-3. **Spec**：保存到 `docs/task-driver/specs/YYYY-MM-DD--slug.md`。
-4. **Plan**：保存到 `docs/task-driver/plans/YYYY-MM-DD--slug.md`。
-5. **Ledger**：保存到 `docs/task-driver/ledgers/YYYY-MM-DD--slug.md`。
-6. **执行**：确认后连续推进，行为变化优先 TDD。
-7. **评审**：每个有意义任务检查 spec compliance 和质量问题。
-8. **验证**：最终对照验收标准给出证据表。
+根 `SKILL.md` 是唯一控制器。内部按以下阶段模式推进：
+
+1. **brainstorming**：先查项目、文件、git、日志和已有文档；深度澄清 Why、scope、success、quality、constraints；产出 approved spec 和 SpecPacket。
+2. **planning**：保存 plan，包含文件映射、接口、任务、TDD/验证命令、Review Gate、停机条件和 PlanPacket。
+3. **executing**：确认后连续推进，行为变化优先 TDD；每个任务写 TaskResult 和 ReviewReport，更新 ledger。
+4. **verification**：最终对照验收标准运行 fresh verification，输出 VerificationReport 和用户验收状态。
+
+阶段参考文档位于 `references/modes/`。这些文件不是独立 skill，只是根控制器的内部协议补充。
+
+## 工件
+
+- Spec：`docs/task-driver/specs/YYYY-MM-DD--slug.md`
+- Plan：`docs/task-driver/plans/YYYY-MM-DD--slug.md`
+- Ledger：`docs/task-driver/ledgers/YYYY-MM-DD--slug.md`
 
 ## 治理门禁
 
@@ -142,7 +105,7 @@ SKILL.md
 Task Driver 支持多 agent，但不依赖多 agent。
 
 - 有 subagent/parallel agent 工具时，可以把 review、verification 或互不依赖的实现任务分派出去。
-- 没有 subagent 能力时，自动降级为 single-agent：同一个 agent 按 Brainstormer、Planner、Implementer、Reviewer、Verifier 顺序执行。
+- 没有 subagent 能力时，自动使用 `single-agent`：同一个 agent 按 Brainstormer、Planner、Implementer、Reviewer、Verifier 顺序执行。
 - 两种模式都必须使用同一套结构化交接 packet：`SpecPacket`、`PlanPacket`、`TaskResult`、`ReviewReport`、`VerificationReport`。
 - 多 agent 输出只是证据，不是最终权威；controller 仍负责对照 spec/plan/ledger 做最终判断。
 
@@ -160,47 +123,8 @@ Task Driver 支持多 agent，但不依赖多 agent。
 - subagent 只返回散文总结，没有结构化 packet，却被当作通过。
 - 同一 requirement 失败 2 轮后仍继续盲修。
 
-## 70 分标准
+## 当前状态
 
-当前版本补齐了关键工作流能力：
+当前版本：v0.4.8
 
-- 持久化 spec/plan/ledger。
-- 多阶段 skill 拆分。
-- TDD 优先规则。
-- 任务级 review gate。
-- 分支/工作区安全前置检查。
-- 上下文恢复规则。
-- 完成前 verification gate。
-- 可选多 agent 执行与 single-agent 降级协议。
-- 运行时 skill 使用中文书写，方便调试，但不限定中文语境。
-- Codex 插件 manifest。
-- APM issue 修复：循环退出、澄清分层、操作化判定、证据强度、品质层级、Red Flags。
-- 中文显示名规范和 98 项中英文对照表，面向中文用户输出更清晰。
-
-暂未包含：
-
-- 没有完整 hooks/bootstrap 体系。
-- 没有内置脚本生成 review package 或 task brief。
-- 没有专门的 subagent prompt 模板。
-- 没有行为 eval harness。
-- 没有 marketplace 发布配置。
-
-## 文件结构
-
-```text
-task-driver/
-  .codex-plugin/plugin.json
-  SKILL.md      # task-driver-standalone 薄入口
-  skills/
-    task-driver/
-    task-driver-brainstorming/
-    task-driver-planning/
-    task-driver-executing/
-    task-driver-verification/
-  README.md
-  CHANGELOG.md
-```
-
-## 版本
-
-当前版本：v0.4.6
+v0.4.8 将 Task Driver 从“插件 + 多 skill + standalone 兼容入口”的双模式收敛为单 skill 多阶段模式，便于 ccswitch/SkillHub 像安装 `flutter-forge` 一样安装完整目录。

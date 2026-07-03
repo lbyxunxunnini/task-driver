@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+## v0.4.8 (2026-07-03)
+
+### 破坏性变更
+
+- **移除插件/多 skill 双入口**：删除 `.codex-plugin/plugin.json` 和 `skills/` 多 skill 目录，不再发布 Codex 插件形态。
+- **根入口恢复为 `task-driver`**：根 `SKILL.md` 从 `task-driver-standalone` 改为唯一入口 `task-driver`，安装后只暴露一个 skill。
+- **阶段收敛为内部模式**：`task-driver-brainstorming`、`task-driver-planning`、`task-driver-executing`、`task-driver-verification` 不再作为独立 skill 暴露，改为 `references/modes/` 下的内部阶段参考文档。
+
+### 改进
+
+- **ccswitch/SkillHub 友好发布结构**：新增 `.skillhub.json` 和 `VERSION`，目录结构对齐 `flutter-forge` 这类单 skill 完整包。
+- **根控制器完整化**：根 `SKILL.md` 直接包含完整 Task Driver 控制器协议，不再要求读取 `skills/task-driver/SKILL.md` 才能获得完整契约。
+- **README 单模式化**：安装说明收敛为“安装整个目录，只看到一个 `task-driver` 入口”，避免 standalone / plugin / 阶段 skill 混淆。
+
 ## v0.4.6 (2026-07-02)
 
 ### 改进
