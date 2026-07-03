@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## v0.5.1 (2026-07-03)
+
+### 改进
+
+- **glossary 中英文输出规范统一**：格式说明从 `中文（英文）` 改为 `中文[英文]`；补全 correctness、completeness、robustness、maintainability、usability、overall 六条质量维度中文映射。
+- **verification 审计表模板中文化**：完成审计表表头及状态值统一使用 `中文[英文]` 格式。
+- **全局反例门禁**：新增 `references/counterexamples/global.md`，面向用户输出使用英文原值视为协议违规；glossary 未收录术语由 agent 自行翻译后输出。
+
 ## v0.5.0 (2026-07-03)
 
 ### 改进

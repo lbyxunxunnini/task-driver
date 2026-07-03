@@ -1,16 +1,16 @@
 # Glossary
 
-面向用户输出时，优先使用中文显示名。首次出现英文协议标识、状态值、字段名、模式名或阶段名时，使用“中文显示名（英文标识）”格式；后续同一回复内可只用中文显示名。代码块、字段表、路径、JSON/YAML key、枚举值本身保持英文原值。
+面向用户输出时，优先使用中文显示名。首次出现英文协议标识、状态值、字段名、模式名或阶段名时，使用”中文显示名[英文标识]”格式；后续同一回复内可只用中文显示名。代码块、字段表、路径、JSON/YAML key、枚举值本身保持英文原值。
 
 不得为了中文化修改机器契约本身：skill 名、文件路径、frontmatter key、JSON key、YAML key、字段名、枚举值、命令、代码块内容必须保持原值；只改变面向用户的显示方式。
 
 示例：
 
-- 需求规格交接包（SpecPacket）
-- 计划交接包（PlanPacket）
-- 任务结果（TaskResult）
-- 用户验收门禁（User Acceptance Gate）
-- 等待用户验收（`awaiting_user_acceptance`）
+- 需求规格交接包[SpecPacket]
+- 计划交接包[PlanPacket]
+- 任务结果[TaskResult]
+- 用户验收门禁[User Acceptance Gate]
+- 等待用户验收[`awaiting_user_acceptance`]
 
 | 英文标识 | 中文显示名 |
 |---|---|
@@ -110,3 +110,9 @@
 | Important | 重要 |
 | Minor | 次要 |
 | backlog | 待办积压 |
+| correctness | 正确性 |
+| completeness | 完整性 |
+| robustness | 鲁棒性 |
+| maintainability | 可维护性 |
+| usability | 可用性 |
+| overall | 综合评分 |

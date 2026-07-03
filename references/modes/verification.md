@@ -63,9 +63,9 @@
 最终报告必须包含：
 
 ```markdown
-| AC ID | Requirement | Evidence | Strength | Status |
+| AC ID | 验收标准[requirement] | 证据[evidence] | 证据强度[strength] | 状态[status] |
 |---|---|---|---|---|
-| AC-1 | [验收标准] | `[命令/文件]` -> [结果] | strong/medium/weak/stale | Met / Partial / Not met / Blocked |
+| AC-1 | [验收标准] | `[命令/文件]` -> [结果] | 强证据[strong]/中等证据[medium]/弱证据[weak]/过期证据[stale] | 已满足[met] / 部分完成[partial] / 未满足[not_met] / 受阻[blocked] |
 ```
 
 AC ID 必须引用 SpecPacket.acceptance_criteria[].id，不得生造或重命名。证据弱、过期、间接或缺失时，状态必须是 `Not met`。不得把不确定包装成完成。
