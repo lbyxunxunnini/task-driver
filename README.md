@@ -95,10 +95,10 @@ task-driver
 
 根 `SKILL.md` 是唯一控制器。内部按以下阶段模式推进：
 
-1. **brainstorming**：先查项目、文件、git、日志和已有文档；深度澄清 Why、scope、success、quality、constraints；产出 approved spec 和 SpecPacket。
-2. **planning**：保存 plan，包含文件映射、接口、任务、TDD/验证命令、Review Gate、停机条件和 PlanPacket。
-3. **executing**：确认后连续推进，行为变化优先 TDD；每个任务写 TaskResult 和 ReviewReport，更新 ledger。
-4. **verification**：最终对照验收标准运行 fresh verification，输出 VerificationReport 和用户验收状态。
+1. **需求澄清阶段[brainstorming]**：先查项目、文件、git、日志和已有文档；深度澄清目的[Why]、范围[scope]、成功标准[success]、质量要求[quality]、约束[constraints]；产出已确认需求规格[approved spec]和需求规格交接包[SpecPacket]。
+2. **计划阶段[planning]**：保存计划[plan]，包含文件映射[File Map]、接口、任务、TDD/验证命令、评审门禁[Review Gate]、停机条件和计划交接包[PlanPacket]。
+3. **执行阶段[executing]**：确认后连续推进，行为变化优先 TDD；每个任务写任务结果[TaskResult]和评审报告[ReviewReport]，更新执行台账[ledger]。
+4. **验证阶段[verification]**：最终对照验收标准运行新鲜验证证据[fresh verification evidence]，输出验证报告[VerificationReport]和用户验收状态。
 
 阶段参考文档位于 `references/modes/`。这些文件不是独立 skill，只是根控制器的内部协议补充。
 
@@ -110,7 +110,7 @@ task-driver
 - `references/quality-rubric.md`：verification 阶段的 1-5 质量评分、阈值和 improve loop。
 - `references/error-templates.md`：停机、验证失败、循环退出、范围漂移、阻塞模板。
 
-根 `SKILL.md` 按 P0/P1/P2 读取优先级加载引用文件，避免每次任务读取全部 references。
+根 `SKILL.md` 按 P0/P1/P2 读取优先级加载引用文件，避免每次任务读取全部 references。`references/glossary.md` 是用户可见输出的启动级必读文件：首次说明阶段、协议、状态、字段或模式前必须读取。
 
 ## 最短流程
 
@@ -145,9 +145,9 @@ tdr- 帮我把这个 bug 从定位到验证完整跑完
 - **品质层级**：MVP 覆盖核心路径；精打磨覆盖主要边界和错误状态；生产级覆盖安全、权限、性能、兼容、观测、回滚/迁移和完整回归。
 - **断点续传**：中断后重新触发时，agent 读取 ledger 的 Resume Checkpoint 判定是否可续传；可恢复错误自动重试 1 次。详见 `references/resume-protocol.md`。
 - **执行-验证循环**：同一 requirement 最多 2 轮；仍失败则进入 `blocked`、`partial` 或 `plan-revision`。
-- **证据强度**：`strong` 才能标 `Met`；`medium` 最多 `Partial`；`weak` / `stale` 必须 `Not met` 或 `Blocked`。
-- **质量评分**：verification 阶段按质量层级判断是否输出 `quality_score`；低于阈值时回到 executing、plan-revision、brainstorming 或 blocked。
-- **中文显示名**：用户可见输出优先使用中文显示名；首次出现英文协议标识时采用”中文显示名（英文标识）”，字段名、枚举值、路径、JSON/YAML key 等机器契约保持原值。
+- **证据强度**：强证据[`strong`] 才能标已满足[`Met`]；中等证据[`medium`] 最多部分完成[`Partial`]；弱证据[`weak`] / 过期证据[`stale`] 必须标未满足[`Not met`] 或受阻[`Blocked`]。
+- **质量评分**：验证阶段[verification] 按质量层级判断是否输出 `quality_score`；低于阈值时回到执行阶段[executing]、计划修订协议[plan-revision]、需求澄清阶段[brainstorming]或受阻[blocked]。
+- **中文显示名**：用户可见输出优先使用中文显示名；首次出现英文协议标识时采用 `中文显示名[英文标识]`，字段名、枚举值、路径、JSON/YAML key 等机器契约保持原值。中间进度更新、阶段切换说明、停机回问、最终报告都受该规则约束。
 
 ## 多 Agent 与降级
 
@@ -166,9 +166,10 @@ Task Driver 支持多 agent，但不依赖多 agent。
 - `references/counterexamples/planning.md`
 - `references/counterexamples/executing.md`
 - `references/counterexamples/verification.md`
+- `references/counterexamples/global.md`
 
 ## 当前状态
 
-当前版本：v0.6.1
+当前版本：v0.6.2
 
-v0.6.1 新增分级执行模式（strict / standard / lite）、断点续传与自动恢复协议、端到端使用案例（walkthrough）、FAQ，以及错误自分类与自动重试机制。
+v0.6.2 将术语表提升为启动级门禁，并加严全局反例，确保用户可见输出优先使用 `中文显示名[英文标识]`，同时避免把机器契约误中文化。

@@ -25,6 +25,10 @@
 | ledger | 执行台账 |
 | packet | 交接包 |
 | schema | 结构定义 |
+| brainstorming | 需求澄清阶段 |
+| planning | 计划阶段 |
+| executing | 执行阶段 |
+| verification | 验证阶段 |
 | Brainstormer | 需求澄清者 |
 | Planner | 计划制定者 |
 | Implementer | 实现者 |
@@ -40,6 +44,9 @@
 | superseded | 已被替代 |
 | degraded-single-skill | 降级单技能模式 |
 | mode | 执行模式 |
+| strict | 严格模式 |
+| standard | 标准模式 |
+| lite | 轻量模式 |
 | single-agent | 单智能体模式 |
 | multi-agent-review | 多智能体评审模式 |
 | multi-agent-parallel | 多智能体并行模式 |
