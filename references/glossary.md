@@ -43,7 +43,9 @@
 | draft | 草稿 |
 | superseded | 已被替代 |
 | degraded-single-skill | 降级单技能模式 |
-| mode | 执行模式 |
+| gate_mode | 门禁模式 |
+| execution_mode | 执行模式 |
+| mode | 模式 |
 | strict | 严格模式 |
 | standard | 标准模式 |
 | lite | 轻量模式 |

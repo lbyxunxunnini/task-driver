@@ -31,3 +31,33 @@
 - 错误：发现 Goal、AC、Scope 或 Quality level 不清楚，却在 plan 中自行补默认值。
 - 违规：plan 改写了 spec。
 - 回退：回到 brainstorming 补 spec，并重新获得用户确认。
+
+## 只有任务清单没有目标和验证方案
+
+- 错误：plan 只列 T-001、T-002、T-003，没有 `Goal`、`Success Definition` 和 `Verification Strategy`。
+- 违规：执行者只能推进小任务，无法判断整体目标是否完成，也无法在 verification 阶段逐条证明。
+- 回退：补齐目标达成定义和验证方案摘要，确保每条 AC 映射到任务或最终验证命令。
+
+## 把技术方案决策伪装成执行任务
+
+- 错误：plan 写“实现方案 A / 方案 B 之一”，或在用户未确认取舍轴时直接选一个方案开工。
+- 违规：会改变接口、依赖、验证方式、风险边界或交付范围的方案选择必须在 brainstorming 闭合。
+- 回退：回到 brainstorming，用单问题澄清门让用户确认方案轴或方案选择；确认后重写 plan。
+
+## 没有 Decision Trace 就写计划
+
+- 错误：spec 只有 Goal、Scope 和 AC，plan 直接拆 T-001/T-002，没有记录宏观到细节的用户决策链。
+- 违规：无法证明计划里的范围切片、技术方案和验证策略已经与用户达成一致。
+- 回退：回到 brainstorming 补 Decision Trace；至少闭合整体目标、大类/规划轴、范围切片、行为细节和实现约束中会影响本轮交付的层级。
+
+## shared_understanding 未成立就写计划
+
+- 错误：Grilling Summary 中 `shared_understanding: false` 或未记录，仍开始写 plan。
+- 违规：plan 必须建立在共同理解上；否则任务拆解会替用户隐性做决策。
+- 回退：回到 brainstorming 输出共享理解摘要，并等待用户明确确认。
+
+## 设计树仍有 open 分支
+
+- 错误：Design Tree Coverage 中验证策略或风险分支仍是 open，plan 已经开始拆任务。
+- 违规：open 分支代表仍有会影响 AC、风险或验证的未决问题；planning 不能替用户默认。
+- 回退：回到 brainstorming 关闭 open 分支，或明确 deferred / out_of_scope 并说明影响。

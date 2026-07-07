@@ -11,6 +11,52 @@
 - 验证没有覆盖某条 acceptance criterion。
 - 跳过失败测试直接实现行为变化。
 - 反复修同一 requirement 但不记录尝试和退出条件。
+- 只完成某个优先级阶段、批次、小目标或子任务，就询问用户是否继续执行已批准计划。
+- plan 没有目标达成定义或验证方案摘要，却已经进入执行。
+- 没有完成验收前自检，就进入 User Acceptance Gate 询问用户是否接受。
+- 跳过 brainstorming / planning / executing / verification / User Acceptance Gate，但没有记录跳过原因、风险、替代证据和用户批准。
+- planning 或 executing 发现未澄清的目标、范围、AC、技术方案或风险细节，却继续向下游推进。
+- Design Tree Coverage 存在 open 分支，却进入 planning、executing 或 verification。
+
+## Target-Driven State Machine
+
+每个 Task Driver 任务必须维护目标定义[Target]，并让所有 packet 引用同一目标：
+
+- `target_id`
+- `target_statement`
+- `success_definition`
+- `quality_level`
+- `stop_or_loop_conditions`
+
+正常状态链：
+
+```text
+Target -> brainstorming -> planning -> executing -> verification -> User Acceptance Gate -> accepted_by_user
+```
+
+必经规则：
+
+- brainstorming、planning、executing、verification、User Acceptance Gate 默认都必须出现。
+- executing、verification、User Acceptance Gate 是交付前硬必经环节；除非用户明确取消交付或将任务降级为纯规划/纯审查，否则不得跳过。
+- 任何跳过都必须写入 ledger：`skipped_stage / reason / risk / replacement_evidence / user_approval`。
+- 没有跳过记录时，后续阶段必须回退补齐，不得继续包装成完成。
+
+回路规则：
+
+- planning 发现 spec 未闭合或技术取舍未确认 -> brainstorming。
+- executing 发现依赖未澄清细节、AC 不可验证、方案取舍未确认或风险边界变化 -> brainstorming；若 spec 正确但计划错误 -> planning。
+- verification 发现实现缺陷且不改变计划 -> executing；发现计划假设错误 -> planning；发现目标、范围、AC、质量层级或风险边界错误 -> brainstorming。
+- User Acceptance Gate 被 reject -> 根据拒绝原因回到 executing / planning / brainstorming；不得默认只做小修。
+
+## Whole-Plan Progression
+
+approved plan 是连续执行契约。用户确认 plan 后，agent 必须按 PlanPacket.tasks[] 推进到以下任一终态：
+
+- 所有任务完成并进入 verification。
+- Review Gate、Scope Drift、停机条件、blocked、partial、plan-revision 或 brainstorming 回退。
+- 用户明确暂停或修改目标。
+
+阶段、优先级批次、小目标和单个任务完成都不是终态。它们只能产生 ledger 更新、TaskResult、ReviewReport 和简短进度更新；不得触发“是否继续”。
 
 ## TDD Exceptions
 
@@ -52,7 +98,7 @@
 
 ## User Acceptance Gate
 
-VerificationReport 写完且所有 AC 至少 Met/Partial 后，状态进入 `awaiting_user_acceptance`，触发 User Acceptance Gate。用户回复后状态变为 `accepted_by_user` / `rejected_by_user` / `partial`。该门只在最终触发一次，不与“已确认 plan 后不得每步讨确认”冲突。
+VerificationReport 写完、所有 AC 至少 Met/Partial、验收前自检无 fail 后，状态进入 `awaiting_user_acceptance`，触发 User Acceptance Gate。用户回复后状态变为 `accepted_by_user` / `rejected_by_user` / `partial`。该门只在最终触发一次，不与“已确认 plan 后不得每步讨确认”冲突。
 
 Partial 仅在同时满足以下条件时可进入 User Acceptance Gate：
 

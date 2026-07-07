@@ -2,6 +2,8 @@
 
 Quality Rubric 用于 verification 阶段回答“做得有多好”，不替代 Acceptance Criteria 和 Evidence Strength。
 
+品质层级的机器枚举统一为 `mvp` / `polished` / `production`；用户可见文本可显示为 MVP / 精打磨 / 生产级。`quality_score.threshold` 必须按机器枚举映射。
+
 ## When to Score
 
 VerificationReport 写入前，若任务满足任一条件，必须给出质量评分：
@@ -47,9 +49,9 @@ quality_score:
 
 ## Thresholds
 
-- `MVP`：threshold = 3。低于 3 必须回到 executing 或 blocked。
-- `精打磨`：threshold = 4。低于 4 必须回到 executing，除非用户明确接受 partial。
-- `生产级`：threshold = 4.5。低于 4.5 必须回到 executing、plan-revision 或 blocked。
+- `mvp`（MVP）：threshold = 3。低于 3 必须回到 executing 或 blocked。
+- `polished`（精打磨）：threshold = 4。低于 4 必须回到 executing，除非用户明确接受 partial。
+- `production`（生产级）：threshold = 4.5。低于 4.5 必须回到 executing、plan-revision 或 blocked。
 
 `overall` 不得高于 evidence 支持的 AC 状态：
 

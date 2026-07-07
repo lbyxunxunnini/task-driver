@@ -26,6 +26,18 @@
 - 违规：跳过 User Acceptance Gate。
 - 回退：状态置为 `awaiting_user_acceptance`，等待用户 accept / reject / partial-accept。
 
+## 未自检就请求用户验收
+
+- 错误：直接输出“用户验收门禁：等待用户验收，是否接受这个交付？”，但没有逐项自检 Plan tasks、Review reports、AC coverage、Verification strategy、Scope drift、Quality gate 和 Residual risk。
+- 违规：User Acceptance Gate 只能在验收前自检完成且无 fail 后触发；用户不负责替 agent 发现没自检。
+- 回退：回到 verification，完成验收前自检表；若发现 fail，按 executing / blocked / plan-revision / brainstorming 路由，不得继续要求用户 accept。
+
+## 用户提醒后才自检
+
+- 错误：用户问“你做自检了吗”，agent 才开始逐项检查。
+- 违规：自检是进入 User Acceptance Gate 的前置条件，不是用户追问后的补救动作。
+- 回退：撤回 awaiting_user_acceptance 状态，完成验收前自检和 VerificationReport 更新后，再决定是否重新进入 User Acceptance Gate。
+
 ## 失败后默认回执行
 
 - 错误：验证失败后直接继续改代码，没有判断是 executing、blocked、partial、plan-revision 还是 brainstorming。

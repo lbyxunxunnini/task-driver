@@ -8,6 +8,10 @@ Packet schema 单点定义在本文。阶段参考只声明本阶段产出哪种
 |---|---|---|---|---|
 | spec_path | string | yes | - | spec 文件路径 |
 | goal | string | yes | - | 一句话目标 |
+| target | object | yes | - | 目标定义；含 `{target_id, target_statement, success_definition, quality_level, stop_or_loop_conditions}`，后续 PlanPacket、TaskResult、VerificationReport 必须围绕同一目标推进 |
+| decision_trace | array<object> | yes | - | 决策轨迹；元素含 `{layer, decision_point, options_summary, decision, impact}`，按整体目标 -> 大类/规划轴 -> 范围切片 -> 小项目/模块 -> 行为细节 -> 实现约束记录已闭合层级 |
+| grilling_summary | object | yes | - | 拷问摘要；含 `{shared_understanding, unresolved_branches, key_tradeoffs, rejected_paths}`；`shared_understanding` 必须为 true 才能进入 planning |
+| design_tree_coverage | array<object> | yes | - | 设计树覆盖；元素含 `{branch_id, name, parent, layer, status, decision_ref, blocks}`；不得存在 `open` 分支 |
 | acceptance_criteria | array<object> | yes | - | 元素含 `{id: AC-N, description, verification}`；id 必填且唯一 |
 | constraints | array<string> | yes | - | 精确约束 |
 | quality_level | enum | yes | mvp / polished / production | 见品质层级 |
@@ -22,7 +26,8 @@ Packet schema 单点定义在本文。阶段参考只声明本阶段产出哪种
 | ledger_path | string | yes | - | ledger 文件路径 |
 | plan_version | string | yes | v1 / v2 / ... | 见 Plan Revision Protocol |
 | predecessor | string | no | - | 前序 plan 路径；首版填“无” |
-| mode | enum | yes | single-agent / multi-agent-review / multi-agent-parallel / degraded-single-skill | 执行模式 |
+| gate_mode | enum | yes | strict / standard / lite | 门禁强度；只决定 Review Gate、质量评分、反例门禁和模板粒度 |
+| execution_mode | enum | yes | single-agent / multi-agent-review / multi-agent-parallel / degraded-single-skill | agent 执行形态；只决定是否使用 subagent / parallel agent |
 | tasks | array<object> | yes | - | 元素含 `{id: T-NNN, owner_role, objective, files, verification, acceptance_ac_ids}`；id 必填且唯一 |
 | stop_conditions | array<string> | yes | - | 触发停机的条件 |
 | status | enum | yes | draft / approved / superseded | 同上 |
@@ -52,8 +57,10 @@ Packet schema 单点定义在本文。阶段参考只声明本阶段产出哪种
 | Field | Type | Required | Enum | Description |
 |---|---|---|---|---|
 | status | enum | yes | met / partial / not_met / blocked / awaiting_user_acceptance / accepted_by_user / rejected_by_user | 见状态机 |
-| mode | enum | yes | single-agent / multi-agent-review / multi-agent-parallel / degraded-single-skill | 与 plan 一致 |
+| gate_mode | enum | yes | strict / standard / lite | 与 PlanPacket.gate_mode 一致 |
+| execution_mode | enum | yes | single-agent / multi-agent-review / multi-agent-parallel / degraded-single-skill | 与 PlanPacket.execution_mode 一致 |
 | coverage | array<object> | yes | - | 元素 `{ac_id: AC-N, evidence_ref, evidence_strength, status: met / partial / not_met / blocked}`；ac_id 必须引用 SpecPacket.acceptance_criteria[].id |
+| pre_acceptance_self_check | object | yes | - | 验收前自检；含 Plan tasks、Review reports、AC coverage、Verification strategy、Scope drift、Quality gate、Residual risk 的结果和证据；无 fail 才能进入 User Acceptance Gate |
 | unmet_requirements | array<object> | yes | - | 元素 `{ac_id, reason, next_action}` |
 | delivery_acknowledged_by_user | enum | yes | true / false / partial / pending | User Acceptance Gate 状态；VerificationReport 初次写入必须为 `pending`，用户回复后更新为 `true / false / partial` |
 | quality_score | object | no | - | 质量评分；结构见 `references/quality-rubric.md`，未评分时写 `{overall: N/A, rationale}` |
@@ -61,15 +68,16 @@ Packet schema 单点定义在本文。阶段参考只声明本阶段产出哪种
 ## YAML Summary
 
 ```yaml
-mode: single-agent | multi-agent-review | multi-agent-parallel | degraded-single-skill
-spec_packet: { spec_path, goal, acceptance_criteria[id, description, verification], constraints, quality_level, approved_by_user, status }
-plan_packet: { plan_path, ledger_path, plan_version, predecessor, mode, tasks[id: T-NNN, owner_role, objective, files, verification, acceptance_ac_ids], stop_conditions, status }
+gate_mode: strict | standard | lite
+execution_mode: single-agent | multi-agent-review | multi-agent-parallel | degraded-single-skill
+spec_packet: { spec_path, goal, target[target_id, target_statement, success_definition, quality_level, stop_or_loop_conditions], decision_trace[layer, decision_point, options_summary, decision, impact], grilling_summary[shared_understanding, unresolved_branches, key_tradeoffs, rejected_paths], design_tree_coverage[branch_id, name, parent, layer, status, decision_ref, blocks], acceptance_criteria[id, description, verification], constraints, quality_level, approved_by_user, status }
+plan_packet: { plan_path, ledger_path, plan_version, predecessor, gate_mode, execution_mode, tasks[id: T-NNN, owner_role, objective, files, verification, acceptance_ac_ids], stop_conditions, status }
 task_result: { task_id: T-NNN, status, files_changed, commands_run, evidence, ac_coverage[ac_id, covered, evidence], deviations_from_plan }
 review_report: { task_id: T-NNN, status, findings[severity, file, issue, required_fix] }
-verification_report: { status, mode, coverage[ac_id, evidence_ref, evidence_strength, status], unmet_requirements[ac_id, reason, next_action], delivery_acknowledged_by_user, quality_score }
+verification_report: { status, gate_mode, execution_mode, coverage[ac_id, evidence_ref, evidence_strength, status], pre_acceptance_self_check, unmet_requirements[ac_id, reason, next_action], delivery_acknowledged_by_user, quality_score }
 ```
 
-在 `single-agent` 模式下，把 packet 写入 ledger。在多 agent 模式下，packet 是唯一交接输入输出；禁止用散文摘要替代。
+在 `execution_mode: single-agent` 模式下，把 packet 写入 ledger。在多 agent 模式下，packet 是唯一交接输入输出；禁止用散文摘要替代。
 
 TaskResult.ac_coverage 为必填；不得以“本任务未覆盖 AC”为由省略字段。VerificationReport.delivery_acknowledged_by_user 为必填；未进入 User Acceptance Gate 前必须显式写 `pending`。
 
@@ -88,6 +96,8 @@ TaskResult.ac_coverage 为必填；不得以“本任务未覆盖 AC”为由省
 Packet 之间必须以 ID 引用，不得用散文、位置或标题模糊指代：
 
 - TaskResult.task_id -> PlanPacket.tasks[].id (`T-NNN`)。
+- PlanPacket / TaskResult / VerificationReport -> SpecPacket.target.target_id。
+- PlanPacket.tasks[].objective / verification -> SpecPacket.decision_trace[]、SpecPacket.acceptance_criteria[] 或 SpecPacket.constraints。
 - TaskResult.ac_coverage[].ac_id -> SpecPacket.acceptance_criteria[].id (`AC-N`)。
 - ReviewReport.task_id -> TaskResult.task_id。
 - VerificationReport.coverage[].ac_id -> SpecPacket.acceptance_criteria[].id。

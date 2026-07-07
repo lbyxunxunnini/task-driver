@@ -7,6 +7,8 @@
 ## 必要输入
 
 - Approved spec，可内联输入或位于 `docs/task-driver/specs/`；进入 plan 编写前，SpecPacket 必须已持久化到 ledger、spec `## SpecPacket` 或 planning handoff。
+- Approved spec 必须包含决策轨迹[Decision Trace]、拷问摘要[Grilling Summary] 和设计树覆盖[Design Tree Coverage]。重任务、重新规划类任务或明显方案分叉任务若缺少 Decision Trace，或轨迹没有从宏观到细节闭合，或 `shared_understanding` 不是 true，或 Design Tree Coverage 存在 open 分支，不得进入 plan 编写。
+- Approved spec 必须包含目标定义[Target] 或等价字段：target_id、target_statement、success_definition、quality_level、stop_or_loop_conditions。缺失时回到 brainstorming。
 - 当前项目事实必须先收集到足以支撑 plan，不得只读目录结构。至少检查：
   - 项目规则：CLAUDE.md、README、CONTRIBUTING、docs、.claude/、agent 规则文件。
   - 代码结构：入口、模块/页面/服务边界、路由、配置、平台目录。
@@ -27,6 +29,12 @@
 4. 用户决策或外部权限/凭据：用单问题澄清门回问。
 5. plan 细节缺口：若不改变 spec、AC、范围和风险边界，可在 plan 中提出明确 assumption；否则回到 brainstorming 或停机回问。
 
+若缺口是技术方案选项，先判断它是否改变接口、数据模型、依赖、文件边界、验证方式、回滚方式、用户流程、风险边界或交付范围。会改变任一项时，它属于 spec 决策，必须回到 brainstorming；只有纯实现顺序、局部代码组织、命名或同等风险的微小取舍，才可作为 plan assumption 或任务细节处理。
+
+计划中的每个技术任务都必须能追溯到 Decision Trace、Acceptance Criteria 或 Constraints。若一个任务本质是“选择技术方案”“调研后决定路线”“看情况实现 A/B”，说明拷问没有闭合，必须回到 brainstorming；plan 只能执行已确认方案，不能继续替用户做方案决策。
+
+planning 阶段只负责把已确认的目标和方案拆成可执行契约。若发现目标、范围、非目标、AC、质量层级、技术取舍、风险边界、共享理解或验收方式任一项未闭合，必须回到 brainstorming；不得在 plan 中自行补默认值。
+
 Plan assumption 必须包含：
 
 - assumption_id：`ASM-N`
@@ -46,9 +54,12 @@ Plan assumption 必须包含：
 
 必须包含：
 
-- 目标和 spec 路径。
+- target_id、目标和 spec 路径。
+- 目标达成定义：用 1-3 句说明完成后什么外部行为、文档状态、质量状态或可观察结果成立；不得只有任务列表。
+- 验证方案摘要：在任务清单前先说明最终要运行/检查的验证类型、覆盖哪些 AC、证据强度上限和无法自动验证的人工证据。
 - 从 spec 复制的全局约束。
-- 执行模式：`single-agent`、`multi-agent-review` 或 `multi-agent-parallel`。
+- 门禁模式：`strict`、`standard` 或 `lite`，写入 `PlanPacket.gate_mode`。
+- 执行模式：`single-agent`、`multi-agent-review` 或 `multi-agent-parallel`，写入 `PlanPacket.execution_mode`。
 - 品质层级对应的验收差异。
 - 文件映射：创建/修改/测试/文档路径及职责。
 - 接口：函数、命令、配置键、schema 或公开行为。
@@ -86,14 +97,28 @@ Plan assumption 必须包含：
 
 **Spec:** docs/task-driver/specs/YYYY-MM-DD--slug.md
 **Ledger:** docs/task-driver/ledgers/YYYY-MM-DD--slug.md
-**Mode:** single-agent | multi-agent-review | multi-agent-parallel
-**Quality level:** MVP | Polished | Production-grade
+**Gate mode:** strict | standard | lite
+**Execution mode:** single-agent | multi-agent-review | multi-agent-parallel
+**Quality level:** mvp | polished | production
 **Status:** Draft | Approved
 **Plan version:** v1
 **Predecessor:** 无（首版） | docs/task-driver/plans/YYYY-MM-DD--slug.md（v[N-1] 路径）
 
 ## Goal
 [一句话目标]
+
+## Target
+- target_id: [目标 ID]
+- target_statement: [外部可观察目标]
+- success_definition: [完成状态]
+- quality_level: [mvp | polished | production]
+- stop_or_loop_conditions: [回路条件]
+
+## Success Definition
+- [目标达成后的可观察结果，对应 AC-N]
+
+## Verification Strategy
+- [最终验证类型、命令或检查方式、覆盖 AC-N、预期 evidence_strength]
 
 ## Global Constraints
 - [精确约束]
@@ -177,7 +202,8 @@ Plan assumption 必须包含：
 
 **Spec:** docs/task-driver/specs/YYYY-MM-DD--slug.md
 **Plan:** docs/task-driver/plans/YYYY-MM-DD--slug.md
-**Mode:** single-agent | multi-agent-review | multi-agent-parallel
+**Gate mode:** strict | standard | lite
+**Execution mode:** single-agent | multi-agent-review | multi-agent-parallel
 **Started:** YYYY-MM-DD
 
 ## Status
@@ -185,7 +211,7 @@ Plan assumption 必须包含：
 
 ## Packets
 - SpecPacket: [path or inline summary]、status
-- PlanPacket: [path]、plan_version、status
+- PlanPacket: [path]、plan_version、gate_mode、execution_mode、status
 - TaskResult: pending
 - ReviewReport: pending
 - VerificationReport: pending
@@ -218,17 +244,23 @@ Plan assumption 必须包含：
 
 ## 阶段输出
 
-输出 `PlanPacket` 并创建 ledger。字段以 `SKILL.md` 的结构化交接 Packet 为准；本阶段至少填入 plan 路径、ledger 路径、执行模式、任务 id、owner role、objective、files、steps、verification、stop conditions。
+输出 `PlanPacket` 并创建 ledger。字段以 `SKILL.md` 的结构化交接 Packet 为准；本阶段至少填入 plan 路径、ledger 路径、门禁模式、执行模式、任务 id、owner role、objective、files、steps、verification、stop conditions。
 
 ## 自检门禁
 
 交给用户确认前：
 
 - 检查 SpecPacket 是否已持久化；若只存在于 spec 的 `## SpecPacket` 或 planning handoff，创建 ledger 时必须同步复制；未持久化不得进入 plan 编写。
+- 检查 spec 的 Decision Trace 是否存在、按层级闭合，并能解释技术方案、范围切片和验证策略来源。
+- 检查 spec 的 Grilling Summary：`shared_understanding` 必须为 true；`unresolved_branches` 非空时必须证明不影响本轮 AC、风险边界和验证方式。
+- 检查 spec 的 Design Tree Coverage：目标、范围、行为、方案、验证、风险分支必须覆盖；不得存在 open 分支。
+- 检查 Target 是否存在并贯穿 plan；每个任务和验证项必须能映射到 target_id、AC 或 stop_or_loop_conditions。
 - 每条 spec AC-N 必须映射到任务或验证命令；映射以 AC ID 引用。
+- `## Goal`、`## Success Definition` 和 `## Verification Strategy` 必须先于任务清单出现，且不能与任务步骤重复成同义列表。
 - 搜索占位词。
 - 检查任务顺序、接口名称、路径一致。
 - 检查 ledger 路径存在于 plan。
 - 一次性请求完整 plan 确认；确认后执行阶段不逐步讨确认。
 - **PlanPacket 单源校验**：plan markdown 任务条目（`### Task T-NNN`）必须与 PlanPacket.tasks[] 一一对应，字段 id / files / acceptance / verification 完全一致；漂移以 packet 为准，立即同步 markdown。
 - 检查 plan-revision 字段：v1 可省 `## Diff From v[N-1]`；v2+ 必填、`predecessor` 指向前版；重新规划类 v1 必须含 `## Change From Current State`。
+- 检查是否仍存在未闭合的技术方案分叉；若存在，回到 brainstorming，不得让用户 approve plan 后再边做边决定。

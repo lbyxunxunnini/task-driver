@@ -1,6 +1,43 @@
 # Changelog
 
-## Unreleased
+## v0.6.3 (2026-07-07)
+
+### 新增
+
+- **契约一致性检查脚本**：新增 `scripts/check-contracts.sh`，检查 packet 字段、禁用表达、质量层级枚举、证据强度规则和三条黄金路径示例，防止 `PlanPacket.mode`、`medium 可标 Met` 等契约漂移再次出现。
+- **Packet 最小模板**：新增 `references/packet-templates.md`，提供 SpecPacket、PlanPacket、TaskResult、ReviewReport、VerificationReport 的最小合法 YAML 模板，降低手写 packet 的错误率。
+- **30 秒快速入口**：新增 `references/quick-start.md`，用决策树判断是否启用 Task Driver，并给出 gate_mode / execution_mode 选择规则。
+- **三条黄金路径**：新增 `references/walkthroughs/lite.md`、`standard.md`、`strict.md`，分别覆盖低风险小任务、默认跨文件 bugfix、高风险权限/发布任务。
+- **发布前自测清单**：新增 `references/self-test-checklist.md`，明确发布前必须运行的命令和人工门禁。
+
+### 改进
+
+- **README 入口收敛**：补充 quick-start、packet templates、self-test checklist、三条 walkthrough 和 `scripts/check-contracts.sh` 的目录说明与使用入口。
+- **协议索引扩展**：`SKILL.md` 的引用表新增 quick-start、packet-templates、self-test-checklist 和分模式 walkthrough 的加载时机。
+
+### 修复
+
+- **设计树覆盖门禁**：brainstorming 新增 Design Tree Coverage，要求目标、范围、行为、方案、验证、风险分支都标记为 decided / deferred / out_of_scope，不得带 open 分支进入 planning。
+- **宏观到细分拷问加强**：每层闭合前必须完成上游依赖、横向分支和下游影响三项检查，防止只问主路径或浅闭合宏观问题。
+- **拷问反例补强**：新增“只问主路径”“宏观问题浅闭合”“同层替代路径未处理”“Design Tree Coverage 缺失”“设计树仍有 open 分支”等反例。
+- **目标驱动状态机**：新增 Target -> brainstorming -> planning -> executing -> verification -> User Acceptance Gate -> accepted_by_user 的正常状态链，明确目标定义和回路条件。
+- **跳过阶段记录**：任何阶段跳过必须记录 skipped_stage、reason、risk、replacement_evidence 和 user_approval；否则视为协议违规。
+- **回路规则强化**：planning / executing 发现未澄清目标、范围、AC、技术取舍或风险边界时必须回到 brainstorming；verification 按失败性质回到 executing、planning 或 brainstorming。
+- **验收前自检门**：User Acceptance Gate 前新增 Pre-Acceptance Self-Check，必须逐项检查 Plan tasks、Review reports、AC coverage、Verification strategy、Scope drift、Quality gate 和 Residual risk。
+- **VerificationReport 入包**：新增 `pre_acceptance_self_check` 必填字段；没有自检结果或自检存在 fail 时，不得进入 `awaiting_user_acceptance`。
+- **反例补强**：新增“未自检就请求用户验收”和“用户提醒后才自检”反例，防止把自检责任转交给用户。
+- **Grilling State 状态机**：brainstorming 新增当前分支、当前问题、上游依赖、推荐答案、用户决策、未闭合分支和 shared_understanding 状态，防止事后补表式伪拷问。
+- **事实与决策分离**：明确可从代码库、文档、日志、git 或已有工件查到的事实必须由 agent 自查；目标、优先级、范围、风险和方案取舍才交给用户决策。
+- **Shared Understanding Gate**：spec 标为 Approved 前必须输出共享理解摘要，并获得用户对目标、范围、非目标、关键取舍、验证方式和风险的明确确认。
+- **Grilling Summary 入包**：SpecPacket 新增 `grilling_summary`，planning 必须检查 `shared_understanding: true` 才能继续。
+- **拷问细化协议**：新增宏观到细节的 6 层拷问链：整体目标、大类/规划轴、范围切片、小项目/模块、行为细节、实现约束。
+- **Decision Trace 强制化**：Spec 模板和 SpecPacket 新增决策轨迹，记录每层决策点、选项、用户/assumption 决策及其对范围、验收、风险和验证的影响。
+- **计划前置门禁收紧**：Planning 阶段必须检查 Decision Trace；技术任务必须能追溯到 Decision Trace、AC 或 Constraints，否则回到 brainstorming。
+- **反例补强**：新增“拷问跳层”“用户笼统回答后伪闭合”“没有 Decision Trace 就写计划”三类反例。
+- **澄清话术自然化**：禁止把“只需要你拍板 1 个问题”作为固定标题，模板改为直接的“请确认”，仅允许最终收口问题使用类似表达。
+- **技术方案分叉前置闭合**：会改变接口、依赖、验证方式、回滚方式、用户流程或风险边界的技术方案必须回到需求澄清阶段逐层确认，不能直接进入计划或执行。
+- **计划目标和验证方案补强**：Plan 模板新增 `Success Definition` 和 `Verification Strategy`，防止只有任务清单、没有整体目标和最终验证路线。
+- **整体计划连续推进**：用户确认计划后，执行阶段必须推进整个 PlanPacket；优先级阶段、批次、小目标或子任务完成后不得询问“是否继续”。
 
 ## v0.6.2 (2026-07-06)
 

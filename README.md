@@ -51,10 +51,13 @@ task-driver/
   .skillhub.json
   VERSION
   references/
+    quick-start.md
     glossary.md
     packet-contract.md
+    packet-templates.md
     runtime-protocols.md
     quality-rubric.md
+    self-test-checklist.md
     error-templates.md
     resume-protocol.md
     walkthrough.md
@@ -69,6 +72,12 @@ task-driver/
       planning.md
       executing.md
       verification.md
+    walkthroughs/
+      lite.md
+      standard.md
+      strict.md
+  scripts/
+    check-contracts.sh
 ```
 
 ccswitch / SkillHub / Claude / Codex 这类传统 skill 搜索路径都应安装整个目录：
@@ -104,11 +113,15 @@ task-driver
 
 长协议已拆到 `references/`，根 `SKILL.md` 只保留入口、硬门禁和读取索引：
 
+- `references/quick-start.md`：30 秒使用判断、门禁模式选择和最终交付最低要求。
 - `references/glossary.md`：中文显示名和术语表。
 - `references/packet-contract.md`：Packet schema、状态机、跨引用、证据强度。
+- `references/packet-templates.md`：5 类 packet 的最小合法 YAML 模板。
 - `references/runtime-protocols.md`：Red Flags、TDD 例外、循环退出、Plan Revision、User Acceptance Gate。
 - `references/quality-rubric.md`：verification 阶段的 1-5 质量评分、阈值和 improve loop。
+- `references/self-test-checklist.md`：发布前自测清单和一致性验证命令。
 - `references/error-templates.md`：停机、验证失败、循环退出、范围漂移、阻塞模板。
+- `references/walkthroughs/`：lite、standard、strict 三条黄金路径。
 
 根 `SKILL.md` 按 P0/P1/P2 读取优先级加载引用文件，避免每次任务读取全部 references。`references/glossary.md` 是用户可见输出的启动级必读文件：首次说明阶段、协议、状态、字段或模式前必须读取。
 
@@ -121,10 +134,24 @@ tdr- 帮我把这个 bug 从定位到验证完整跑完
 触发后，Task Driver 会按以下顺序推进：
 
 1. 收集项目事实，先读相关文件、文档、git 状态、日志或失败证据。
-2. 若目标、范围、验收或质量层级不清楚，只问一个最高影响决策点，并给出选项和推荐。
-3. 生成或内联 approved spec，写清 Goal、Scope、Non-goals、Acceptance Criteria、Constraints、Quality Level。
-4. 生成 approved plan 和 ledger，明确文件映射、任务、验证命令、Review Gate 和停机条件。
-5. 按 plan 连续执行，写 TaskResult 和 ReviewReport，最后运行 fresh verification；需要时按质量层级输出 `quality_score`。
+2. 若目标、范围、验收或质量层级不清楚，只问一个最高影响决策点，并维护 Grilling State，按整体目标、大类/规划轴、范围切片、小项目/模块、行为细节、实现约束逐层拷问。
+3. 通过 Shared Understanding Gate 后，生成或内联 approved spec，写清 Goal、Target、Decision Trace、Grilling Summary、Scope、Non-goals、Acceptance Criteria、Constraints、Quality Level。
+4. 生成 approved plan 和 ledger，明确目标达成定义、验证策略、文件映射、任务、验证命令、Review Gate 和停机条件。
+5. 按 plan 连续执行整个 PlanPacket，写 TaskResult 和 ReviewReport，最后运行 fresh verification；需要时按质量层级输出 `quality_score`，并在请求用户验收前完成验收前自检。
+
+## 30 秒选择
+
+需要快速判断时，先读 `references/quick-start.md`：
+
+- 单文件低风险、有确定性验证：`gate_mode: lite`。
+- 跨 2-5 文件、默认风险：`gate_mode: standard`。
+- 安全、权限、数据、发布、迁移、公共 API 或生产级：`gate_mode: strict`。
+
+示例路径：
+
+- `references/walkthroughs/lite.md`
+- `references/walkthroughs/standard.md`
+- `references/walkthroughs/strict.md`
 
 ## 工件
 
@@ -137,12 +164,26 @@ tdr- 帮我把这个 bug 从定位到验证完整跑完
 ## 治理门禁
 
 - **重任务判定**：跨 2 个以上文件/模块，或目标、范围、验收、质量层级不清楚，或涉及数据、权限、安全、发布、迁移、外部服务、破坏性操作时，必须走 Task Driver。
-- **执行模式**：`strict[严格]`（高风险/生产级）、`standard[标准]`（默认）、`lite[轻量]`（中等任务门禁放宽）。详见 SKILL.md。
+- **目标驱动状态机**：每个任务必须有 `Target`，包含 target_id、目标陈述、完成定义、质量层级和回路条件；正常状态链为 Target → brainstorming → planning → executing → verification → User Acceptance Gate → accepted_by_user。
+- **跳过记录**：brainstorming、planning、executing、verification、User Acceptance Gate 正常都必须出现；跳过必须记录 skipped_stage、reason、risk、replacement_evidence 和 user_approval。
+- **门禁模式**：`strict[严格]`（高风险/生产级）、`standard[标准]`（默认）、`lite[轻量]`（中等任务门禁放宽），写入 `PlanPacket.gate_mode`。agent 执行形态另写入 `PlanPacket.execution_mode`。
 - **明显方案分叉**：会改变 API、数据模型、用户流程、依赖、验证方式、风险边界、交付范围或回滚方式的选择，必须在 spec/plan 阶段确认。
 - **澄清分层**：Goal、Scope、Non-goals、Acceptance Criteria、Constraints、Quality Level 是必填门禁；User scenario、Risks、Trade-offs、Alternatives 按需补充。
 - **单问题澄清**：禁止问卷式连续提 1 个以上问题；每轮只问一个最高影响决策点，能给参考答案时必须给 2-3 个互斥选项和推荐。
+- **自然澄清话术**：单问题是决策结构，不是固定话术；不得反复使用“只需要你拍板 1 个问题”这类标题，除非已经是最终收口问题。
+- **技术方案闭合**：会改变接口、依赖、验证方式、回滚方式、用户流程或风险边界的技术方案，必须先在需求澄清阶段[brainstorming]确认取舍轴和方案选择。
+- **拷问细化协议**：澄清必须按整体目标 → 大类/规划轴 → 范围切片 → 小项目/模块 → 行为细节 → 实现约束推进；每层要说明排除项、AC 影响、风险边界和验证影响。
+- **Grilling State**：拷问必须维护当前分支、当前唯一问题、上游依赖、推荐答案、用户决策和未闭合分支；不得最后补表伪造过程。
+- **Design Tree Coverage**：拷问必须覆盖目标、范围、行为、方案、验证、风险分支；任何 open 分支都会阻止进入 planning。
+- **事实与决策分离**：代码、文档、日志、git 和已有工件能查到的事实由 agent 自查；目标、优先级、范围、风险、质量和方案取舍由用户决策。
+- **Decision Trace / Grilling Summary**：重任务、重新规划类任务或明显方案分叉任务的 spec 必须记录决策轨迹和共享理解摘要；计划里的技术任务必须能追溯到该轨迹、AC 或 Constraints。
+- **Shared Understanding Gate**：用户明确确认共享理解前，不得把 spec 标为 Approved，不得进入 planning。
+- **计划目标与验证策略**：计划阶段[planning] 必须先写目标达成定义和验证策略，再拆任务，避免只推进小任务而无法判断整体完成。
+- **整体计划推进**：用户确认计划后，执行阶段[executing] 必须连续推进整个 PlanPacket；阶段、批次、小目标或单个任务完成不是“是否继续”的停机点。
+- **回路规则**：planning / executing 发现未澄清目标、范围、AC、技术取舍或风险边界时必须回到 brainstorming；verification 根据失败性质回到 executing、planning 或 brainstorming。
+- **验收前自检**：进入用户验收门禁[User Acceptance Gate] 前，必须逐项自检任务结果、评审报告、AC 覆盖、验证策略、范围漂移、质量门和残余风险；没有自检表不得询问用户是否接受。
 - **重新规划顺序**：重新规划、整体规划、重构规划、从头梳理或重新设计类任务，必须先从整体规划视角或大类划分开始，再进入小项目和细节。
-- **品质层级**：MVP 覆盖核心路径；精打磨覆盖主要边界和错误状态；生产级覆盖安全、权限、性能、兼容、观测、回滚/迁移和完整回归。
+- **品质层级**：机器枚举统一为 `mvp` / `polished` / `production`；用户可见显示为 MVP / 精打磨 / 生产级。MVP 覆盖核心路径；精打磨覆盖主要边界和错误状态；生产级覆盖安全、权限、性能、兼容、观测、回滚/迁移和完整回归。
 - **断点续传**：中断后重新触发时，agent 读取 ledger 的 Resume Checkpoint 判定是否可续传；可恢复错误自动重试 1 次。详见 `references/resume-protocol.md`。
 - **执行-验证循环**：同一 requirement 最多 2 轮；仍失败则进入 `blocked`、`partial` 或 `plan-revision`。
 - **证据强度**：强证据[`strong`] 才能标已满足[`Met`]；中等证据[`medium`] 最多部分完成[`Partial`]；弱证据[`weak`] / 过期证据[`stale`] 必须标未满足[`Not met`] 或受阻[`Blocked`]。
@@ -170,6 +211,15 @@ Task Driver 支持多 agent，但不依赖多 agent。
 
 ## 当前状态
 
-当前版本：v0.6.2
+当前版本：v0.6.3
 
-v0.6.2 将术语表提升为启动级门禁，并加严全局反例，确保用户可见输出优先使用 `中文显示名[英文标识]`，同时避免把机器契约误中文化。
+v0.6.3 新增契约一致性检查、packet 最小模板、30 秒 quick-start、lite/standard/strict 三条黄金路径和发布前自测清单。
+
+## 自测
+
+发布前运行：
+
+```bash
+scripts/check-contracts.sh
+git diff --check
+```

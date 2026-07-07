@@ -37,3 +37,9 @@
 - 错误：任务小、只是文档或测试改动，所以跳过 ReviewReport。
 - 违规：每个 PlanPacket task 都必须执行 Review Gate。
 - 回退：按风险调整深度，但必须写 ReviewReport。
+
+## 小目标完成后询问是否继续
+
+- 错误：完成 P0、某个批次或前几个任务后，展示进度表并问“下一步进入 P1，是否继续？”
+- 违规：approved plan 已经授权连续执行整个 PlanPacket；阶段性完成不是停机条件。
+- 回退：把进度写入 ledger，继续执行下一个 pending task；若全部任务完成，则立即进入 verification。

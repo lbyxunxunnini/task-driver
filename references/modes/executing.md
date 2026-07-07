@@ -4,6 +4,8 @@
 
 执行 approved plan，不重新发明需求。按任务推进，更新 ledger，边做边验证，只在定义的停机条件下回问。
 
+执行阶段的目标单位是整个 PlanPacket，不是单个优先级阶段、批次或小任务。只要 approved plan 中仍有 pending / in_progress 任务，且未命中停机条件，就必须继续推进下一个任务；不得在 “P0 完成”“前 5 项完成”“小目标完成” 之后询问用户是否继续。阶段性汇报只能作为进度更新，不能把继续执行责任转交给用户。
+
 ## 执行前检查
 
 编辑前必须：
@@ -20,7 +22,9 @@
    - 如果确实无法运行任何基线，必须在 ledger 记录原因、影响的证据强度、替代检查方式，并在执行前停机回问是否接受无 baseline 风险。
    - 未建立 baseline 且未获用户接受风险前，不得进入写入阶段。
 5. 检查 plan 是否有矛盾、缺失依赖或不可执行步骤。
-6. 确认执行模式。没有明确 subagent 工具时，使用 `single-agent`。
+   - 若矛盾来自目标、范围、AC、质量层级、共享理解、技术方案取舍或风险边界未澄清，必须回到 brainstorming。
+   - 若 spec 正确但任务顺序、文件映射、接口假设或验证命令错误，必须进入 plan-revision。
+6. 确认 `PlanPacket.execution_mode`。没有明确 subagent 工具时，使用 `single-agent`。
 
 ## 多 Agent 降级
 
@@ -38,11 +42,11 @@
 
 ### 有 subagent 时
 
-必须按 PlanPacket.mode 执行：
+必须按 `PlanPacket.execution_mode` 执行：
 
 - `multi-agent-review`：按 plan 将 Reviewer 或 Verifier 派给独立 agent；高风险、跨模块或用户要求复核的任务不得退回 single-agent，除非 subagent 工具不可用，并记录降级原因。
-- `multi-agent-parallel`：只有 PlanPacket 明确允许并行，且任务文件集合不重叠、合并规则和最终验证命令已定义时才可并行派发 Implementer。
-- 若执行阶段发现 PlanPacket.mode 与当前工具能力不一致，必须更新 ledger 并触发 plan-revision 或停机回问，不得自行切换模式。
+- `multi-agent-parallel`：只有 `PlanPacket.execution_mode` 明确允许并行，且任务文件集合不重叠、合并规则和最终验证命令已定义时才可并行派发 Implementer。
+- 若执行阶段发现 `PlanPacket.execution_mode` 与当前工具能力不一致，必须更新 ledger 并触发 plan-revision 或停机回问，不得自行切换模式。不得把 `gate_mode` 当作执行形态。
 - 只把相关 packet 和必要文件路径交给 subagent。
 - 要求 subagent 返回 TaskResult 或 ReviewReport。
 - 不接受纯散文总结作为完成证据。
@@ -57,7 +61,8 @@
    - 如果步骤不可能执行，必须记录具体原因、受影响的任务/AC、已尝试的替代事实收集，并进入 `blocked` 或 `plan-revision`。
    - 如果步骤不安全，必须停止执行，说明风险类型、潜在影响和安全替代方案，并按停机回问模板让用户拍板。
    - 只有替代步骤不改变 AC、范围、风险边界和验证强度时，才可作为同任务内替代执行；替代步骤必须写入 ledger。
-   - 替代步骤改变 plan 假设时，必须触发 Plan Revision Protocol。
+	   - 替代步骤改变 plan 假设时，必须触发 Plan Revision Protocol。
+   - 如果执行中发现需要用户决定目标、范围、AC、质量层级、风险接受或技术方案取舍，必须停止当前任务并回到 brainstorming；不得边执行边替用户决定。
 3. 行为变化走 TDD：
    - 先写失败测试。
    - 运行并确认失败原因符合预期。
@@ -71,6 +76,12 @@
 7. 写 TaskResult packet，含 `task_id` (T-NNN) / `status` / `files_changed` / `commands_run` / `evidence` / `ac_coverage`。**`ac_coverage[]`** 逐项填写，`ac_id` 必须引用 SpecPacket 中的 `AC-N`；`covered` 取 `full / partial / none`；`evidence` 引用本轮 Evidence 条目。
 8. 做 Review Gate。
 9. 写 ReviewReport packet。
+
+完成一个任务后：
+
+- 若 PlanPacket 仍有未完成任务，更新 ledger 后继续下一个任务。
+- 若所有任务完成，立即进入 verification 阶段；验证前不得宣称完成、通过或可交付。
+- 只有命中停机条件、Scope Drift、Review Gate 阻塞、2 轮执行-验证循环退出、plan-revision 或用户明确暂停时，才允许停止连续推进。
 
 ## Scope Drift Detector
 
@@ -156,6 +167,7 @@ Critical 或 Important 问题阻塞继续。必须修复并复审后进入下一
 出现以下情况停下问用户：
 
 - plan 指令不清楚或不可执行。
+- 执行中暴露未澄清的目标、范围、AC、质量层级、技术方案取舍或风险边界。
 - 测试反复失败且根因未知。
 - 修复需要扩大 scope。
 - plan 要求和代码质量或安全冲突。
@@ -163,6 +175,8 @@ Critical 或 Important 问题阻塞继续。必须修复并复审后进入下一
 - 依赖、凭据、环境或外部服务阻塞，且无安全替代路径。
 
 不要为了总结进度而停。给简短进度更新，然后继续执行。
+
+禁止把阶段性完成当成停机条件。错误示例：`P0 阶段全部完成，当前进度 5/25，下一步进入 P1，是否继续？`。正确做法：记录 P0 证据和 ledger 状态，然后自动执行 P1 的第一个 pending task。
 
 ## 恢复规则
 
@@ -175,4 +189,4 @@ Critical 或 Important 问题阻塞继续。必须修复并复审后进入下一
 
 ## 完成移交
 
-所有 plan 任务完成后，进入 `verification` 阶段。验证前不得宣称完成。
+所有 plan 任务完成后，进入 `verification` 阶段。验证前不得宣称完成；最终验证和用户验收门前不得要求用户决定是否继续执行已批准计划。
