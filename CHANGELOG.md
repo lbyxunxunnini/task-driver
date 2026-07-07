@@ -1,5 +1,21 @@
 # Changelog
 
+## v0.7.0 (2026-07-07)
+
+### 改进
+
+- **术语表改为 JSON 格式**：`references/glossary.md` 改为 `references/glossary.json`，减少文件体积，便于程序解析。
+- **统一术语展示规则**：所有面向用户的英文术语（无论是否在 glossary 中有映射）都必须使用 `中文[英文]` 格式。
+- **Packet 展示富文本化**：新增"面向用户展示规则"，明确 SpecPacket、PlanPacket、TaskResult、ReviewReport、VerificationReport 展示时必须转换字段名和枚举值。
+- **新增反例**：新增"未映射术语裸用英文"和"Packet 展示裸用字段名"两类反例。
+
+### 修复
+
+- **grilling_state 展示**：从原始 YAML 改为富文本表格格式，同时保留机器契约 YAML 用于写入 ledger。
+- **Decision Trace 表头**：统一使用 `中文[英文]` 格式（如 `层级[layer]`、`决策点[decision_point]`）。
+- **Grilling Summary 字段**：统一使用 `中文[英文]` 格式（如 `共享理解[shared_understanding]`）。
+- **Design Tree Coverage 表头**：统一使用 `中文[英文]` 格式。
+
 ## v0.6.3 (2026-07-07)
 
 ### 新增

@@ -51,7 +51,28 @@
 
 ### Grilling State
 
-拷问不是一次性表格填写，而是一个交互状态机。进入 brainstorming 后，必须在对话或 ledger 中维护当前拷问状态：
+数据收集不是一次性表格填写，而是一个交互状态机。进入 brainstorming 后，必须在对话或 ledger 中维护当前数据收集状态。
+
+**面向用户展示格式**（富文本摘要）：
+
+```markdown
+---
+**数据收集[grilling_state]**
+
+| 字段 | 当前值 |
+|---|---|
+| 当前分支[current_branch] | 整体目标 |
+| 当前问题[current_question] | 确认解决问题的优先级和约束 |
+| 已闭合决策[upstream_decisions] | 无 / [just_audio 可用性已确认] |
+| 依赖关系[dependency] | 无 / 整体目标已闭合 |
+| 推荐答案[recommended_answer] | 选项 1（用 just_audio 替代） |
+| 用户决策[user_decision] | 待处理[pending] / 选项 1（已确认） |
+| 未闭合分支[unresolved_branches] | [整体目标, 范围切片, 技术方案] |
+| 共享理解[shared_understanding] | 否[false] |
+---
+```
+
+**机器契约格式**（写入 ledger 或 spec 时使用）：
 
 ```yaml
 grilling_state:
@@ -214,19 +235,19 @@ design_tree:
 [架构、流程、UI/API 行为、数据流或内容结构]
 
 ## Decision Trace
-| 层级 | 决策点 | 选项摘要 | 用户/assumption 决策 | 对范围/验收/风险/验证的影响 |
+| 层级[layer] | 决策点[decision_point] | 选项摘要[options] | 用户决策[user_decision] | 对范围/验收/风险/验证的影响[impact] |
 |---|---|---|---|---|
 | 整体目标 | [问题] | [2-3 个选项] | [用户选择或 ASM-N] | [影响] |
 | 大类/规划轴 | ... | ... | ... | ... |
 
 ## Grilling Summary
-- shared_understanding: true | false
-- unresolved_branches: [无 / 列出剩余分支及为什么不阻塞]
-- key_tradeoffs: [关键取舍]
-- rejected_paths: [明确拒绝的方向]
+- 共享理解[shared_understanding]: true | false
+- 未闭合分支[unresolved_branches]: [无 / 列出剩余分支及为什么不阻塞]
+- 关键取舍[key_tradeoffs]: [关键取舍]
+- 拒绝方向[rejected_paths]: [明确拒绝的方向]
 
 ## Design Tree Coverage
-| 分支 ID | 分支 | 上游依赖 | 层级 | 状态 | 决策引用 | 阻塞项 |
+| 分支 ID[branch_id] | 分支[name] | 上游依赖[parent] | 层级[layer] | 状态[status] | 决策引用[decision_ref] | 阻塞项[blocks] |
 |---|---|---|---|---|---|---|
 | B1 | [分支名] | [root/B-N] | [层级] | decided/deferred/out_of_scope/open | [Decision Trace/ASM-N] | [B-N 或无] |
 

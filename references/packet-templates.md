@@ -1,6 +1,101 @@
 # Packet Templates
 
-这些是最小合法 packet 模板。字段名和枚举值是机器契约，必须保持英文；用户可见解释可按 `references/glossary.md` 显示中文名。
+这些是最小合法 packet 模板。字段名和枚举值是机器契约，必须保持英文；用户可见解释可按 `references/glossary.json` 显示中文名。
+
+## 面向用户展示规则
+
+当 agent 向用户展示 packet 内容时，必须将英文字段名转换为 `中文[英文]` 格式。转换规则：
+
+1. **字段名转换**：`spec_path` → `需求规格路径[spec_path]`、`approved_by_user` → `用户已确认[approved_by_user]`
+2. **枚举值转换**：`status: approved` → `状态[status]: 已确认[approved]`、`quality_level: polished` → `质量层级[quality_level]: 精打磨[polished]`
+3. **布尔值保持**：`true`/`false` 保持原值，但字段名需转换
+4. **数组/对象**：内部字段同样需要转换
+
+**示例转换**：
+
+机器契约（写入 ledger/spec 时）：
+```yaml
+spec_packet:
+  spec_path: docs/task-driver/specs/2026-07-07--migrate.md
+  goal: "解决鸿蒙端播放问题"
+  quality_level: polished
+  approved_by_user: true
+  status: approved
+```
+
+面向用户展示：
+```markdown
+**需求规格交接包[SpecPacket]**
+
+| 字段 | 值 |
+|---|---|
+| 需求规格路径[spec_path] | docs/task-driver/specs/2026-07-07--migrate.md |
+| 目标[goal] | 解决鸿蒙端播放问题 |
+| 质量层级[quality_level] | 精打磨[polished] |
+| 用户已确认[approved_by_user] | true |
+| 状态[status] | 已确认[approved] |
+```
+
+**PlanPacket 展示示例**：
+
+机器契约：
+```yaml
+plan_packet:
+  plan_path: docs/task-driver/plans/2026-07-07--migrate.md
+  ledger_path: docs/task-driver/ledgers/2026-07-07--migrate.md
+  gate_mode: standard
+  execution_mode: single-agent
+  quality_level: polished
+  status: draft
+  plan_version: v1
+  tasks:
+    - id: T-001
+      name: 修改 audio_preview_mixin.dart
+      files: [lib/common/mixins/audio_preview_mixin.dart]
+      acceptance: [AC-1, AC-2, AC-3, AC-4]
+```
+
+面向用户展示：
+```markdown
+**计划交接包[PlanPacket]**
+
+**基本信息**
+| 字段 | 值 |
+|---|---|
+| 计划路径[plan_path] | docs/task-driver/plans/2026-07-07--migrate.md |
+| 执行台账路径[ledger_path] | docs/task-driver/ledgers/2026-07-07--migrate.md |
+| 目标ID[target_id] | fix-ohos-audio-preview-2026-07-07 |
+| 目标[goal] | 用 just_audio 替代 audioplayers，解决鸿蒙端音色试听播放失败问题 |
+| 门禁模式[gate_mode] | 标准模式[standard] |
+| 执行模式[execution_mode] | 单智能体模式[single-agent] |
+| 质量层级[quality_level] | 精打磨[polished] |
+| 状态[status] | 草稿[draft] |
+| 计划版本[plan_version] | v1 |
+
+**任务列表[tasks]**
+| 任务ID | 名称 | 文件 | 验收标准 |
+|---|---|---|---|
+| T-001 | 修改 audio_preview_mixin.dart | lib/common/mixins/audio_preview_mixin.dart | AC-1, AC-2, AC-3, AC-4 |
+| T-002 | 修改 timbre_audio_preview_mixin.dart | lib/screens/timbre/utils/timbre_audio_preview_mixin.dart | AC-1, AC-2, AC-3, AC-4 |
+| ... | ... | ... | ... |
+
+**验证策略[verification_strategy]**
+| 类型 | 命令 | 覆盖标准 | 证据强度 |
+|---|---|---|---|
+| 静态分析 | flutter analyze --no-fatal-infos --no-fatal-warnings | AC-5 | 强证据[strong] |
+| 真机测试 | - | AC-1, AC-2, AC-3, AC-4 | 强证据[strong] |
+
+**停机条件[stop_conditions]**
+- 如果 just_audio_ohos 在鸿蒙端不可用
+- 如果状态模型适配遗漏
+- 如果静态分析有错误
+
+**假设[assumptions]**
+| ID | 内容 | 验证方式 |
+|---|---|---|
+| ASM-1 | just_audio_ohos 已集成且可用 | T-010 真机测试 |
+| ASM-2 | 状态模型适配可行 | T-007, T-008 静态分析 |
+```
 
 ## SpecPacket
 

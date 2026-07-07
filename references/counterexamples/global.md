@@ -5,20 +5,32 @@
 ## 面向用户输出使用英文原值
 
 - 错误：完成审计表、质量评分表等面向用户的输出中，状态值、证据强度、维度名直接使用英文原值（如 `Met`、`Partial`、`strong`、`Correctness`），未按 glossary 规则翻译。
-- 违规：违反 glossary.md "面向用户输出时，优先使用中文显示名"规则，所有面向用户的输出必须使用 `中文显示名[英文标识]` 格式。每个阶段视为独立上下文：同一阶段内首次出现使用完整 `中文[英文]` 格式，后续可只用中文显示名。
-- 回退：逐项检查输出中的协议标识、状态值、字段名；glossary.md 已收录的直接替换为 `中文[英文]`；未收录的由 agent 自行翻译后使用 `中文[英文]` 格式输出。
+- 违规：违反 glossary.json "面向用户输出时，优先使用中文显示名"规则，所有面向用户的输出必须使用 `中文显示名[英文标识]` 格式。每个阶段视为独立上下文：同一阶段内首次出现使用完整 `中文[英文]` 格式，后续可只用中文显示名。
+- 回退：逐项检查输出中的协议标识、状态值、字段名；glossary.json 已收录的直接替换为 `中文[英文]`；未收录的由 agent 自行翻译后使用 `中文[英文]` 格式输出。
+
+## 未映射术语裸用英文
+
+- 错误：面向用户输出中出现 glossary.json 未收录的英文术语（如 `Design Tree Coverage`、`Grilling State`、`SpecPacket`），直接使用英文原值，未使用 `中文[英文]` 格式。
+- 违规：用户可见输出术语门禁要求所有英文术语（无论是否在 glossary 中有映射）首次出现时使用 `中文[英文]` 格式。不能以"glossary 中没有映射"为由裸用英文。
+- 回退：立即将裸用的英文术语改为 `中文[英文]` 格式（如 `设计树覆盖[Design Tree Coverage]`、`数据收集[Grilling State]`），然后继续任务。
+
+## Packet 展示裸用字段名
+
+- 错误：向用户展示 SpecPacket、PlanPacket、TaskResult、ReviewReport 或 VerificationReport 时，字段名直接使用英文原值（如 `spec_path`、`approved_by_user`、`status`、`quality_level`），未转换为 `中文[英文]` 格式。
+- 违规：Packet 是机器契约，但面向用户展示时必须转换字段名和枚举值。`spec_path` 应显示为 `需求规格路径[spec_path]`，`approved_by_user` 应显示为 `用户已确认[approved_by_user]`，`status: approved` 应显示为 `状态[status]: 已确认[approved]`。
+- 回退：停止当前输出，按 `references/packet-templates.md` 的"面向用户展示规则"重新格式化 packet 内容，然后继续任务。
 
 ## 阶段进度说明裸用英文阶段名
 
 - 错误：面向用户说“进入 brainstorming 阶段”“补读 planning 协议”“进入 verification”或“执行 executing 阶段”，未使用中文显示名。
 - 违规：阶段名属于面向用户的模式名/阶段名，必须按 glossary 使用 `需求澄清阶段[brainstorming]`、`计划阶段[planning]`、`执行阶段[executing]`、`验证阶段[verification]`。中间进度更新、阶段切换说明和停机回问都属于用户可见输出。
-- 回退：停止继续推进，读取 `references/glossary.md`，重述当前阶段和后续动作；之后同一回复内可只用中文显示名。
+- 回退：停止继续推进，读取 `references/glossary.json`，重述当前阶段和后续动作；之后同一回复内可只用中文显示名。
 
 ## 解释协议或阶段前未读取术语表
 
-- 错误：在未读取 `references/glossary.md` 的情况下，向用户解释 spec、plan、ledger、packet、brainstorming、planning、executing、verification、strict、standard、lite 等协议、阶段或模式。
-- 违规：触发术语显示规则但未加载术语表，导致中文显示名不稳定。`references/glossary.md` 是任务启动后、首次面向用户输出阶段/协议/状态/字段/模式说明前的 P0 必读文件。
-- 回退：立即读取 `references/glossary.md`；重新输出用户可见说明。机器契约、路径、YAML/JSON key、枚举值、命令和代码块保持英文原值。
+- 错误：在未读取 `references/glossary.json` 的情况下，向用户解释 spec、plan、ledger、packet、brainstorming、planning、executing、verification、strict、standard、lite 等协议、阶段或模式。
+- 违规：触发术语显示规则但未加载术语表，导致中文显示名不稳定。`references/glossary.json` 是任务启动后、首次面向用户输出阶段/协议/状态/字段/模式说明前的 P0 必读文件。
+- 回退：立即读取 `references/glossary.json`；重新输出用户可见说明。机器契约、路径、YAML/JSON key、枚举值、命令和代码块保持英文原值。
 
 ## 把机器契约中文化
 

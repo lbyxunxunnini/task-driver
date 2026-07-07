@@ -52,7 +52,7 @@ task-driver/
   VERSION
   references/
     quick-start.md
-    glossary.md
+    glossary.json
     packet-contract.md
     packet-templates.md
     runtime-protocols.md
@@ -114,7 +114,7 @@ task-driver
 长协议已拆到 `references/`，根 `SKILL.md` 只保留入口、硬门禁和读取索引：
 
 - `references/quick-start.md`：30 秒使用判断、门禁模式选择和最终交付最低要求。
-- `references/glossary.md`：中文显示名和术语表。
+- `references/glossary.json`：中文显示名和术语表。
 - `references/packet-contract.md`：Packet schema、状态机、跨引用、证据强度。
 - `references/packet-templates.md`：5 类 packet 的最小合法 YAML 模板。
 - `references/runtime-protocols.md`：Red Flags、TDD 例外、循环退出、Plan Revision、User Acceptance Gate。
@@ -123,7 +123,7 @@ task-driver
 - `references/error-templates.md`：停机、验证失败、循环退出、范围漂移、阻塞模板。
 - `references/walkthroughs/`：lite、standard、strict 三条黄金路径。
 
-根 `SKILL.md` 按 P0/P1/P2 读取优先级加载引用文件，避免每次任务读取全部 references。`references/glossary.md` 是用户可见输出的启动级必读文件：首次说明阶段、协议、状态、字段或模式前必须读取。
+根 `SKILL.md` 按 P0/P1/P2 读取优先级加载引用文件，避免每次任务读取全部 references。`references/glossary.json` 是用户可见输出的启动级必读文件：首次说明阶段、协议、状态、字段或模式前必须读取。
 
 ## 最短流程
 
@@ -211,9 +211,9 @@ Task Driver 支持多 agent，但不依赖多 agent。
 
 ## 当前状态
 
-当前版本：v0.6.3
+当前版本：v0.7.0
 
-v0.6.3 新增契约一致性检查、packet 最小模板、30 秒 quick-start、lite/standard/strict 三条黄金路径和发布前自测清单。
+v0.7.0 术语表改为 JSON 格式、packet 展示统一使用中文[英文]格式、新增未映射术语和 packet 展示反例。
 
 ## 自测
 
