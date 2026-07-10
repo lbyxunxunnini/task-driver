@@ -16,7 +16,7 @@
 机器契约（写入 ledger/spec 时）：
 ```yaml
 spec_packet:
-  spec_path: docs/task-driver/specs/2026-07-07--migrate.md
+  spec_path: .task-driver/specs/20260707-1200-migrate.md
   goal: "解决鸿蒙端播放问题"
   quality_level: polished
   approved_by_user: true
@@ -29,7 +29,7 @@ spec_packet:
 
 | 字段 | 值 |
 |---|---|
-| 需求规格路径[spec_path] | docs/task-driver/specs/2026-07-07--migrate.md |
+| 需求规格路径[spec_path] | .task-driver/specs/20260707-1200-migrate.md |
 | 目标[goal] | 解决鸿蒙端播放问题 |
 | 质量层级[quality_level] | 精打磨[polished] |
 | 用户已确认[approved_by_user] | true |
@@ -41,8 +41,8 @@ spec_packet:
 机器契约：
 ```yaml
 plan_packet:
-  plan_path: docs/task-driver/plans/2026-07-07--migrate.md
-  ledger_path: docs/task-driver/ledgers/2026-07-07--migrate.md
+  plan_path: .task-driver/plans/20260707-1200-migrate.md
+  ledger_path: .task-driver/ledgers/20260707-1200-migrate.md
   gate_mode: standard
   execution_mode: single-agent
   quality_level: polished
@@ -62,8 +62,8 @@ plan_packet:
 **基本信息**
 | 字段 | 值 |
 |---|---|
-| 计划路径[plan_path] | docs/task-driver/plans/2026-07-07--migrate.md |
-| 执行台账路径[ledger_path] | docs/task-driver/ledgers/2026-07-07--migrate.md |
+| 计划路径[plan_path] | .task-driver/plans/20260707-1200-migrate.md |
+| 执行台账路径[ledger_path] | .task-driver/ledgers/20260707-1200-migrate.md |
 | 目标ID[target_id] | fix-ohos-audio-preview-2026-07-07 |
 | 目标[goal] | 用 just_audio 替代 audioplayers，解决鸿蒙端音色试听播放失败问题 |
 | 门禁模式[gate_mode] | 标准模式[standard] |
@@ -101,12 +101,16 @@ plan_packet:
 
 ```yaml
 spec_packet:
-  spec_path: docs/task-driver/specs/YYYY-MM-DD--slug.md | inline
+  spec_path: .task-driver/specs/YYYYMMDD-HHmm-主题.md | inline
   goal: "[一句话目标]"
   target:
     target_id: "[slug]"
     target_statement: "[外部可观察目标]"
     success_definition: "[完成状态，必须映射到 AC 和最终验证]"
+    scope_denominator:
+      - "[目标单元，例如模块/文件族/命令/配置/测试/文档/用户路径/阶段]"
+    target_principles:
+      - "[冲突取舍原则，例如完整性优先于速度]"
     quality_level: mvp | polished | production
     stop_or_loop_conditions: "[失败、partial、plan-revision、brainstorming 回路条件]"
   decision_trace:
@@ -143,16 +147,29 @@ spec_packet:
 
 ```yaml
 plan_packet:
-  plan_path: docs/task-driver/plans/YYYY-MM-DD--slug.md | inline
-  ledger_path: docs/task-driver/ledgers/YYYY-MM-DD--slug.md | inline
+  plan_path: .task-driver/plans/YYYYMMDD-HHmm-主题.md | inline
+  ledger_path: .task-driver/ledgers/YYYYMMDD-HHmm-主题.md | inline
   plan_version: v1
   predecessor: 无
   gate_mode: strict | standard | lite
   execution_mode: single-agent | multi-agent-review | multi-agent-parallel | degraded-single-skill
+  target_coverage_matrix:
+    - target_unit: "[scope_denominator 中的目标单元]"
+      task_ids: [T-001]
+      verification_refs: [AC-1]
+      status: planned
+  decomposition_strategy:
+    axis: 阶段 | 模块 | 风险 | 用户路径 | 产物类型 | 协议层级 | 问题类型
+    levels: "[Phase -> Task -> Step -> Verification]"
+    outputs: "[每层产物]"
+    verification_by_level: "[每层验收方式]"
+    granularity_floor: "文件 + 行为/内容变化 + AC 引用 + 功能级验证"
   tasks:
     - id: T-001
       owner_role: Implementer
       objective: "[必须追溯到 target_id、Decision Trace、AC 或 Constraints]"
+      target_units:
+        - "[目标单元]"
       files:
         - path/to/file
       verification:
@@ -215,14 +232,22 @@ verification_report:
       evidence_ref: EV-1
       evidence_strength: strong | medium | weak | stale
       status: met | partial | not_met | blocked
+  target_coverage:
+    - target_unit: "[目标单元]"
+      task_ref: T-001
+      evidence_ref: EV-1
+      evidence_strength: strong | medium | weak | stale
+      status: met | partial | not_met | blocked
   pre_acceptance_self_check:
     plan_tasks: pass | partial | fail
     review_reports: pass | partial | fail
     ac_coverage: pass | partial | fail
+    target_coverage: pass | partial | fail
     verification_strategy: pass | partial | fail
     scope_drift: pass | fail
     quality_gate: pass | N/A | fail
     residual_risk: pass | partial | fail
+    self_test_improve_loop: pass | partial | fail
   unmet_requirements: []
   delivery_acknowledged_by_user: pending
   quality_score:

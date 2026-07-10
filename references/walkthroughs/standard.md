@@ -18,12 +18,14 @@ tdr- 修复 CLI --json 输出空数组时格式错误的问题，从复现到验
 
 ```yaml
 spec_packet:
-  spec_path: docs/task-driver/specs/2026-07-07--cli-json-empty-array.md
+  spec_path: .task-driver/specs/20260707-1200-cli-json-empty-array.md
   goal: "修复 CLI --json 空数组输出格式"
   target:
     target_id: cli-json-empty-array
     target_statement: "CLI 在空结果下输出合法 JSON 数组。"
     success_definition: "AC-1 到 AC-4 均有 strong fresh evidence。"
+    scope_denominator: ["空结果 JSON 输出", "JSON.parse 可解析性", "非空 JSON 回归", "默认文本输出回归"]
+    target_principles: ["最小行为修复优先", "不改变错误输出和 formatter 架构"]
     quality_level: polished
     stop_or_loop_conditions: "复现不成立回到 brainstorming；测试路径错误回到 planning；实现缺陷回到 executing。"
   decision_trace:
@@ -73,22 +75,47 @@ spec_packet:
 
 ```yaml
 plan_packet:
-  plan_path: docs/task-driver/plans/2026-07-07--cli-json-empty-array.md
-  ledger_path: docs/task-driver/ledgers/2026-07-07--cli-json-empty-array.md
+  plan_path: .task-driver/plans/20260707-1200-cli-json-empty-array.md
+  ledger_path: .task-driver/ledgers/20260707-1200-cli-json-empty-array.md
   plan_version: v1
   predecessor: 无
   gate_mode: standard
   execution_mode: single-agent
+  target_coverage_matrix:
+    - target_unit: "空结果 JSON 输出"
+      task_ids: [T-001, T-002]
+      verification_refs: [AC-1]
+      status: planned
+    - target_unit: "JSON.parse 可解析性"
+      task_ids: [T-001, T-002]
+      verification_refs: [AC-2]
+      status: planned
+    - target_unit: "非空 JSON 回归"
+      task_ids: [T-002]
+      verification_refs: [AC-3]
+      status: planned
+    - target_unit: "默认文本输出回归"
+      task_ids: [T-002]
+      verification_refs: [AC-4]
+      status: planned
+  decomposition_strategy:
+    axis: 用户路径
+    levels: "Task -> Step -> Verification"
+    outputs: "失败测试、formatter 修复、回归验证"
+    verification_by_level: "CLI JSON 测试、formatter 回归测试"
+    granularity_floor: "文件 + 行为变化 + AC 引用 + 功能级测试"
   tasks:
     - id: T-001
       owner_role: Implementer
       objective: "新增空数组 JSON 失败测试"
+      target_units: ["空结果 JSON 输出", "JSON.parse 可解析性"]
       files: [tests/cli-json.test.ts]
       verification: ["npm test -- cli-json"]
       acceptance_ac_ids: [AC-1, AC-2]
     - id: T-002
       owner_role: Implementer
       objective: "修复 formatter 空结果分支"
+      target_units: ["空结果 JSON 输出", "JSON.parse 可解析性", "非空 JSON 回归", "默认文本输出回归"]
       files: [src/cli.ts, src/formatters/json.ts]
       verification: ["npm test -- cli-json", "npm test -- formatter"]
       acceptance_ac_ids: [AC-1, AC-2, AC-3, AC-4]
@@ -166,14 +193,37 @@ verification_report:
       evidence_ref: EV-2
       evidence_strength: strong
       status: met
+  target_coverage:
+    - target_unit: "空结果 JSON 输出"
+      task_ref: T-002
+      evidence_ref: EV-1
+      evidence_strength: strong
+      status: met
+    - target_unit: "JSON.parse 可解析性"
+      task_ref: T-002
+      evidence_ref: EV-1
+      evidence_strength: strong
+      status: met
+    - target_unit: "非空 JSON 回归"
+      task_ref: T-002
+      evidence_ref: EV-1
+      evidence_strength: strong
+      status: met
+    - target_unit: "默认文本输出回归"
+      task_ref: T-002
+      evidence_ref: EV-2
+      evidence_strength: strong
+      status: met
   pre_acceptance_self_check:
     plan_tasks: pass
     review_reports: pass
     ac_coverage: pass
+    target_coverage: pass
     verification_strategy: pass
     scope_drift: pass
     quality_gate: pass
     residual_risk: pass
+    self_test_improve_loop: pass
   unmet_requirements: []
   delivery_acknowledged_by_user: pending
   quality_score:

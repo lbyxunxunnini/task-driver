@@ -50,7 +50,7 @@ Agent 先读取相关文件，了解当前实现：
 
 ### 产出 Spec
 
-Agent 生成 `docs/task-driver/specs/2026-07-03--cli-verbose-flag.md`：
+Agent 生成 `.task-driver/specs/20260703-1200-cli-verbose-flag.md`：
 
 ```markdown
 # CLI --verbose Flag Spec
@@ -66,6 +66,15 @@ CLI 工具支持 --verbose flag，开启后输出调试级日志到控制台。
 - target_id: cli-verbose-flag
 - target_statement: CLI 在用户启用 verbose 时输出调试信息，默认模式不输出调试信息。
 - success_definition: AC-1 到 AC-5 均有 strong fresh evidence，且无未关闭 Critical/Important review finding。
+- scope_denominator:
+  - --verbose 调试输出路径
+  - 默认模式无调试输出路径
+  - -v 短参数路径
+  - 错误输出回归路径
+  - help 文案路径
+- target_principles:
+  - 最小用户路径优先，不扩大到完整日志系统
+  - CLI 可见行为验证优先于文本写入检查
 - quality_level: polished
 - stop_or_loop_conditions: AC 或验证策略错误回到 brainstorming；文件映射或任务顺序错误回到 planning；实现缺陷回到 executing。
 
@@ -138,7 +147,7 @@ Agent 自检 spec 无占位、无矛盾、Decision Trace 已闭合、Grilling Su
 
 ### 产出 Plan 和 Ledger
 
-Agent 生成 `docs/task-driver/plans/2026-07-03--cli-verbose-flag.md`：
+Agent 生成 `.task-driver/plans/20260703-1200-cli-verbose-flag.md`：
 
 ```markdown
 # CLI --verbose Flag Implementation Plan
@@ -148,6 +157,21 @@ Agent 生成 `docs/task-driver/plans/2026-07-03--cli-verbose-flag.md`：
 
 ## Success Definition
 - AC-1 到 AC-5 均有 fresh 命令证据覆盖，`--verbose` / `-v` 输出调试信息，默认模式不输出调试信息，现有错误输出和 help 行为保持正确。
+
+## Target Coverage Matrix
+| 目标单元[target_unit] | 计划任务[task] | 验证项[verification] | 状态[status] |
+|---|---|---|---|
+| --verbose 调试输出路径 | T-001, T-002 | AC-1 | planned |
+| 默认模式无调试输出路径 | T-001, T-002 | AC-2 | planned |
+| -v 短参数路径 | T-002 | AC-3 | planned |
+| 错误输出回归路径 | T-003 | AC-4 | planned |
+| help 文案路径 | T-002 | AC-5 | planned |
+
+## Decomposition Strategy
+- 拆解轴：用户路径
+- 拆解层级：Task -> Step -> Verification
+- 每层产物：logger 行为、CLI 参数行为、端到端命令验证
+- 粒度下限：文件 + CLI 可见行为 + AC 引用 + 功能级命令验证
 
 ## Verification Strategy
 - 单元测试覆盖 logger 级别过滤和 CLI 参数解析，证据强度为 strong。
@@ -203,7 +227,7 @@ node dist/cli.js --help | grep verbose      # AC-5
 - 改动超出 src/logger.ts 和 src/cli.ts
 ```
 
-Agent 同时创建 `docs/task-driver/ledgers/2026-07-03--cli-verbose-flag.md`。
+Agent 同时创建 `.task-driver/ledgers/20260703-1200-cli-verbose-flag.md`。
 
 ## 阶段 3：Executing（执行）
 
@@ -280,7 +304,7 @@ quality_score:
 
 ### User Acceptance Gate
 
-Agent 先输出验收前自检表，确认 Plan tasks、Review reports、AC coverage、Verification strategy、Scope drift、Quality gate 和 Residual risk 无 fail，再输出最终报告并等待用户确认。用户回复确认后，状态更新为 `accepted_by_user`。
+Agent 先输出验收前自检表，确认 Plan tasks、Review reports、AC coverage、Target coverage、Verification strategy、Scope drift、Quality gate、Residual risk 和 Self-test improve loop 无 fail，再输出最终报告并等待用户确认。用户回复确认后，状态更新为 `accepted_by_user`。
 
 ## 关键要点
 

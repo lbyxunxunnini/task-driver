@@ -61,3 +61,27 @@
 - 错误：Design Tree Coverage 中验证策略或风险分支仍是 open，plan 已经开始拆任务。
 - 违规：open 分支代表仍有会影响 AC、风险或验证的未决问题；planning 不能替用户默认。
 - 回退：回到 brainstorming 关闭 open 分支，或明确 deferred / out_of_scope 并说明影响。
+
+## Phase 包装成任务
+
+- 错误：plan 写 `Phase 1：补齐目标治理`、`Phase 2：优化流程`，每个 Phase 只有文件列表和一句成功外观。
+- 违规：Phase 是组织层级，不是可执行任务；执行者无法知道具体行为、AC、验证和停机条件。
+- 回退：拆到 Task T-NNN，每个任务包含目标单元、文件、行为/内容变化、AC 引用、功能级验证和 Review Gate。
+
+## 产物名替代设计决策
+
+- 错误：`为 stage2 建立 cover-quality-rubric.md`，但没有说明 Rubric 的评价对象、维度、评分尺度、阈值、证据来源和失败反例。
+- 违规：文件名不是设计决策，评价模型会改变验收口径，必须在 brainstorming 闭合。
+- 回退：回到 brainstorming 确认评价模型；确认后再写计划任务。
+
+## 缺少目标覆盖矩阵
+
+- 错误：目标是“全部整改”，plan 只列任务，没有把 scope_denominator 的每个目标单元映射到 T-NNN 和验证项。
+- 违规：无法防止 100% 目标实际只做 30%。
+- 回退：补 Target Coverage Matrix；任何未覆盖目标单元都是 Critical 缺口。
+
+## 只有文件列表没有子问题拆解
+
+- 错误：plan 写“修改各阶段 SKILL.md”，但没有说明每个阶段要解决的问题、行为变化和验证方式。
+- 违规：文件列表不能证明拆解深度，也不能指导执行和评审。
+- 回退：按拆解轴继续拆成可验证任务；若子问题会影响目标、AC 或验证，回到 brainstorming。

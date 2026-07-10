@@ -34,7 +34,7 @@
 
 ## 把机器契约中文化
 
-- 错误：为了遵守中文显示名，把 YAML key、JSON key、枚举值、命令、文件路径或代码块里的 `status`、`mode`、`accepted_by_user`、`docs/task-driver/...` 改成中文。
+- 错误：为了遵守中文显示名，把 YAML key、JSON key、枚举值、命令、文件路径或代码块里的 `status`、`mode`、`accepted_by_user`、`.task-driver/...` 改成中文。
 - 违规：glossary 只约束面向用户的显示方式，不允许修改机器契约。机器契约必须保持英文原值，否则会破坏 packet、脚本、路径或验证命令。
 - 回退：恢复机器契约英文原值；只在代码块外、表格说明或自然语言解释中使用中文显示名。
 
@@ -61,3 +61,21 @@
 - 错误：只按任务清单推进，没有 `target_id`、目标陈述、完成定义和回路条件。
 - 违规：后续计划、执行、验证无法判断是否围绕同一目标完成。
 - 回退：回到 brainstorming 补 Target，并让 plan / ledger / verification 引用同一 target_id。
+
+## 目标分母缺失
+
+- 错误：使用“全部 / 完整 / 100% / 迁移 / 覆盖”描述目标，但没有列出模块、文件族、命令、配置、测试、文档、用户路径或阶段分母。
+- 违规：没有 scope_denominator 就无法证明完整性，也无法判定是否偷懒。
+- 回退：回到 brainstorming 确认范围分母和完成判定。
+
+## 静默降低目标
+
+- 错误：目标是“完整迁移 / 100% 覆盖 / 全部整改”，执行中只完成一部分，最终报告改成“核心完成”或“主要完成”。
+- 违规：目标降级必须用户明确批准，并写入 Decision Trace、ledger Decisions 和 VerificationReport.unmet_requirements[]。
+- 回退：停止完成声明；按目标分母补齐覆盖矩阵，未覆盖项进入 executing、plan-revision、brainstorming 或 blocked。
+
+## 弱证据包装完成
+
+- 错误：用文件已创建、文本已写入、`rg` 命中或 diff 看起来正确，宣布功能、迁移、协议或流程已完成。
+- 违规：文件存在和文本命中默认是 weak evidence，不能支撑 met 或完成声明。
+- 回退：补功能级验证、样例任务、反例检查、端到端流程或明确证据强度上限；无法补强时标 partial / blocked。

@@ -38,6 +38,36 @@
 - 违规：自检是进入 User Acceptance Gate 的前置条件，不是用户追问后的补救动作。
 - 回退：撤回 awaiting_user_acceptance 状态，完成验收前自检和 VerificationReport 更新后，再决定是否重新进入 User Acceptance Gate。
 
+## 文件存在冒充功能完成
+
+- 错误：目标是新增功能、迁移流程或优化协议，验证只检查目标文件存在或新增文字存在。
+- 违规：文件存在只能证明写入，不能证明功能、流程或规则生效。
+- 回退：补功能级验证，例如测试、命令、样例任务、walkthrough、反例检查或人工审查表；无法补强时状态最多 partial / blocked。
+
+## 文本命中冒充契约通过
+
+- 错误：用 `rg "scope_denominator"` 或 `rg "Target Coverage"` 命中，就说目标门禁已完成。
+- 违规：文本存在不等于语义正确，也不证明门禁能拦住旧问题。
+- 回退：补语义级检查或反例样例，证明缺目标分母、Phase 粗拆、弱证据包装完成等问题会被拦截。
+
+## 只验证主路径
+
+- 错误：只验证正常路径或一个成功样例，忽略错误路径、边界、反例、目标分母剩余单元。
+- 违规：精打磨和生产级任务不能用主路径证据支撑完整完成；完整 / 100% 目标必须覆盖分母。
+- 回退：补边界验证、反例验证和 Target coverage；无法补齐时标 partial / blocked。
+
+## 自检循环假闭环
+
+- 错误：自检发现问题后只改文字，再跑同一个粗检查并宣布闭环。
+- 违规：没有证明原问题类型被消除，自检优化循环没有复验证据。
+- 回退：记录 finding、route、fix、recheck 和 evidence_strength；用功能级证据或反例样例证明问题已消除。
+
+## 未覆盖目标单元仍请求验收
+
+- 错误：VerificationReport.coverage 覆盖了部分 AC，但 scope_denominator 中仍有目标单元没有 target_coverage，就进入 User Acceptance Gate。
+- 违规：目标覆盖是验收前自检的一部分；未覆盖目标单元不得请求用户验收完整交付。
+- 回退：回到 executing、plan-revision、brainstorming 或 blocked；补齐 target_coverage 后再判断是否可验收。
+
 ## 失败后默认回执行
 
 - 错误：验证失败后直接继续改代码，没有判断是 executing、blocked、partial、plan-revision 还是 brainstorming。

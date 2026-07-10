@@ -8,7 +8,7 @@ Packet schema 单点定义在本文。阶段参考只声明本阶段产出哪种
 |---|---|---|---|---|
 | spec_path | string | yes | - | spec 文件路径 |
 | goal | string | yes | - | 一句话目标 |
-| target | object | yes | - | 目标定义；含 `{target_id, target_statement, success_definition, quality_level, stop_or_loop_conditions}`，后续 PlanPacket、TaskResult、VerificationReport 必须围绕同一目标推进 |
+| target | object | yes | - | 目标定义；含 `{target_id, target_statement, success_definition, scope_denominator, target_principles, quality_level, stop_or_loop_conditions}`，后续 PlanPacket、TaskResult、VerificationReport 必须围绕同一目标推进 |
 | decision_trace | array<object> | yes | - | 决策轨迹；元素含 `{layer, decision_point, options_summary, decision, impact}`，按整体目标 -> 大类/规划轴 -> 范围切片 -> 小项目/模块 -> 行为细节 -> 实现约束记录已闭合层级 |
 | grilling_summary | object | yes | - | 拷问摘要；含 `{shared_understanding, unresolved_branches, key_tradeoffs, rejected_paths}`；`shared_understanding` 必须为 true 才能进入 planning |
 | design_tree_coverage | array<object> | yes | - | 设计树覆盖；元素含 `{branch_id, name, parent, layer, status, decision_ref, blocks}`；不得存在 `open` 分支 |
@@ -28,7 +28,9 @@ Packet schema 单点定义在本文。阶段参考只声明本阶段产出哪种
 | predecessor | string | no | - | 前序 plan 路径；首版填“无” |
 | gate_mode | enum | yes | strict / standard / lite | 门禁强度；只决定 Review Gate、质量评分、反例门禁和模板粒度 |
 | execution_mode | enum | yes | single-agent / multi-agent-review / multi-agent-parallel / degraded-single-skill | agent 执行形态；只决定是否使用 subagent / parallel agent |
-| tasks | array<object> | yes | - | 元素含 `{id: T-NNN, owner_role, objective, files, verification, acceptance_ac_ids}`；id 必填且唯一 |
+| target_coverage_matrix | array<object> | yes | - | 元素含 `{target_unit, task_ids, verification_refs, status}`；必须覆盖 SpecPacket.target.scope_denominator 中全部目标单元 |
+| decomposition_strategy | object | yes | - | 含 `{axis, levels, outputs, verification_by_level, granularity_floor}`；说明为什么这样拆以及任务粒度下限 |
+| tasks | array<object> | yes | - | 元素含 `{id: T-NNN, owner_role, objective, target_units, files, verification, acceptance_ac_ids}`；id 必填且唯一 |
 | stop_conditions | array<string> | yes | - | 触发停机的条件 |
 | status | enum | yes | draft / approved / superseded | 同上 |
 
@@ -60,7 +62,8 @@ Packet schema 单点定义在本文。阶段参考只声明本阶段产出哪种
 | gate_mode | enum | yes | strict / standard / lite | 与 PlanPacket.gate_mode 一致 |
 | execution_mode | enum | yes | single-agent / multi-agent-review / multi-agent-parallel / degraded-single-skill | 与 PlanPacket.execution_mode 一致 |
 | coverage | array<object> | yes | - | 元素 `{ac_id: AC-N, evidence_ref, evidence_strength, status: met / partial / not_met / blocked}`；ac_id 必须引用 SpecPacket.acceptance_criteria[].id |
-| pre_acceptance_self_check | object | yes | - | 验收前自检；含 Plan tasks、Review reports、AC coverage、Verification strategy、Scope drift、Quality gate、Residual risk 的结果和证据；无 fail 才能进入 User Acceptance Gate |
+| target_coverage | array<object> | yes | - | 元素 `{target_unit, task_ref, evidence_ref, evidence_strength, status}`；必须覆盖 scope_denominator |
+| pre_acceptance_self_check | object | yes | - | 验收前自检；含 Plan tasks、Review reports、AC coverage、Target coverage、Verification strategy、Scope drift、Quality gate、Residual risk、Self-test improve loop 的结果和证据；无 fail 才能进入 User Acceptance Gate |
 | unmet_requirements | array<object> | yes | - | 元素 `{ac_id, reason, next_action}` |
 | delivery_acknowledged_by_user | enum | yes | true / false / partial / pending | User Acceptance Gate 状态；VerificationReport 初次写入必须为 `pending`，用户回复后更新为 `true / false / partial` |
 | quality_score | object | no | - | 质量评分；结构见 `references/quality-rubric.md`，未评分时写 `{overall: N/A, rationale}` |
@@ -70,11 +73,11 @@ Packet schema 单点定义在本文。阶段参考只声明本阶段产出哪种
 ```yaml
 gate_mode: strict | standard | lite
 execution_mode: single-agent | multi-agent-review | multi-agent-parallel | degraded-single-skill
-spec_packet: { spec_path, goal, target[target_id, target_statement, success_definition, quality_level, stop_or_loop_conditions], decision_trace[layer, decision_point, options_summary, decision, impact], grilling_summary[shared_understanding, unresolved_branches, key_tradeoffs, rejected_paths], design_tree_coverage[branch_id, name, parent, layer, status, decision_ref, blocks], acceptance_criteria[id, description, verification], constraints, quality_level, approved_by_user, status }
-plan_packet: { plan_path, ledger_path, plan_version, predecessor, gate_mode, execution_mode, tasks[id: T-NNN, owner_role, objective, files, verification, acceptance_ac_ids], stop_conditions, status }
+spec_packet: { spec_path, goal, target[target_id, target_statement, success_definition, scope_denominator, target_principles, quality_level, stop_or_loop_conditions], decision_trace[layer, decision_point, options_summary, decision, impact], grilling_summary[shared_understanding, unresolved_branches, key_tradeoffs, rejected_paths], design_tree_coverage[branch_id, name, parent, layer, status, decision_ref, blocks], acceptance_criteria[id, description, verification], constraints, quality_level, approved_by_user, status }
+plan_packet: { plan_path, ledger_path, plan_version, predecessor, gate_mode, execution_mode, target_coverage_matrix[target_unit, task_ids, verification_refs, status], decomposition_strategy[axis, levels, outputs, verification_by_level, granularity_floor], tasks[id: T-NNN, owner_role, objective, target_units, files, verification, acceptance_ac_ids], stop_conditions, status }
 task_result: { task_id: T-NNN, status, files_changed, commands_run, evidence, ac_coverage[ac_id, covered, evidence], deviations_from_plan }
 review_report: { task_id: T-NNN, status, findings[severity, file, issue, required_fix] }
-verification_report: { status, gate_mode, execution_mode, coverage[ac_id, evidence_ref, evidence_strength, status], pre_acceptance_self_check, unmet_requirements[ac_id, reason, next_action], delivery_acknowledged_by_user, quality_score }
+verification_report: { status, gate_mode, execution_mode, coverage[ac_id, evidence_ref, evidence_strength, status], target_coverage[target_unit, task_ref, evidence_ref, evidence_strength, status], pre_acceptance_self_check, unmet_requirements[ac_id, reason, next_action], delivery_acknowledged_by_user, quality_score }
 ```
 
 在 `execution_mode: single-agent` 模式下，把 packet 写入 ledger。在多 agent 模式下，packet 是唯一交接输入输出；禁止用散文摘要替代。
@@ -115,9 +118,9 @@ PlanPacket.tasks[] 是任务清单权威单源；plan markdown 的 `### Task T-N
 
 ## Evidence Strength
 
-- `strong`：新鲜运行结果或直接检查目标产物，覆盖对应验收标准。
-- `medium`：覆盖核心路径但缺少部分边界；只能标 `Partial`，并必须写 caveat、缺口、影响范围和补强验证命令。
-- `weak`：只看 diff、只读代码、只跑窄检查或证据间接；不能支撑完成声明。
+- `strong`：新鲜功能级验证，直接证明目标行为或目标产物满足对应验收标准，例如测试、命令、样例任务、端到端流程、渲染检查、schema 校验加反例样例。
+- `medium`：覆盖核心路径但缺少部分边界，或只证明结构正确但未覆盖完整功能行为；只能标 `Partial`，并必须写 caveat、缺口、影响范围和补强验证命令。
+- `weak`：文件存在、文本命中、只看 diff、只读代码、只跑窄检查或证据间接；不能支撑完成声明。
 - `stale`：旧会话、旧日志、旧测试结果；不能支撑完成声明。
 
 只有 `strong` 可标 `Met`；`medium` 最多 `Partial`；`weak` 或 `stale` 必须标 `Not met` 或 `Blocked`。

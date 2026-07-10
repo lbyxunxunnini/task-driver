@@ -11,6 +11,10 @@
   是 -> 用 Task Driver
   否 -> 下一问
 
+目标是否包含“全部 / 完整 / 100% / 迁移 / 覆盖”？
+  是 -> 用 Task Driver，并先定义 scope_denominator
+  否 -> 下一问
+
 是否涉及数据、权限、安全、发布、迁移、外部服务或破坏性操作？
   是 -> 用 Task Driver
   否 -> 下一问
@@ -40,6 +44,7 @@
 停下问用户：
 
 - 目标、范围、AC、质量层级或风险边界未闭合。
+- scope_denominator、target_principles、拆解轴、目标覆盖矩阵或功能级验证口径未闭合。
 - 继续会扩大 scope、删除/覆盖/发布/合并/丢弃工作。
 - 计划假设错误，需要 plan-revision。
 - 验证失败 2 轮后仍未闭合。
@@ -48,11 +53,11 @@
 
 最终请求用户验收前必须有：
 
-- SpecPacket：目标、AC、质量层级和 approved 状态。
-- PlanPacket：gate_mode、execution_mode、任务、文件、验证和停机条件。
+- SpecPacket：目标、scope_denominator、target_principles、AC、质量层级和 approved 状态。
+- PlanPacket：gate_mode、execution_mode、target_coverage_matrix、decomposition_strategy、任务、文件、功能级验证和停机条件。
 - TaskResult：每个任务的文件、命令、证据和 AC 覆盖。
 - ReviewReport：每个任务的评审结果。
-- VerificationReport：每条 AC 的 fresh evidence、验收前自检和 `delivery_acknowledged_by_user: pending`。
+- VerificationReport：每条 AC 和目标单元的 fresh functional evidence、验收前自检、自检优化循环和 `delivery_acknowledged_by_user: pending`。
 
 ## Examples
 

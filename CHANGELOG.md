@@ -1,5 +1,20 @@
 # Changelog
 
+## v0.8.0 (2026-07-10)
+
+### 改进
+
+- **产物路径改为 `.task-driver/`**：spec、plan、ledger 统一使用 `.task-driver/{specs,plans,ledgers}/YYYYMMDD-HHmm-主题.md`，并同步 `.gitignore`、模板、示例和契约检查脚本。
+- **精准目标门禁**：Target 新增 `scope_denominator` 和 `target_principles`，要求“全部 / 完整 / 100% / 迁移 / 覆盖”类目标先定义可计数分母和取舍原则。
+- **拆解深度门禁**：Planning 新增 Target Coverage Matrix 和 Decomposition Strategy，禁止用 Phase、文件列表或产物名替代可执行任务。
+- **功能级检验门禁**：文件存在、文本命中、只看 diff 默认降为 weak evidence；新增功能、迁移、流程和协议优化必须用功能级验证或反例样例证明。
+- **自检优化循环**：验收前自检升级为发现、修复、复验、记录证据的循环，VerificationReport 自检增加 Target coverage 和 Self-test improve loop。
+
+### 修复
+
+- **数据收集展示降噪**：`grilling_state` 默认只向用户展示当前决策摘要，完整表格写入 ledger，避免把内部状态表格每轮暴露给用户。
+- **反偷懒反例补强**：新增目标空泛就开工、百分比目标无分母、Phase 包装成任务、30% 冒充 100%、弱证据包装完成、自检假闭环等反例。
+
 ## v0.7.0 (2026-07-07)
 
 ### 改进
@@ -159,7 +174,7 @@
 - **主控 Review Gate 同步**：主控流程同步为每个 PlanPacket task 必须执行 Review Gate，可按风险调整深度但不得跳过。
 - **Schema 状态一致性修复**：`degraded-single-skill` 纳入 PlanPacket/VerificationReport mode 枚举；planning 明确内联 spec 输入也必须先持久化 SpecPacket；用户 reject 对应新增 `rejected_by_user` 状态。
 - **双机制入口同步**：standalone 根入口明确只加载根 `SKILL.md` 时只能执行 minimal protocol，不得声称完整 Task Driver；插件 manifest 版本同步到 `0.4.6`。
-- **主控模板精简**：将错误提示完整模板下沉到 `docs/task-driver/error-templates.md`，主控仅保留强制使用规则和适用关系索引。
+- **主控模板精简**：将错误提示完整模板下沉到 `.task-driver/error-templates.md`，主控仅保留强制使用规则和适用关系索引。
 - **中文显示名规范**：主控新增 98 项中英文对照表；面向用户输出时使用“中文显示名（英文标识）”，同时保留字段名、枚举值、路径、JSON/YAML key 等机器契约原值。
 - **版本同步**：根入口、插件 manifest、README 和发布说明同步到 `0.4.6`。
 
@@ -245,9 +260,9 @@
   - `task-driver-executing`
   - `task-driver-verification`
 - 持久化工件规范：
-  - `docs/task-driver/specs/YYYY-MM-DD--slug.md`
-  - `docs/task-driver/plans/YYYY-MM-DD--slug.md`
-  - `docs/task-driver/ledgers/YYYY-MM-DD--slug.md`
+  - `.task-driver/specs/YYYYMMDD-HHmm-主题.md`
+  - `.task-driver/plans/YYYYMMDD-HHmm-主题.md`
+  - `.task-driver/ledgers/YYYYMMDD-HHmm-主题.md`
 - Spec 模板、Plan 模板、Ledger 模板
 - TDD 优先规则：行为变化必须先写失败测试，除非明确豁免或不可测试
 - 任务级 review gate：spec compliance + code/content quality

@@ -104,10 +104,10 @@ task-driver
 
 根 `SKILL.md` 是唯一控制器。内部按以下阶段模式推进：
 
-1. **需求澄清阶段[brainstorming]**：先查项目、文件、git、日志和已有文档；深度澄清目的[Why]、范围[scope]、成功标准[success]、质量要求[quality]、约束[constraints]；产出已确认需求规格[approved spec]和需求规格交接包[SpecPacket]。
-2. **计划阶段[planning]**：保存计划[plan]，包含文件映射[File Map]、接口、任务、TDD/验证命令、评审门禁[Review Gate]、停机条件和计划交接包[PlanPacket]。
-3. **执行阶段[executing]**：确认后连续推进，行为变化优先 TDD；每个任务写任务结果[TaskResult]和评审报告[ReviewReport]，更新执行台账[ledger]。
-4. **验证阶段[verification]**：最终对照验收标准运行新鲜验证证据[fresh verification evidence]，输出验证报告[VerificationReport]和用户验收状态。
+1. **需求澄清阶段[brainstorming]**：先查项目、文件、git、日志和已有文档；深度澄清目的[Why]、范围分母[scope_denominator]、目标原则[target_principles]、成功标准[success]、质量要求[quality]、约束[constraints]；产出已确认需求规格[approved spec]和需求规格交接包[SpecPacket]。
+2. **计划阶段[planning]**：保存计划[plan]，包含目标覆盖矩阵[Target Coverage Matrix]、拆解策略[Decomposition Strategy]、文件映射[File Map]、接口、任务、功能级验证、评审门禁[Review Gate]、停机条件和计划交接包[PlanPacket]。
+3. **执行阶段[executing]**：确认后连续推进，行为变化优先 TDD；每个任务写任务结果[TaskResult]和评审报告[ReviewReport]，更新执行台账[ledger]，不得静默降低目标。
+4. **验证阶段[verification]**：最终对照验收标准和目标覆盖矩阵运行新鲜功能级验证证据[fresh functional evidence]，输出验证报告[VerificationReport]和用户验收状态。
 
 阶段参考文档位于 `references/modes/`。这些文件不是独立 skill，只是根控制器的内部协议补充。
 
@@ -134,10 +134,10 @@ tdr- 帮我把这个 bug 从定位到验证完整跑完
 触发后，Task Driver 会按以下顺序推进：
 
 1. 收集项目事实，先读相关文件、文档、git 状态、日志或失败证据。
-2. 若目标、范围、验收或质量层级不清楚，只问一个最高影响决策点，并维护 Grilling State，按整体目标、大类/规划轴、范围切片、小项目/模块、行为细节、实现约束逐层拷问。
-3. 通过 Shared Understanding Gate 后，生成或内联 approved spec，写清 Goal、Target、Decision Trace、Grilling Summary、Scope、Non-goals、Acceptance Criteria、Constraints、Quality Level。
-4. 生成 approved plan 和 ledger，明确目标达成定义、验证策略、文件映射、任务、验证命令、Review Gate 和停机条件。
-5. 按 plan 连续执行整个 PlanPacket，写 TaskResult 和 ReviewReport，最后运行 fresh verification；需要时按质量层级输出 `quality_score`，并在请求用户验收前完成验收前自检。
+2. 若目标、范围、验收或质量层级不清楚，只问一个最高影响决策点，并维护 Grilling State；默认只向用户展示当前决策摘要，完整状态写入 ledger。
+3. 通过 Shared Understanding Gate 后，生成或内联 approved spec，写清 Goal、Target、scope_denominator、target_principles、Decision Trace、Grilling Summary、Scope、Non-goals、Acceptance Criteria、Constraints、Quality Level。
+4. 生成 approved plan 和 ledger，明确目标达成定义、目标覆盖矩阵、拆解策略、验证策略、文件映射、任务、功能级验证命令、Review Gate 和停机条件。
+5. 按 plan 连续执行整个 PlanPacket，写 TaskResult 和 ReviewReport，最后运行 fresh functional verification；需要时按质量层级输出 `quality_score`，并在请求用户验收前完成自检优化循环。
 
 ## 30 秒选择
 
@@ -155,16 +155,19 @@ tdr- 帮我把这个 bug 从定位到验证完整跑完
 
 ## 工件
 
-- Spec：`docs/task-driver/specs/YYYY-MM-DD--slug.md`
-- Plan：`docs/task-driver/plans/YYYY-MM-DD--slug.md`
-- Ledger：`docs/task-driver/ledgers/YYYY-MM-DD--slug.md`
+- Spec：`.task-driver/specs/YYYYMMDD-HHmm-主题.md`
+- Plan：`.task-driver/plans/YYYYMMDD-HHmm-主题.md`
+- Ledger：`.task-driver/ledgers/YYYYMMDD-HHmm-主题.md`
 
-在本仓库中，`docs/task-driver/` 是运行时生成的 spec/plan/ledger 目录，建议通过 `.gitignore` 忽略。
+在本仓库中，`.task-driver/` 是运行时生成的 spec/plan/ledger 目录，建议通过 `.gitignore` 忽略。
 
 ## 治理门禁
 
 - **重任务判定**：跨 2 个以上文件/模块，或目标、范围、验收、质量层级不清楚，或涉及数据、权限、安全、发布、迁移、外部服务、破坏性操作时，必须走 Task Driver。
-- **目标驱动状态机**：每个任务必须有 `Target`，包含 target_id、目标陈述、完成定义、质量层级和回路条件；正常状态链为 Target → brainstorming → planning → executing → verification → User Acceptance Gate → accepted_by_user。
+- **目标驱动状态机**：每个任务必须有 `Target`，包含 target_id、目标陈述、范围分母、目标原则、完成定义、质量层级和回路条件；正常状态链为 Target → brainstorming → planning → executing → verification → User Acceptance Gate → accepted_by_user。
+- **精准目标门禁**：目标出现“全部 / 完整 / 100% / 迁移 / 覆盖”时，必须先定义可计数分母；没有分母不得进入 planning。
+- **拆解深度门禁**：计划不能只列 Phase、文件或产物名，必须写明拆解轴、拆解层级、每层产物、每层验收和任务粒度下限。
+- **目标覆盖矩阵**：scope_denominator 中每个目标单元必须映射到 T-NNN 和验证项；未覆盖目标单元是 Critical 缺口。
 - **跳过记录**：brainstorming、planning、executing、verification、User Acceptance Gate 正常都必须出现；跳过必须记录 skipped_stage、reason、risk、replacement_evidence 和 user_approval。
 - **门禁模式**：`strict[严格]`（高风险/生产级）、`standard[标准]`（默认）、`lite[轻量]`（中等任务门禁放宽），写入 `PlanPacket.gate_mode`。agent 执行形态另写入 `PlanPacket.execution_mode`。
 - **明显方案分叉**：会改变 API、数据模型、用户流程、依赖、验证方式、风险边界、交付范围或回滚方式的选择，必须在 spec/plan 阶段确认。
@@ -173,7 +176,7 @@ tdr- 帮我把这个 bug 从定位到验证完整跑完
 - **自然澄清话术**：单问题是决策结构，不是固定话术；不得反复使用“只需要你拍板 1 个问题”这类标题，除非已经是最终收口问题。
 - **技术方案闭合**：会改变接口、依赖、验证方式、回滚方式、用户流程或风险边界的技术方案，必须先在需求澄清阶段[brainstorming]确认取舍轴和方案选择。
 - **拷问细化协议**：澄清必须按整体目标 → 大类/规划轴 → 范围切片 → 小项目/模块 → 行为细节 → 实现约束推进；每层要说明排除项、AC 影响、风险边界和验证影响。
-- **Grilling State**：拷问必须维护当前分支、当前唯一问题、上游依赖、推荐答案、用户决策和未闭合分支；不得最后补表伪造过程。
+- **Grilling State**：拷问必须维护当前分支、当前唯一问题、上游依赖、推荐答案、用户决策和未闭合分支；默认面向用户展示决策摘要，完整状态写入 ledger，不得最后补表伪造过程。
 - **Design Tree Coverage**：拷问必须覆盖目标、范围、行为、方案、验证、风险分支；任何 open 分支都会阻止进入 planning。
 - **事实与决策分离**：代码、文档、日志、git 和已有工件能查到的事实由 agent 自查；目标、优先级、范围、风险、质量和方案取舍由用户决策。
 - **Decision Trace / Grilling Summary**：重任务、重新规划类任务或明显方案分叉任务的 spec 必须记录决策轨迹和共享理解摘要；计划里的技术任务必须能追溯到该轨迹、AC 或 Constraints。
@@ -181,12 +184,13 @@ tdr- 帮我把这个 bug 从定位到验证完整跑完
 - **计划目标与验证策略**：计划阶段[planning] 必须先写目标达成定义和验证策略，再拆任务，避免只推进小任务而无法判断整体完成。
 - **整体计划推进**：用户确认计划后，执行阶段[executing] 必须连续推进整个 PlanPacket；阶段、批次、小目标或单个任务完成不是“是否继续”的停机点。
 - **回路规则**：planning / executing 发现未澄清目标、范围、AC、技术取舍或风险边界时必须回到 brainstorming；verification 根据失败性质回到 executing、planning 或 brainstorming。
-- **验收前自检**：进入用户验收门禁[User Acceptance Gate] 前，必须逐项自检任务结果、评审报告、AC 覆盖、验证策略、范围漂移、质量门和残余风险；没有自检表不得询问用户是否接受。
+- **验收前自检**：进入用户验收门禁[User Acceptance Gate] 前，必须逐项自检任务结果、评审报告、AC 覆盖、目标覆盖、验证策略、范围漂移、质量门、残余风险和自检优化循环；没有自检表不得询问用户是否接受。
 - **重新规划顺序**：重新规划、整体规划、重构规划、从头梳理或重新设计类任务，必须先从整体规划视角或大类划分开始，再进入小项目和细节。
 - **品质层级**：机器枚举统一为 `mvp` / `polished` / `production`；用户可见显示为 MVP / 精打磨 / 生产级。MVP 覆盖核心路径；精打磨覆盖主要边界和错误状态；生产级覆盖安全、权限、性能、兼容、观测、回滚/迁移和完整回归。
 - **断点续传**：中断后重新触发时，agent 读取 ledger 的 Resume Checkpoint 判定是否可续传；可恢复错误自动重试 1 次。详见 `references/resume-protocol.md`。
 - **执行-验证循环**：同一 requirement 最多 2 轮；仍失败则进入 `blocked`、`partial` 或 `plan-revision`。
-- **证据强度**：强证据[`strong`] 才能标已满足[`Met`]；中等证据[`medium`] 最多部分完成[`Partial`]；弱证据[`weak`] / 过期证据[`stale`] 必须标未满足[`Not met`] 或受阻[`Blocked`]。
+- **证据强度**：强证据[`strong`] 必须优先来自功能级验证；中等证据[`medium`] 最多部分完成[`Partial`]；文件存在、文本命中、只看 diff 或弱证据[`weak`] / 过期证据[`stale`] 必须标未满足[`Not met`] 或受阻[`Blocked`]。
+- **禁止静默降级**：目标范围内未覆盖项不得进入普通 backlog；必须修复、受阻、计划修订或由用户明确批准降级。
 - **质量评分**：验证阶段[verification] 按质量层级判断是否输出 `quality_score`；低于阈值时回到执行阶段[executing]、计划修订协议[plan-revision]、需求澄清阶段[brainstorming]或受阻[blocked]。
 - **中文显示名**：用户可见输出优先使用中文显示名；首次出现英文协议标识时采用 `中文显示名[英文标识]`，字段名、枚举值、路径、JSON/YAML key 等机器契约保持原值。中间进度更新、阶段切换说明、停机回问、最终报告都受该规则约束。
 
@@ -211,9 +215,9 @@ Task Driver 支持多 agent，但不依赖多 agent。
 
 ## 当前状态
 
-当前版本：v0.7.0
+当前版本：v0.8.0
 
-v0.7.0 术语表改为 JSON 格式、packet 展示统一使用中文[英文]格式、新增未映射术语和 packet 展示反例。
+v0.8.0 将产物目录统一为 `.task-driver/`，新增精准目标、拆解深度、功能级检验、反偷懒和自检优化循环门禁。
 
 ## 自测
 
