@@ -1,13 +1,39 @@
 ---
 slug: task-driver-user-88546431
 displayName: Task Driver
-version: 0.8.2
+version: 0.8.3
 summary: 像资深项目管家一样推进复杂任务——先澄清目标，再计划执行，最后用证据验收。内置轻量/标准/严格三级门禁、packet 模板、黄金路径示例和契约自测，简单任务不繁琐，重任务不失控。
 tags: [agent, workflow, task-management]
 license: MIT
 name: task-driver
 description: >-
   必须触发：用户消息以 tdr- / task-driver / /task-driver 开头时，立即调用 Task Driver。
+---
+
+## 30 秒选择器
+
+**你需要 Task Driver 吗？** 回答 3 个问题：
+
+1. **是否跨 2+ 文件/模块？**
+   - 是 → 用 Task Driver
+   - 否 → 下一问
+
+2. **目标、范围、验收、质量层级是否任一不清楚？**
+   - 是 → 用 Task Driver
+   - 否 → 下一问
+
+3. **是否涉及数据、权限、安全、发布、迁移、外部服务或破坏性操作？**
+   - 是 → 用 Task Driver
+   - 否 → 普通执行即可
+
+**选什么模式？**
+
+| 任务特征 | 门禁模式[gate_mode] | 必读文件 |
+|---|---|---|
+| 单文件低风险、可一轮完成 | 轻量模式[lite] | 无 |
+| 跨 2-5 文件、默认风险 | 标准模式[standard] | `references/quick-start.md` |
+| 安全、权限、数据、发布、迁移、生产级 | 严格模式[strict] | `references/quick-start.md` + `references/walkthroughs/strict.md` |
+
 ---
 
 # Task Driver
@@ -243,7 +269,27 @@ Lite 模式不得用于：涉及安全、权限、数据、发布、迁移、依
 
 **Packet 展示规则**：向用户展示 SpecPacket、PlanPacket、TaskResult、ReviewReport、VerificationReport 时，必须将所有英文字段名和枚举值转换为 `中文[英文]` 格式。转换规则见 `references/packet-templates.md` 的"面向用户展示规则"段落。
 
-## 适用判定
+## 能力矩阵
+
+| 能力 | 状态 | 说明 |
+|---|---|---|
+| 任务类型：跨 2+ 文件/模块 | ✅ 能做 | 自动判定为重任务 |
+| 任务类型：目标/范围/验收不清楚 | ✅ 能做 | 需求澄清阶段[brainstorming]会逐层拷问 |
+| 任务类型：涉及数据/权限/安全/发布/迁移 | ✅ 能做 | 使用严格模式[strict]门禁 |
+| 任务类型：单文件低风险 | ⚠️ 部分支持 | 可用轻量模式[lite]，但需满足小任务条件 |
+| 任务类型：不涉及任何高风险领域 | ❌ 不做 | 普通执行即可，无需 Task Driver |
+| 门禁模式：轻量模式[lite] | ✅ 能做 | 部分门禁放宽，详见下方表格 |
+| 门禁模式：标准模式[standard] | ✅ 能做 | 全部门禁生效 |
+| 门禁模式：严格模式[strict] | ✅ 能做 | 全部门禁生效，高风险任务必选 |
+| 执行模式：单智能体模式[single-agent] | ✅ 能做 | 默认模式，顺序执行 |
+| 执行模式：多智能体评审模式[multi-agent-review] | ⚠️ 部分支持 | 需要 subagent 工具 |
+| 执行模式：多智能体并行模式[multi-agent-parallel] | ⚠️ 部分支持 | 需要 subagent 工具且任务不重叠 |
+| 验证方式：功能级验证 | ✅ 能做 | 必须有 fresh verification evidence |
+| 验证方式：文件存在/文本命中 | ⚠️ 部分支持 | 只能作为弱证据，不能支撑完成声明 |
+| 验证方式：人工测试 | ✅ 能做 | 需要明确的验证步骤和预期结果 |
+| 领域 skill 协作 | ⚠️ 部分支持 | 可调用领域 skill，但不能绕过 spec/plan/verification |
+
+**适用判定**
 
 满足任一条件，按重任务处理：
 
