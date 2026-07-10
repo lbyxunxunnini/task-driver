@@ -24,6 +24,16 @@
   否 -> 普通执行即可
 ```
 
+## 写入前预检（显式触发时必做）
+
+用户显式触发 Task Driver（`tdr-` / `task-driver` / `/task-driver`）后，首次写入动作前必须完成：
+
+1. 输出启动预检门声明（当前阶段、目标草案、是否有 approved spec、是否有 approved plan、本次动作类型）。
+2. 确认写入屏障状态：
+   - 无 approved spec 且无 approved plan → 屏障生效，只允许读取和澄清。
+   - 有 approved spec 或 approved plan → 屏障解除，可执行写入。
+3. 如果是小任务走内联路径，仍必须先产出内联 spec/plan 并让用户确认，不得以"任务小"跳过。
+
 ## Mode Picker
 
 | 任务特征 | gate_mode | execution_mode |

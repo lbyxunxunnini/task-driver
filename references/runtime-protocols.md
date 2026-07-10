@@ -42,7 +42,7 @@ Target -> brainstorming -> planning -> executing -> verification -> User Accepta
 
 必经规则：
 
-- brainstorming、planning、executing、verification、User Acceptance Gate 默认都必须出现。
+- brainstorming、planning、executing、verification、User Acceptance Gate 都必须出现。
 - executing、verification、User Acceptance Gate 是交付前硬必经环节；除非用户明确取消交付或将任务降级为纯规划/纯审查，否则不得跳过。
 - 任何跳过都必须写入 ledger：`skipped_stage / reason / risk / replacement_evidence / user_approval`。
 - 没有跳过记录时，后续阶段必须回退补齐，不得继续包装成完成。

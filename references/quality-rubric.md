@@ -50,7 +50,7 @@ quality_score:
 ## Thresholds
 
 - `mvp`（MVP）：threshold = 3。低于 3 必须回到 executing 或 blocked。
-- `polished`（精打磨）：threshold = 4。低于 4 必须回到 executing，除非用户明确接受 partial。
+- `polished`（精打磨）：threshold = 4。低于 4 必须回到 executing、plan-revision 或 blocked。
 - `production`（生产级）：threshold = 4.5。低于 4.5 必须回到 executing、plan-revision 或 blocked。
 
 `overall` 不得高于 evidence 支持的 AC 状态：

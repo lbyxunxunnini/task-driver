@@ -74,6 +74,24 @@
 - 违规：目标降级必须用户明确批准，并写入 Decision Trace、ledger Decisions 和 VerificationReport.unmet_requirements[]。
 - 回退：停止完成声明；按目标分母补齐覆盖矩阵，未覆盖项进入 executing、plan-revision、brainstorming 或 blocked。
 
+## 读完协议后直接执行
+
+- 错误：读完 SKILL.md、glossary.json 或 references 后，直接说"好的，我理解了，现在开始改"或"我现在进入执行阶段"，没有先走 brainstorming 和 planning。
+- 违规：读取协议是准备动作，不等于已通过 brainstorming 和 planning。协议读取完成后仍必须按状态链推进：Target → brainstorming → planning → executing → verification。
+- 回退：停止执行意图；回到 brainstorming 开始事实收集和需求澄清。
+
+## 口头计划替代已确认计划
+
+- 错误：agent 口头描述"我打算先改 A 再改 B 再改 C"，用户说"好的"，agent 就开始执行，没有产出结构化的 PlanPacket 或内联 plan 并让用户明确确认。
+- 违规：自然语言对话中的"计划"不是 approved plan。approved plan 必须是结构化的 PlanPacket（或内联等价物），且有用户明确确认记录。
+- 回退：停止执行；将口头计划转化为结构化 PlanPacket 或内联 plan，提交用户确认后才能解除写入屏障。
+
+## 预热创建工件目录
+
+- 错误：还没有 approved spec 和 approved plan，就先执行 `mkdir -p .task-driver/specs` 或 `mkdir -p .task-driver/plans`，声称"只是预热目录"。
+- 违规：目录创建是写入动作，受写入屏障约束。没有 approved spec 且没有 approved plan 时，`.task-driver/` 下任何目录都不得创建。
+- 回退：删除预创建的目录（或记录为已存在）；等 spec/plan 确认后再创建。
+
 ## 弱证据包装完成
 
 - 错误：用文件已创建、文本已写入、`rg` 命中或 diff 看起来正确，宣布功能、迁移、协议或流程已完成。

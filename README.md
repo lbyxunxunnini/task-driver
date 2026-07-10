@@ -159,7 +159,7 @@ tdr- 帮我把这个 bug 从定位到验证完整跑完
 - Plan：`.task-driver/plans/YYYYMMDD-HHmm-主题.md`
 - Ledger：`.task-driver/ledgers/YYYYMMDD-HHmm-主题.md`
 
-在本仓库中，`.task-driver/` 是运行时生成的 spec/plan/ledger 目录，建议通过 `.gitignore` 忽略。
+在本仓库中，`.task-driver/` 是运行时生成的 spec/plan/ledger 目录，必须通过 `.gitignore` 忽略。
 
 ## 治理门禁
 
@@ -215,7 +215,7 @@ Task Driver 支持多 agent，但不依赖多 agent。
 
 ## 当前状态
 
-当前版本：v0.8.0
+当前版本：v0.8.1
 
 v0.8.0 将产物目录统一为 `.task-driver/`，新增精准目标、拆解深度、功能级检验、反偷懒和自检优化循环门禁。
 

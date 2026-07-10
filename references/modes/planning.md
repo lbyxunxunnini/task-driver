@@ -2,7 +2,7 @@
 
 计划阶段。用于 approved spec 之后、执行之前：创建实施 plan、文件映射、接口、任务拆解、TDD/验证命令、review gate、ledger 和 PlanPacket。
 
-写出一个新 agent 也能执行的计划。Plan 是执行契约；确认后不应再靠连续追问推进。
+写出一个新 agent 也能执行的计划。Plan 是执行契约；确认后禁止再靠连续追问推进。
 
 ## 必要输入
 

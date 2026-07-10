@@ -8,6 +8,12 @@
 - 违规：没有 approved spec 或 approved plan。
 - 回退：回到 brainstorming 或 planning，补齐确认状态。
 
+## 未确认 spec/plan 就创建工件目录或文件
+
+- 错误：还没有 approved spec 和 approved plan，就执行 `mkdir -p .task-driver/specs`、`mkdir -p .task-driver/plans`、`mkdir -p .task-driver/ledgers` 或创建任何工件文件。
+- 违规：目录和文件创建是写入动作，受写入屏障约束。写入屏障要求同时有 approved spec 和 approved plan 才能解除。
+- 回退：停止创建；等 spec 和 plan 都经用户确认后再创建目录和工件。
+
 ## 静默跳过 plan 步骤
 
 - 错误：某个计划步骤跑不通，就改做另一个看似等价的步骤但不记录。

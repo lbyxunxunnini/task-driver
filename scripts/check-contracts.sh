@@ -62,6 +62,20 @@ require_match 'mvp.*threshold = 3' references/quality-rubric.md
 require_match 'polished.*threshold = 4' references/quality-rubric.md
 require_match 'production.*threshold = 4.5' references/quality-rubric.md
 
+# 启动预检门 + 写入屏障 + 优先级声明（防协议被改回松散状态）
+require_match '启动预检门' SKILL.md
+require_match '写入屏障' SKILL.md
+require_match '优先级声明' SKILL.md
+require_match '先确认再执行.*优先于.*主动执行' SKILL.md
+require_match 'apply_patch.*重定向写文件' SKILL.md
+require_match 'mkdir.*创建目录.*\.task-driver' SKILL.md
+require_match 'spec/plan 产出不受屏障约束' SKILL.md
+require_match '小任务内联的时序规则' SKILL.md
+require_match '读完协议后直接执行' references/counterexamples/global.md
+require_match '口头计划替代已确认计划' references/counterexamples/global.md
+require_match '预热创建工件目录' references/counterexamples/global.md
+require_match '未确认 spec/plan 就创建工件目录或文件' references/counterexamples/executing.md
+
 for template in SpecPacket PlanPacket TaskResult ReviewReport VerificationReport; do
   require_match "$template" references/packet-templates.md
 done
