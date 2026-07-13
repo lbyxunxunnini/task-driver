@@ -1,5 +1,19 @@
 # Changelog
 
+## v0.8.4 (2026-07-13)
+
+### 改进
+
+- **Goal 兼容层**：新增 `goal_provider`，支持 Codex Goal、Claude Code `/goal` 和 `ledger-only` 三种路径。
+- **GoalDraft 交接包**：新增目标草案合约、展示模板和 walkthrough 示例，确保目标由 SpecPacket.target 派生并贯穿执行与验证。
+- **隔离目标检测**：Goal complete 前必须由隔离上下文的 subagent / isolated verifier 审计；可降级为新会话、外部工具或人工隔离审查，但禁止同上下文自证。
+- **Packet 展示修复**：阶段交接、评估结论和下一步决策必须使用中文分组表格展示，禁止裸贴 YAML/JSON 机器契约。
+- **Loop 审计脚本**：新增 `scripts/check-ledger-loop.sh`，检查 Target、GoalDraft、Iteration Log、target coverage、isolated_goal_detection 和 self-test improve loop。
+
+### 修复
+
+- **契约检查补强**：`scripts/check-contracts.sh` 覆盖 GoalDraft、Goal provider、隔离目标检测、walkthrough 示例和 ledger loop 审计脚本，防止协议回退。
+
 ## v0.8.3 (2026-07-10)
 
 ### 改进

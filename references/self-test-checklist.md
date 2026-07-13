@@ -6,6 +6,7 @@
 
 ```bash
 scripts/check-contracts.sh
+scripts/check-ledger-loop.sh <ledger-file>
 git diff --check
 ```
 
@@ -34,6 +35,7 @@ git diff --check
 - Plan 必须包含 Target Coverage Matrix 和 Decomposition Strategy；不得用 Phase 标题、文件列表或产物名替代任务拆解。
 - Verification 必须包含 Target coverage 和功能级证据；文件存在、文本命中、diff 审查不得支撑 `met`。
 - 验收前自检必须包含 Self-test improve loop 摘要，证明发现、修复和复验已经闭环。
+- Goal complete 前必须有 isolated_goal_detection，且由隔离上下文的 subagent / isolated verifier 执行。
 - lite / standard / strict 三条 walkthrough 都必须包含 SpecPacket、PlanPacket、TaskResult、ReviewReport、VerificationReport。
 - README、SKILL、packet-contract、quality-rubric 对同一契约不得出现不同枚举或不同状态判定。
 
@@ -51,3 +53,4 @@ git diff --check
 | Target rigor | Target / Plan / Verification 均能追踪 scope_denominator |
 | Functional evidence | 完成声明由功能级验证或明确证据强度上限支撑 |
 | Improve loop | 自检发现、修复、复验记录完整 |
+| Ledger loop audit | `scripts/check-ledger-loop.sh <ledger-file>` 能检查 Target、GoalDraft、Iteration Log、target coverage、isolated_goal_detection 和 self-test improve loop |

@@ -71,6 +71,34 @@ spec_packet:
   status: approved
 ```
 
+## GoalDraft Summary
+
+```yaml
+goal_draft:
+  target_id: cli-json-empty-array
+  goal_provider: ledger-only
+  outcome: "CLI 在空结果下输出合法 JSON 数组。"
+  completion_condition: "AC-1 到 AC-4 均有 strong fresh evidence。"
+  verification_surface:
+    - "cli search none --json"
+    - "node -e 'JSON.parse(...)'"
+    - "existing json fixture test"
+    - "snapshot or direct CLI check"
+  constraints: ["最小行为修复优先", "不改变错误输出和 formatter 架构"]
+  boundaries: ["空结果 JSON 输出", "JSON.parse 可解析性", "非空 JSON 回归", "默认文本输出回归"]
+  iteration_policy: "每轮记录改动、证据、未满足项和下一步假设；同一问题最多两轮后路由。"
+  blocked_stop_condition: "复现不成立回到 brainstorming；测试路径错误回到 planning；实现缺陷回到 executing。"
+  goal_detection:
+    required: true
+    verifier: isolated_goal_verifier
+    context_policy: "只提供 packet、ledger evidence、VerificationReport draft 和必要命令输出。"
+    fallback_policy: "允许 new-session verifier / external verifier / manual isolated review；禁止 same-context self-check。"
+    evidence_required: ["coverage[]", "target_coverage[]", "pre_acceptance_self_check"]
+  activation_command: "N/A"
+  source_packet_ref: .task-driver/specs/20260707-1200-cli-json-empty-array.md
+  status: active
+```
+
 ## Plan Summary
 
 ```yaml
@@ -224,6 +252,12 @@ verification_report:
     quality_gate: pass
     residual_risk: pass
     self_test_improve_loop: pass
+  isolated_goal_detection:
+    verifier: isolated_goal_verifier
+    context_inputs: ["SpecPacket", "GoalDraft", "PlanPacket", "ledger evidence", "VerificationReport draft"]
+    evidence_refs: [EV-1, EV-2, EV-3]
+    status: pass
+    finding: "All JSON output goal boundaries are proven by fresh verification evidence."
   unmet_requirements: []
   delivery_acknowledged_by_user: pending
   quality_score:

@@ -57,6 +57,42 @@ Target -> brainstorming -> planning -> executing -> verification -> User Accepta
 - verification 发现目标覆盖不足、功能级证据不足或自检循环未闭合 -> executing / planning / brainstorming；不得直接进入 User Acceptance Gate。
 - User Acceptance Gate 被 reject -> 根据拒绝原因回到 executing / planning / brainstorming；不得默认只做小修。
 
+## 目标兼容生命周期[Goal Compatibility Lifecycle]
+
+Goal 兼容层把 Target 映射到宿主 agent 的目标模式，但 Task Driver 的 packet 和 ledger 仍是审计单源。
+
+### Provider 选择
+
+- `codex`：当前环境有 `get_goal` / `create_goal` / `update_goal` 工具时使用。
+- `claude-code`：当前环境支持 Claude Code `/goal`，但没有 Codex Goal 工具时使用。
+- `ledger-only`：目标模式不可用、hook 被禁用、版本不支持或无法从当前 agent 控制时使用。
+
+### 激活规则
+
+- brainstorming 阶段不得激活 Goal。
+- planning 阶段必须从 approved SpecPacket 生成 GoalDraft。
+- executing 阶段启动前读取 GoalDraft，并按 provider 激活：
+  - Codex：先检查现有 goal；没有 active goal 才创建；target_id 冲突必须停机回问。
+  - Claude Code：输出 `/goal <condition>` 字符串；因为新 `/goal` 会替换旧 goal，发现已有 active goal 时必须让用户确认，不得自动覆盖。
+  - ledger-only：写 `goal_provider: ledger-only` 和降级原因，使用 ledger 的 Target / Iteration Log / VerificationReport 维持目标。
+
+### Claude Code 条件要求
+
+Claude Code 的 evaluator 只看对话中已展示的证据，不独立运行命令或读文件。因此 `/goal` 条件必须要求 agent 在每轮输出或 ledger 中展示：
+
+- 验证命令和结果。
+- 每个 AC 的状态。
+- 每个 scope_denominator 目标单元的状态。
+- 未满足项、下一步假设和阻塞原因。
+
+### 完成规则
+
+- Goal active 不等于任务完成。
+- Codex 目标[Codex Goal]不得在 VerificationReport 通过前 `update_goal complete`。
+- Claude Code goal 自动 clear 只代表 evaluator 认为条件满足；Task Driver 仍必须写 VerificationReport 并进入 User Acceptance Gate。
+- ledger-only 的 GoalDraft.status 只能在 VerificationReport 有强证据覆盖全部目标分母后写 `complete`。
+- Goal complete 之前必须运行隔离目标检测[goal_detection]：由独立 subagent / isolated verifier 只读取 SpecPacket、GoalDraft、PlanPacket、ledger evidence、VerificationReport 草稿和必要文件/命令输出，不读取当前执行上下文推理。检测结果写入 VerificationReport.isolated_goal_detection。检测实现可降级为新会话、外部工具或人工隔离审查，但不得降级为同上下文自检；没有任何隔离检测路径时，不得 complete。
+
 ## No Silent Downscope
 
 禁止静默降级：

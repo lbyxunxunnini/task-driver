@@ -59,6 +59,28 @@ spec_packet:
   approved_by_user: true
   status: approved
 
+goal_draft:
+  target_id: readme-typo-verification
+  goal_provider: ledger-only
+  outcome: "README 中 verification 拼写正确，且无额外文件改动。"
+  completion_condition: "AC-1 和 AC-2 有 fresh evidence。"
+  verification_surface:
+    - "rg -n 'verfication' README.md exits 1"
+    - "git diff --name-only"
+  constraints: ["最小改动优先", "不做文案重写"]
+  boundaries: ["README.md 中的 verfication 错拼", "改动文件集合"]
+  iteration_policy: "每轮记录改动、证据、未满足项和下一步假设；同一问题最多两轮。"
+  blocked_stop_condition: "发现多处相关错拼可继续；发现范围扩大则停机回问。"
+  goal_detection:
+    required: true
+    verifier: isolated_goal_verifier
+    context_policy: "只提供 packet、ledger evidence、VerificationReport draft 和必要命令输出。"
+    fallback_policy: "允许 new-session verifier / external verifier / manual isolated review；禁止 same-context self-check。"
+    evidence_required: ["coverage[]", "target_coverage[]", "pre_acceptance_self_check"]
+  activation_command: "N/A"
+  source_packet_ref: inline
+  status: active
+
 plan_packet:
   plan_path: inline
   ledger_path: inline
@@ -168,6 +190,12 @@ verification_report:
     quality_gate: N/A
     residual_risk: pass
     self_test_improve_loop: pass
+  isolated_goal_detection:
+    verifier: isolated_goal_verifier
+    context_inputs: ["SpecPacket", "GoalDraft", "PlanPacket", "ledger evidence", "VerificationReport draft"]
+    evidence_refs: [EV-1, EV-2]
+    status: pass
+    finding: "README typo target and file boundary are proven by current evidence."
   unmet_requirements: []
   delivery_acknowledged_by_user: pending
   quality_score:

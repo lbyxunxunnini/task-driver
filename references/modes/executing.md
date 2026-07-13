@@ -27,6 +27,11 @@
    - 若矛盾来自目标、范围分母、目标原则、拆解轴、AC、质量层级、共享理解、技术方案取舍或风险边界未澄清，必须回到 brainstorming。
    - 若 spec 正确但任务顺序、文件映射、接口假设或验证命令错误，必须进入 plan-revision。
 6. 确认 `PlanPacket.execution_mode`。没有明确 subagent 工具时，使用 `single-agent`。
+7. 读取 GoalDraft 并激活目标兼容层：
+   - `codex`：使用 Goal 工具前先检查当前 active goal；不存在时创建；target_id 冲突时停机回问；工具不可用时降级为 `ledger-only`。
+   - `claude-code`：展示 `/goal <condition>` activation_command；发现已有 active goal 或无法确认是否已有 goal 时，不得自动替换，必须让用户确认或降级为 `ledger-only`。
+   - `ledger-only`：在 ledger 写明降级原因，并把 GoalDraft.status 标为 `active` 或 `unavailable`。
+   - GoalDraft 未生成、target_id 不匹配、verification_surface 未覆盖 AC 时，不得进入写入；回到 planning 修正。
 
 ## 多 Agent 降级
 
@@ -76,9 +81,10 @@
 5. 更新 ledger：改动文件、命令、结果、commit、风险。Evidence 按结构化字段写（见 planning ledger 模板）。
 6. **Scope Drift 检查**：对照 `files_changed` 与 PlanPacket 的 File Map。超出集合则停机回问，不得隐性扩 scope。
 7. **Target Coverage 检查**：对照 Target Coverage Matrix 和当前任务的 Target units。目标单元未执行、未验证或证据弱于 plan 预期时，必须写入 ledger 并按 blocked / plan-revision / brainstorming 路由；不得静默移到 backlog。
-8. 写 TaskResult packet，含 `task_id` (T-NNN) / `status` / `files_changed` / `commands_run` / `evidence` / `ac_coverage`。**`ac_coverage[]`** 逐项填写，`ac_id` 必须引用 SpecPacket 中的 `AC-N`；`covered` 取 `full / partial / none`；`evidence` 引用本轮 Evidence 条目。若任务声明覆盖某个目标单元，也必须在 evidence 或 deviations_from_plan 中说明该目标单元状态。
-9. 做 Review Gate。
-10. 写 ReviewReport packet。
+8. **目标进度[Goal Progress] 检查**：对照 GoalDraft 的 outcome、completion_condition、boundaries 和 verification_surface。每轮必须记录当前任务对 Goal 的推进、未满足项和下一步假设；Claude Code provider 必须把这些证据放入对话或 ledger，供 evaluator 判断。
+9. 写 TaskResult packet，含 `task_id` (T-NNN) / `status` / `files_changed` / `commands_run` / `evidence` / `ac_coverage`。**`ac_coverage[]`** 逐项填写，`ac_id` 必须引用 SpecPacket 中的 `AC-N`；`covered` 取 `full / partial / none`；`evidence` 引用本轮 Evidence 条目。若任务声明覆盖某个目标单元，也必须在 evidence 或 deviations_from_plan 中说明该目标单元状态。
+10. 做 Review Gate。
+11. 写 ReviewReport packet。
 
 完成一个任务后：
 

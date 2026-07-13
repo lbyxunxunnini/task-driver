@@ -34,6 +34,26 @@ Packet schema 单点定义在本文。阶段参考只声明本阶段产出哪种
 | stop_conditions | array<string> | yes | - | 触发停机的条件 |
 | status | enum | yes | draft / approved / superseded | 同上 |
 
+## GoalDraft
+
+GoalDraft 是 Task Driver 与宿主目标模式的兼容交接包。它由 SpecPacket.target 派生，在 planning 阶段生成，executing 阶段按 goal_provider 激活或降级。
+
+| Field | Type | Required | Enum | Description |
+|---|---|---|---|---|
+| target_id | string | yes | - | 必须等于 SpecPacket.target.target_id |
+| goal_provider | enum | yes | codex / claude-code / ledger-only | 目标提供方；决定执行阶段如何激活目标 |
+| outcome | string | yes | - | 来自 target_statement，描述完成后应为真的外部结果 |
+| completion_condition | string | yes | - | 来自 success_definition，必须能由 verification_surface 证明 |
+| verification_surface | array<string> | yes | - | 来自 acceptance_criteria[].verification；Claude Code 必须要求把证据写进 transcript |
+| constraints | array<string> | yes | - | 来自 target_principles 和 constraints |
+| boundaries | array<string> | yes | - | 来自 scope_denominator；目标模式不得越界 |
+| iteration_policy | string | yes | - | 每轮如何记录改动、证据、未满足项、下一步假设和 2 轮退出 |
+| blocked_stop_condition | string | yes | - | 来自 stop_or_loop_conditions；描述何时 stopped / blocked |
+| goal_detection | object | yes | - | 目标检测要求；含 `{required: true, verifier: isolated_goal_verifier, context_policy, fallback_policy, evidence_required}` |
+| activation_command | string | no | - | Claude Code `/goal ...` 字符串或 Codex Goal objective 摘要；ledger-only 可为空 |
+| source_packet_ref | string | yes | - | SpecPacket 路径或 inline id |
+| status | enum | yes | draft / active / unavailable / complete / blocked | GoalDraft 状态；complete 只能在 VerificationReport 通过后写入 |
+
 ## TaskResult
 
 | Field | Type | Required | Enum | Description |
@@ -64,6 +84,7 @@ Packet schema 单点定义在本文。阶段参考只声明本阶段产出哪种
 | coverage | array<object> | yes | - | 元素 `{ac_id: AC-N, evidence_ref, evidence_strength, status: met / partial / not_met / blocked}`；ac_id 必须引用 SpecPacket.acceptance_criteria[].id |
 | target_coverage | array<object> | yes | - | 元素 `{target_unit, task_ref, evidence_ref, evidence_strength, status}`；必须覆盖 scope_denominator |
 | pre_acceptance_self_check | object | yes | - | 验收前自检；含 Plan tasks、Review reports、AC coverage、Target coverage、Verification strategy、Scope drift、Quality gate、Residual risk、Self-test improve loop 的结果和证据；无 fail 才能进入 User Acceptance Gate |
+| isolated_goal_detection | object | yes | - | 隔离目标检测结果；必须来自独立 subagent / isolated verifier，含 `{verifier, context_inputs, evidence_refs, status, finding}` |
 | unmet_requirements | array<object> | yes | - | 元素 `{ac_id, reason, next_action}` |
 | delivery_acknowledged_by_user | enum | yes | true / false / partial / pending | User Acceptance Gate 状态；VerificationReport 初次写入必须为 `pending`，用户回复后更新为 `true / false / partial` |
 | quality_score | object | no | - | 质量评分；结构见 `references/quality-rubric.md`，未评分时写 `{overall: N/A, rationale}` |
@@ -75,9 +96,10 @@ gate_mode: strict | standard | lite
 execution_mode: single-agent | multi-agent-review | multi-agent-parallel | degraded-single-skill
 spec_packet: { spec_path, goal, target[target_id, target_statement, success_definition, scope_denominator, target_principles, quality_level, stop_or_loop_conditions], decision_trace[layer, decision_point, options_summary, decision, impact], grilling_summary[shared_understanding, unresolved_branches, key_tradeoffs, rejected_paths], design_tree_coverage[branch_id, name, parent, layer, status, decision_ref, blocks], acceptance_criteria[id, description, verification], constraints, quality_level, approved_by_user, status }
 plan_packet: { plan_path, ledger_path, plan_version, predecessor, gate_mode, execution_mode, target_coverage_matrix[target_unit, task_ids, verification_refs, status], decomposition_strategy[axis, levels, outputs, verification_by_level, granularity_floor], tasks[id: T-NNN, owner_role, objective, target_units, files, verification, acceptance_ac_ids], stop_conditions, status }
+goal_draft: { target_id, goal_provider, outcome, completion_condition, verification_surface, constraints, boundaries, iteration_policy, blocked_stop_condition, goal_detection, activation_command, source_packet_ref, status }
 task_result: { task_id: T-NNN, status, files_changed, commands_run, evidence, ac_coverage[ac_id, covered, evidence], deviations_from_plan }
 review_report: { task_id: T-NNN, status, findings[severity, file, issue, required_fix] }
-verification_report: { status, gate_mode, execution_mode, coverage[ac_id, evidence_ref, evidence_strength, status], target_coverage[target_unit, task_ref, evidence_ref, evidence_strength, status], pre_acceptance_self_check, unmet_requirements[ac_id, reason, next_action], delivery_acknowledged_by_user, quality_score }
+verification_report: { status, gate_mode, execution_mode, coverage[ac_id, evidence_ref, evidence_strength, status], target_coverage[target_unit, task_ref, evidence_ref, evidence_strength, status], pre_acceptance_self_check, isolated_goal_detection, unmet_requirements[ac_id, reason, next_action], delivery_acknowledged_by_user, quality_score }
 ```
 
 在 `execution_mode: single-agent` 模式下，把 packet 写入 ledger。在多 agent 模式下，packet 是唯一交接输入输出；禁止用散文摘要替代。
@@ -88,6 +110,7 @@ TaskResult.ac_coverage 为必填；不得以“本任务未覆盖 AC”为由省
 
 - **SpecPacket**：`draft -> approved -> superseded`。`approved` 是进入 planning 的前置条件。
 - **PlanPacket**：`draft -> approved -> superseded`。`approved` 是进入 executing 的前置条件。
+- **GoalDraft**：`draft -> active | unavailable -> complete | blocked`。`active` 表示宿主目标已激活或 ledger-only 已接管；`complete` 必须由 VerificationReport 的证据支撑。
 - **TaskResult**：`pending -> in_progress -> done | blocked | partial`。`done` 进入 review。
 - **ReviewReport**：`pass | needs_fix | blocked`。`needs_fix` 必须先修后复审，否则不得继续下一个任务。
 - **VerificationReport**：`met | partial | not_met | blocked -> awaiting_user_acceptance -> accepted_by_user | rejected_by_user`。
@@ -100,6 +123,9 @@ Packet 之间必须以 ID 引用，不得用散文、位置或标题模糊指代
 
 - TaskResult.task_id -> PlanPacket.tasks[].id (`T-NNN`)。
 - PlanPacket / TaskResult / VerificationReport -> SpecPacket.target.target_id。
+- GoalDraft.target_id -> SpecPacket.target.target_id。
+- GoalDraft.verification_surface -> SpecPacket.acceptance_criteria[].verification。
+- VerificationReport.isolated_goal_detection.evidence_refs -> VerificationReport.coverage[] / target_coverage[] evidence_ref。
 - PlanPacket.tasks[].objective / verification -> SpecPacket.decision_trace[]、SpecPacket.acceptance_criteria[] 或 SpecPacket.constraints。
 - TaskResult.ac_coverage[].ac_id -> SpecPacket.acceptance_criteria[].id (`AC-N`)。
 - ReviewReport.task_id -> TaskResult.task_id。

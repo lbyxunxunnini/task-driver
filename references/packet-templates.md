@@ -74,6 +74,38 @@
 2. 复杂分组用多列（根据字段特点设计）
 3. 每组独立成表，用户可快速定位
 
+**适用范围**：
+- 展示完整 SpecPacket、PlanPacket、TaskResult、ReviewReport、VerificationReport。
+- 展示 packet 摘要、阶段交接、计划前确认、停机回问、用户验收门。
+- 展示包含扩展字段的评估结果，例如 `evaluation_result`、`go`、`no_go`、`decision_trace`、`shared_understanding`。
+
+**禁止格式**：
+- 不得把用户可见内容写成裸 YAML/JSON。
+- 不得直接输出 `spec_path:`、`target_id:`、`evaluation_result:`、`go:`、`no_go:` 这类字段行。
+- 不得在同一块内容中混用未翻译字段名和中文说明。
+
+**评估结论展示模板**：
+
+```markdown
+**评估结论[evaluation_result]**
+
+| 结论类型 | 对象 | 判断 | 建议 |
+|---|---|---|---|
+| 可融入[go] | [对象名称] | [通过/部分通过/不通过] | [融入路径或下一步] |
+| 不融入[no_go] | [对象名称] | [不通过原因] | [排除建议或后续触发条件] |
+
+**决策轨迹[decision_trace]**
+| 层级[layer] | 决策[decision] | 用户决策[user_decision] |
+|---|---|---|
+| [整体目标 / 大类/规划轴 / 范围切片 / 行为细节] | [已确认决策] | [确认 / ASM-N] |
+
+**下一步决策[next_step]**
+| 选项 | 含义 |
+|---|---|
+| 1. [选项名称] | [进入哪个阶段、会做什么] |
+| 2. [选项名称] | [停机、验收或后续触发条件] |
+```
+
 **PlanPacket 分组表格展示模板**：
 
 **面向用户展示（精简版）**：
@@ -143,6 +175,37 @@
 | ID | 内容 | 依据 | 验证点 | 失效处理 | 影响范围 |
 |---|---|---|---|---|---|
 | [ASM-1] | [具体假设] | [来自哪些文件、命令、日志或文档] | [在哪个任务或命令中验证] | [假设不成立时进入 blocked / plan-revision / brainstorming 的哪一路] | [影响哪些 T-NNN / AC-N] |
+```
+
+**GoalDraft 分组表格展示模板**：
+
+```markdown
+**目标草案[GoalDraft]**
+
+**基本信息**
+| 字段 | 值 |
+|---|---|
+| 目标ID[target_id] | [slug] |
+| 目标提供方[goal_provider] | [Codex 目标提供方[codex] / Claude Code 目标提供方[claude-code] / 执行台账目标提供方[ledger-only]] |
+| 状态[status] | [草稿[draft] / 进行中[active] / 不可用[unavailable] / 完成[complete] / 受阻[blocked]] |
+| 来源交接包[source_packet_ref] | [SpecPacket 路径或 inline id] |
+
+**目标契约**
+| 字段 | 值 |
+|---|---|
+| 结果[outcome] | [target_statement] |
+| 完成条件[completion_condition] | [success_definition] |
+| 验证面[verification_surface] | [AC-N verification 列表] |
+| 范围边界[boundaries] | [scope_denominator 列表] |
+| 约束[constraints] | [target_principles + constraints] |
+| 迭代策略[iteration_policy] | [每轮记录和退出规则] |
+| 阻塞停止条件[blocked_stop_condition] | [stop_or_loop_conditions] |
+| 目标检测[goal_detection] | [必须使用隔离目标验证者[isolated_goal_verifier]；可降级到新会话/外部工具/人工隔离审查；禁止同上下文自检] |
+
+**激活命令[activation_command]**
+```text
+[Codex Goal objective 或 Claude Code /goal 条件；ledger-only 可写 N/A]
+```
 ```
 
 **TaskResult 分组表格展示模板**：
@@ -230,6 +293,15 @@
 | 质量门[quality_gate] | [通过[pass] / 不适用[N/A] / 失败[fail]] |
 | 残余风险[residual_risk] | [通过[pass] / 部分通过[partial] / 失败[fail]] |
 | 自检优化循环[self_test_improve_loop] | [通过[pass] / 部分通过[partial] / 失败[fail]] |
+
+**隔离目标检测[isolated_goal_detection]**
+| 字段 | 值 |
+|---|---|
+| 验证者[verifier] | [隔离目标验证者[isolated_goal_verifier] / 子智能体[subagent]] |
+| 上下文输入[context_inputs] | [SpecPacket / GoalDraft / PlanPacket / ledger evidence / VerificationReport draft / 必要文件或命令输出] |
+| 证据引用[evidence_refs] | [EV-1 / coverage refs] |
+| 状态[status] | [通过[pass] / 部分通过[partial] / 失败[fail] / 受阻[blocked]] |
+| 发现[finding] | [检测结论] |
 
 **未满足需求[unmet_requirements]**
 | AC ID | 原因[reason] | 下一步动作[next_action] |
@@ -336,6 +408,36 @@ plan_packet:
   status: approved
 ```
 
+## GoalDraft
+
+```yaml
+goal_draft:
+  target_id: "[same as SpecPacket.target.target_id]"
+  goal_provider: codex | claude-code | ledger-only
+  outcome: "[target_statement]"
+  completion_condition: "[success_definition]"
+  verification_surface:
+    - "[AC-1 verification]"
+  constraints:
+    - "[target_principles or constraints]"
+  boundaries:
+    - "[scope_denominator item]"
+  iteration_policy: "每轮记录改动、证据、未满足项和下一步假设；同一问题最多两轮后路由到 blocked / plan-revision / brainstorming。"
+  blocked_stop_condition: "[stop_or_loop_conditions]"
+  goal_detection:
+    required: true
+    verifier: isolated_goal_verifier
+    context_policy: "只提供 SpecPacket、GoalDraft、PlanPacket、ledger evidence、VerificationReport draft 和必要文件/命令输出；不提供当前执行上下文推理。"
+    fallback_policy: "允许 new-session verifier / external verifier / manual isolated review；禁止 same-context self-check。"
+    evidence_required:
+      - "coverage[]"
+      - "target_coverage[]"
+      - "pre_acceptance_self_check"
+  activation_command: "[Claude Code /goal ... 或 Codex Goal objective；ledger-only 可为空]"
+  source_packet_ref: "[SpecPacket path or inline id]"
+  status: draft | active | unavailable | complete | blocked
+```
+
 ## TaskResult
 
 ```yaml
@@ -403,6 +505,12 @@ verification_report:
     quality_gate: pass | N/A | fail
     residual_risk: pass | partial | fail
     self_test_improve_loop: pass | partial | fail
+  isolated_goal_detection:
+    verifier: isolated_goal_verifier
+    context_inputs: ["SpecPacket", "GoalDraft", "PlanPacket", "ledger evidence", "VerificationReport draft"]
+    evidence_refs: [EV-1]
+    status: pass | partial | fail | blocked
+    finding: "[目标是否由当前证据证明]"
   unmet_requirements: []
   delivery_acknowledged_by_user: pending
   quality_score:

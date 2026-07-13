@@ -57,5 +57,18 @@ else
   fail "CHANGELOG.md not found"
 fi
 
-info "version metadata is consistent: $version"
+# 5. 检查 SKILL.md frontmatter 版本
+if [[ -f SKILL.md ]]; then
+  skill_version="$(python3 -c '
+import re
+text = open("SKILL.md", encoding="utf-8").read()
+m = re.search(r"^version:\s*([^\s]+)\s*$", text, re.M)
+print(m.group(1) if m else "")
+')"
+  [[ -n "$skill_version" ]] || fail "SKILL.md has no version field"
+  [[ "${version#v}" == "$skill_version" ]] || fail "VERSION ($version) != SKILL.md ($skill_version)"
+else
+  fail "SKILL.md not found"
+fi
 
+info "version metadata is consistent: $version"

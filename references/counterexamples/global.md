@@ -20,6 +20,36 @@
 - 违规：Packet 是机器契约，但面向用户展示时必须转换字段名和枚举值。`spec_path` 应显示为 `需求规格路径[spec_path]`，`approved_by_user` 应显示为 `用户已确认[approved_by_user]`，`status: approved` 应显示为 `状态[status]: 已确认[approved]`。
 - 回退：停止当前输出，按 `references/packet-templates.md` 的"面向用户展示规则"重新格式化 packet 内容，然后继续任务。
 
+## 阶段交接裸贴机器契约
+
+- 错误：需求澄清阶段结束后，面向用户直接输出 `spec_path: inline`、`target_id: ...`、`evaluation_result:`、`go:`、`no_go:`、`shared_understanding: true`，再询问"下一步开始实现还是到此为止"。
+- 违规：阶段交接、计划前确认、停机回问和评估结论属于用户可见 Packet 展示，不得裸贴 YAML/JSON 风格机器契约。扩展字段同样必须按 `中文[英文]` 格式渲染，并使用分组表格或清单展示。
+- 回退：将评估结论渲染为 `评估结论[evaluation_result]` 表格，将 SpecPacket 摘要渲染为分组表格，将下一步动作渲染为 `下一步决策[next_step]` 表格。
+
+## 目标模式过早激活
+
+- 错误：brainstorming 还没有 approved SpecPacket，就调用 Codex create_goal 或输出 Claude Code `/goal`。
+- 违规：Goal 必须由已确认 Target 派生；未确认 spec 的目标可能会固化错误范围、验收或风险边界。
+- 回退：清理或暂停未确认目标；回到 brainstorming 完成 SpecPacket 和 shared_understanding，再在 planning 生成 GoalDraft。
+
+## 静默覆盖已有 Goal
+
+- 错误：发现 Claude Code 或 Codex 已有 active goal，直接发送新的 `/goal` 或 create_goal 替换当前目标。
+- 违规：Claude Code 新 `/goal` 会替换旧 goal；Codex Goal 也属于线程级完成契约。target_id 不一致时必须停机回问，不得静默覆盖用户已有目标。
+- 回退：展示当前目标冲突、当前 Task Driver target_id 和建议选项；用户确认前降级为 `ledger-only` 或暂停执行。
+
+## 证据不足就完成 Goal
+
+- 错误：测试未覆盖全部 AC、target_coverage 缺失或仅有 diff 审查，就调用 `update_goal(status=complete)`，或把 Claude Code goal 自动 clear 当作任务完成。
+- 违规：Goal complete 必须由 VerificationReport 的当前证据证明；Goal 达成不等于用户验收。
+- 回退：回到 verification 补 Goal complete gate；证据不足则回到 executing、plan-revision、brainstorming 或 blocked。
+
+## 同上下文自证目标完成
+
+- 错误：实现者在同一上下文中读完自己刚写的 VerificationReport 后，直接判断 GoalDraft 已满足并标记 complete。
+- 违规：目标检测[goal_detection]必须由隔离上下文的子智能体[subagent]或等价 isolated verifier 执行；当前执行上下文不能自证目标完成。
+- 回退：将 SpecPacket、GoalDraft、PlanPacket、ledger evidence、VerificationReport 草稿和必要命令输出交给 isolated_goal_verifier；没有 subagent 时可降级为新会话、外部工具或人工隔离审查，但不得降级为同上下文自检。没有任何隔离检测路径时不得 complete，必须 blocked、回到 verification 或请求外部验证。
+
 ## 阶段进度说明裸用英文阶段名
 
 - 错误：面向用户说“进入 brainstorming 阶段”“补读 planning 协议”“进入 verification”或“执行 executing 阶段”，未使用中文显示名。

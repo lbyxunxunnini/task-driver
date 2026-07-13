@@ -279,7 +279,18 @@ Plan 任务必须达到以下粒度，缺一项即不得进入 executing：
 
 ## 阶段输出
 
-输出 `PlanPacket` 并创建 ledger。字段以 `SKILL.md` 的结构化交接 Packet 为准；本阶段至少填入 plan 路径、ledger 路径、门禁模式、执行模式、任务 id、owner role、objective、files、steps、verification、stop conditions。
+输出 `PlanPacket`、`GoalDraft` 并创建 ledger。字段以 `SKILL.md` 的结构化交接 Packet 为准；本阶段至少填入 plan 路径、ledger 路径、门禁模式、执行模式、任务 id、owner role、objective、files、steps、verification、stop conditions。
+
+GoalDraft 必须从 approved SpecPacket.target 派生，不得引入新目标或弱化目标：
+
+- `outcome` 使用 target_statement。
+- `completion_condition` 使用 success_definition。
+- `verification_surface` 使用 acceptance_criteria[].verification。
+- `boundaries` 使用 scope_denominator。
+- `constraints` 合并 target_principles 和 constraints。
+- `blocked_stop_condition` 使用 stop_or_loop_conditions。
+- `goal_detection` 固定要求 `required: true`，`verifier: isolated_goal_verifier`，并声明只向检测者提供 packet、ledger evidence、验证报告草稿和必要文件/命令输出；fallback_policy 必须允许新会话、外部工具或人工隔离审查，但禁止同上下文自检。
+- `activation_command` 根据 goal_provider 生成：Codex 写 objective 摘要；Claude Code 写 `/goal <condition>`；ledger-only 写 `N/A`。
 
 ## 自检门禁
 
@@ -290,6 +301,10 @@ Plan 任务必须达到以下粒度，缺一项即不得进入 executing：
 - 检查 spec 的 Grilling Summary：`shared_understanding` 必须为 true；`unresolved_branches` 非空时必须证明不影响本轮 AC、风险边界和验证方式。
 - 检查 spec 的 Design Tree Coverage：目标、范围、行为、方案、验证、风险分支必须覆盖；不得存在 open 分支。
 - 检查 Target 是否存在并贯穿 plan；每个任务和验证项必须能映射到 target_id、AC 或 stop_or_loop_conditions。
+- 检查 GoalDraft.target_id 是否等于 SpecPacket.target.target_id，且 verification_surface 覆盖每条 AC-N。
+- 检查 GoalDraft.goal_detection.required 是否为 true；若当前环境没有 subagent，计划必须写明降级到新会话、外部工具或人工隔离审查；不能静默改为同上下文自检。
+- 检查 goal_provider 是否为 `codex` / `claude-code` / `ledger-only` 之一；无法确定宿主能力时使用 `ledger-only` 并写明降级原因。
+- Claude Code 的 activation_command 必须要求把验证命令、AC 状态、目标分母状态和 blocker 写进对话或 ledger；否则 evaluator 无法可靠判断。
 - 检查 scope_denominator 是否完整进入 Target Coverage Matrix；任何未计划目标单元都是 Critical 缺口，不得进入 executing。
 - 检查 target_principles 是否贯穿拆解、任务顺序、验证强度和取舍说明。
 - 检查 Decomposition Strategy 是否说明拆解轴、层级、每层产物和粒度下限；不得只有 Phase 或文件列表。
