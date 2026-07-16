@@ -3,7 +3,7 @@
 ## 项目信息
 
 - **名称**：任务驱动
-- **版本**：v0.9.0
+- **版本**：v0.9.1
 - **定位**：低认知负担的复杂任务推进 skill
 - **GitHub**：[lbyxunxunnini/task-driver](https://github.com/lbyxunxunnini/task-driver)
 - **父级规则**：[agent设计/CLAUDE.md](../CLAUDE.md)
@@ -25,7 +25,7 @@
 
 | 文件 | 职责 |
 |------|------|
-| `SKILL.md` | 触发规则和 v1.0 核心链路 |
+| `SKILL.md` | 触发规则和当前核心链路 |
 | `README.md` | 面向安装和使用的说明 |
 | `references/quick-start.md` | 极简使用示例 |
 | `scripts/check-contracts.sh` | 防止旧流程和旧术语回退 |
