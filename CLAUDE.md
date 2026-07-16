@@ -29,7 +29,7 @@
 | `README.md` | 面向安装和使用的说明 |
 | `references/quick-start.md` | 极简使用示例 |
 | `scripts/check-contracts.sh` | 防止旧流程和旧术语回退 |
-| `VERSION` | 当前版本号 |
+| `VERSION.md` | 当前版本号 |
 | `CHANGELOG.md` | 版本日志 |
 
 ## 开发规则
@@ -49,8 +49,8 @@
 
 ## 版本管理
 
-- 版本号同步：`SKILL.md` / `VERSION` / `.skillhub.json` / `README.md` / `CHANGELOG.md`。
-- 版本对齐基准：本地 `VERSION` 文件。
+- 版本号同步：`SKILL.md` / `VERSION.md` / `.skillhub.json` / `README.md` / `CHANGELOG.md`。
+- 版本对齐基准：本地 `VERSION.md` 文件。
 - 发布前运行 `bash scripts/release_checks/metadata.sh`。
 
 ## Git 约束

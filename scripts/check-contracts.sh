@@ -37,7 +37,7 @@ require_file SKILL.md
 require_file README.md
 require_file CLAUDE.md
 require_file references/quick-start.md
-require_file VERSION
+require_file VERSION.md
 
 DOC_SCOPE='SKILL.md README.md CLAUDE.md references/quick-start.md'
 

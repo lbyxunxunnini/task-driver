@@ -144,7 +144,7 @@ tdr- 帮我把阶段2接入生图能力重新梳理并实现
 task-driver/
   SKILL.md
   README.md
-  VERSION
+  VERSION.md
   CHANGELOG.md
   references/
     quick-start.md

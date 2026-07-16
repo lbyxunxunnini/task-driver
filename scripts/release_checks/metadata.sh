@@ -1,5 +1,5 @@
 #!/bin/bash
-# 版本一致性校验：VERSION、.skillhub.json、README、CHANGELOG 四处必须一致
+# 版本一致性校验：VERSION.md、.skillhub.json、README、CHANGELOG 四处必须一致
 set -euo pipefail
 
 RED="[0;31m"
@@ -11,12 +11,12 @@ fail() { echo -e "${RED}FAIL${NC}: $1"; exit 1; }
 info() { echo -e "${GREEN}PASS${NC}: $1"; }
 warn() { echo -e "${YELLOW}WARN${NC}: $1"; }
 
-# 1. 读取 VERSION
-if [[ ! -f VERSION ]]; then
-  fail "VERSION file not found"
+# 1. 读取 VERSION.md
+if [[ ! -f VERSION.md ]]; then
+  fail "VERSION.md file not found"
 fi
-version="$(tr -d '[:space:]' < VERSION)"
-[[ -n "$version" ]] || fail "VERSION file is empty"
+version="$(tr -d '[:space:]' < VERSION.md)"
+[[ -n "$version" ]] || fail "VERSION.md file is empty"
 
 # 2. 读取 .skillhub.json
 if [[ -f .skillhub.json ]]; then
