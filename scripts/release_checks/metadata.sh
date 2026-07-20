@@ -1,5 +1,5 @@
 #!/bin/bash
-# 版本一致性校验：VERSION.md、.skillhub.json、README、CHANGELOG 四处必须一致
+# 发布元数据校验：版本号必须一致，SkillHub 展示名必须保持稳定
 set -euo pipefail
 
 RED="[0;31m"
@@ -67,8 +67,16 @@ print(m.group(1) if m else "")
 ')"
   [[ -n "$skill_version" ]] || fail "SKILL.md has no version field"
   [[ "${version#v}" == "$skill_version" ]] || fail "VERSION ($version) != SKILL.md ($skill_version)"
+
+  skill_display_name="$(python3 -c '
+import re
+text = open("SKILL.md", encoding="utf-8").read()
+m = re.search(r"^displayName:\s*(.+?)\s*$", text, re.M)
+print(m.group(1) if m else "")
+')"
+  [[ "$skill_display_name" == "Task Driver" ]] || fail "SKILL.md displayName must be Task Driver (found: $skill_display_name)"
 else
   fail "SKILL.md not found"
 fi
 
-info "version metadata is consistent: $version"
+info "release metadata is consistent: $version / Task Driver"
