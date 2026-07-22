@@ -1,5 +1,5 @@
 {
   "name": "task-driver",
   "description": "必须触发：用户消息以 tdr-、task-driver 或 /task-driver 开头时，立即调用任务驱动。",
-  "version": "v0.9.2"
+  "version": "v0.9.3"
 }
