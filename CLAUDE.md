@@ -30,6 +30,7 @@
 | `references/quick-start.md` | 极简使用示例 |
 | `references/faq.md` | 常见流程、异常、权限和恢复问题的直接答案 |
 | `references/scenarios.md` | 五类业务任务的讨论、计划、验证与停止边界 |
+| `references/templates.md` | 计划摘要、计划草案、异常通知和用户验收通知的展示模板 |
 | `scripts/check-contracts.sh` | 防止旧流程和旧术语回退 |
 | `VERSION.md` | 当前版本号 |
 | `CHANGELOG.md` | 版本日志 |

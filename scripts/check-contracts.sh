@@ -39,6 +39,7 @@ require_file CLAUDE.md
 require_file references/quick-start.md
 require_file references/faq.md
 require_file references/scenarios.md
+require_file references/templates.md
 require_file VERSION.md
 require_file tests/dialogue-contracts/explicit-discussion-request.md
 require_file tests/dialogue-contracts/discussion-transition.md
