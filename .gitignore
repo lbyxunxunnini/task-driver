@@ -1,4 +1,6 @@
 .task-driver/
 pm-memory/
-CLAUDE.md
+CLAUDE.local.md
 .claude/
+.DS_Store
+references/.DS_Store
