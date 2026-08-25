@@ -53,10 +53,11 @@ require_file tests/dialogue-contracts/retry-strategy-change.md
 require_file tests/dialogue-contracts/unified-exception-notice.md
 require_file tests/dialogue-contracts/progressive-doc-routing.md
 require_file tests/dialogue-contracts/deferred-goal-tools.md
+require_file tests/dialogue-contracts/visible-reply-boundary.md
 
 DOC_SCOPE='SKILL.md README.md CLAUDE.md references/quick-start.md references/faq.md references/scenarios.md'
 
-# 主流程必须先讨论，再输出计划和最终验收目标；v0.9.4 的验收目标支持分流。
+# 主流程必须先讨论，再输出计划和最终验收目标；v0.9.5 保留验收目标分流并补充回复边界。
 require_match '仔细询问并逐项讨论' SKILL.md
 require_match '输出计划' SKILL.md
 require_match '讨论并确认计划' SKILL.md
@@ -76,6 +77,13 @@ require_match '已确认决定' SKILL.md
 require_match '用户选择生成计划前，不得输出完整计划' SKILL.md
 require_match '继续讨论，或结束讨论并生成计划' SKILL.md
 require_match '普通“确认”“继续”“可以”' SKILL.md
+require_match '## 回复提交门禁' SKILL.md
+require_match '用户可见回复' SKILL.md
+require_match '发出回复后立即结束本轮' SKILL.md
+require_match 'reasoning、工具调用说明、工具参数和内部状态不算回复' SKILL.md
+require_match '不得在同一轮继续预演下一阶段' SKILL.md
+require_match '不为了满足格式制造新选项' SKILL.md
+require_match '发出回复后立即结束本轮' tests/dialogue-contracts/visible-reply-boundary.md
 
 # 计划必须说明实施方法，并以已确认事项为顶层结构。
 require_match '顶层计划事项必须按照已确认的需求或问题组织' SKILL.md
@@ -182,7 +190,7 @@ require_match '每个计划事项必须展示“已确认”和“实施方案�
 require_match '计划确认后先输出验收目标草案' README.md
 require_match '用户确认后的目标原样进入目标模式' README.md
 require_match '需要用户验收时' README.md
-require_match '当前版本：v0.9.4' README.md
+require_match '当前版本：v0.9.5' README.md
 require_match '仔细询问并逐项讨论' CLAUDE.md
 require_match '计划确认后先输出验收目标草案' CLAUDE.md
 require_match '任务规模必须按业务目标、权限、风险、交付和回滚关系判断' CLAUDE.md

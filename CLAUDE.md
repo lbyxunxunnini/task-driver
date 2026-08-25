@@ -3,7 +3,7 @@
 ## 项目信息
 
 - **名称**：任务驱动
-- **版本**：v0.9.4
+- **版本**：v0.9.5
 - **定位**：低认知负担的复杂任务推进 skill
 - **GitHub**：[lbyxunxunnini/task-driver](https://github.com/lbyxunxunnini/task-driver)
 - **父级规则**：[agent设计/CLAUDE.md](../CLAUDE.md)
