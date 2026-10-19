@@ -214,7 +214,7 @@ require_match '每个计划事项必须展示“已确认”和“实施方案�
 require_match '倾向合并展示计划与验收目标' README.md
 require_match '用户确认后的目标原样进入目标模式' README.md
 require_match '需要用户验收时' README.md
-require_match '当前版本：v0.9.5' README.md
+require_match '当前版本：v1.0.0' README.md
 require_match '逐项讨论' references/quick-start.md
 require_match '计划包含实施方案' tests/dialogue-contracts/plan-with-implementation.md
 require_match '五项目标覆盖' tests/dialogue-contracts/end-to-end-small-case.md

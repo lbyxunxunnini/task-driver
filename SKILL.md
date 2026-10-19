@@ -1,7 +1,7 @@
 ---
 slug: task-driver-user-88546431
 displayName: Task Driver
-version: 0.9.5
+version: 1.0.0
 summary: 负责逐项讨论需求、输出含实施方案的计划、共同形成最终验收目标并创建目标执行；适配 deferred 目标工具并同步任务状态，异常先分类，只有可修复问题进入最多三次的修复循环。
 tags: [agent, workflow, task-management]
 license: MIT
