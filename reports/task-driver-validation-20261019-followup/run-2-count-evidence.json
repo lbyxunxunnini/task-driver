@@ -1,0 +1,278 @@
+[
+  {
+    "source_line": 24,
+    "input": {
+      "pattern": "integration_test/**/*"
+    },
+    "metadata": {
+      "numFiles": 0,
+      "totalMatches": 0,
+      "countIsComplete": true,
+      "truncated": false
+    }
+  },
+  {
+    "source_line": 25,
+    "input": {
+      "pattern": "test/**/*"
+    },
+    "metadata": {
+      "numFiles": 12,
+      "totalMatches": 12,
+      "countIsComplete": true,
+      "truncated": false
+    }
+  },
+  {
+    "source_line": 57,
+    "input": {
+      "pattern": "lib/**/*.dart"
+    },
+    "metadata": {
+      "numFiles": 100,
+      "totalMatches": 790,
+      "countIsComplete": true,
+      "truncated": true
+    }
+  },
+  {
+    "source_line": 65,
+    "input": {
+      "pattern": "lib/screens/**/*.dart"
+    },
+    "metadata": {
+      "numFiles": 100,
+      "totalMatches": 343,
+      "countIsComplete": true,
+      "truncated": true
+    }
+  },
+  {
+    "source_line": 66,
+    "input": {
+      "pattern": "lib/services/*.dart"
+    },
+    "metadata": {
+      "numFiles": 23,
+      "totalMatches": 23,
+      "countIsComplete": true,
+      "truncated": false
+    }
+  },
+  {
+    "source_line": 67,
+    "input": {
+      "pattern": "lib/controllers/**/*.dart"
+    },
+    "metadata": {
+      "numFiles": 35,
+      "totalMatches": 35,
+      "countIsComplete": true,
+      "truncated": false
+    }
+  },
+  {
+    "source_line": 68,
+    "input": {
+      "pattern": "lib/beans/**/*.dart"
+    },
+    "metadata": {
+      "numFiles": 100,
+      "totalMatches": 104,
+      "countIsComplete": true,
+      "truncated": true
+    }
+  },
+  {
+    "source_line": 69,
+    "input": {
+      "pattern": "test/**/*_test.dart"
+    },
+    "metadata": {
+      "numFiles": 12,
+      "totalMatches": 12,
+      "countIsComplete": true,
+      "truncated": false
+    }
+  },
+  {
+    "source_line": 70,
+    "input": {
+      "pattern": "lib/screens/home/*.dart"
+    },
+    "metadata": {
+      "numFiles": 6,
+      "totalMatches": 6,
+      "countIsComplete": true,
+      "truncated": false
+    }
+  },
+  {
+    "source_line": 82,
+    "input": {
+      "pattern": "test/**/*.dart"
+    },
+    "metadata": {
+      "numFiles": 12,
+      "totalMatches": 12,
+      "countIsComplete": true,
+      "truncated": false
+    }
+  },
+  {
+    "source_line": 83,
+    "input": {
+      "pattern": ".github/workflows/*"
+    },
+    "metadata": {
+      "numFiles": 0,
+      "totalMatches": 0,
+      "countIsComplete": true,
+      "truncated": false
+    }
+  },
+  {
+    "source_line": 97,
+    "input": {
+      "pattern": "lib/common/utils/*.dart"
+    },
+    "metadata": {
+      "numFiles": 32,
+      "totalMatches": 32,
+      "countIsComplete": true,
+      "truncated": false
+    }
+  },
+  {
+    "source_line": 98,
+    "input": {
+      "pattern": "lib/common/mixins/*.dart"
+    },
+    "metadata": {
+      "numFiles": 9,
+      "totalMatches": 9,
+      "countIsComplete": true,
+      "truncated": false
+    }
+  },
+  {
+    "source_line": 163,
+    "input": {
+      "pattern": "lib/screens/create_song_home/**/*.dart"
+    },
+    "metadata": {
+      "numFiles": 15,
+      "totalMatches": 15,
+      "countIsComplete": true,
+      "truncated": false
+    }
+  },
+  {
+    "source_line": 190,
+    "input": {
+      "pattern": "scripts/**/*"
+    },
+    "metadata": {
+      "numFiles": 1,
+      "totalMatches": 1,
+      "countIsComplete": true,
+      "truncated": false
+    }
+  },
+  {
+    "source_line": 191,
+    "input": {
+      "pattern": "**/*.sh"
+    },
+    "metadata": {
+      "numFiles": 19,
+      "totalMatches": 19,
+      "countIsComplete": true,
+      "truncated": false
+    }
+  },
+  {
+    "source_line": 192,
+    "input": {
+      "pattern": "docs/**/*"
+    },
+    "metadata": {
+      "numFiles": 0,
+      "totalMatches": 0,
+      "countIsComplete": true,
+      "truncated": false
+    }
+  },
+  {
+    "source_line": 202,
+    "input": {
+      "pattern": ".ai/playbooks/*"
+    },
+    "metadata": {
+      "numFiles": 1,
+      "totalMatches": 1,
+      "countIsComplete": true,
+      "truncated": false
+    }
+  },
+  {
+    "source_line": 203,
+    "input": {
+      "pattern": "README.md"
+    },
+    "metadata": {
+      "numFiles": 24,
+      "totalMatches": 24,
+      "countIsComplete": true,
+      "truncated": false
+    }
+  },
+  {
+    "source_line": 291,
+    "input": {
+      "pattern": "docs/*"
+    },
+    "metadata": {
+      "numFiles": 0,
+      "totalMatches": 0,
+      "countIsComplete": true,
+      "truncated": false
+    }
+  },
+  {
+    "source_line": 292,
+    "input": {
+      "pattern": "docs/**"
+    },
+    "metadata": {
+      "numFiles": 0,
+      "totalMatches": 0,
+      "countIsComplete": true,
+      "truncated": false
+    }
+  },
+  {
+    "source_line": 302,
+    "input": {
+      "pattern": "docs/*/*"
+    },
+    "metadata": {
+      "numFiles": 0,
+      "totalMatches": 0,
+      "countIsComplete": true,
+      "truncated": false
+    }
+  },
+  {
+    "source_line": 303,
+    "input": {
+      "pattern": "*.md"
+    },
+    "metadata": {
+      "numFiles": 100,
+      "totalMatches": 193,
+      "countIsComplete": true,
+      "truncated": true
+    }
+  }
+]

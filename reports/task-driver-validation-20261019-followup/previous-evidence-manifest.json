@@ -1,0 +1,16 @@
+{
+  "reports/task-driver-validation-20261019/changed-files.json": "39cd82fd94646bfda4d1c430b0803513de584805abe020d70c9ee169ad2a0f99",
+  "reports/task-driver-validation-20261019/run-2-dialogue.md": "0d699e62b023269d304228a8c2ca8956461b036c15ec385d085f3455dd578d54",
+  "reports/task-driver-validation-20261019/run-2-plan-and-goals.md": "8f022dc133111cf76329e2122f612bc2f5b0e7cb9a4879acaae13ade6a143184",
+  "reports/task-driver-validation-20261019/run-1-metadata.json": "59dc4021d8022ab170ef8ea6011d035f86a1665475be0aef4417f801303a1b56",
+  "reports/task-driver-validation-20261019/run-1-dialogue.md": "ebcfe31d0927cb0d2df2e459c0e02dfac142cb7b259bdcc011848d0b0eb213f2",
+  "reports/task-driver-validation-20261019/project-after.json": "89bee21e0de56d33d34a3b8a955814a97ab9d49e16ef3fb3215e19aad8d36800",
+  "reports/task-driver-validation-20261019/run-1-events.jsonl": "4553a1b05f121cc00c9b184c6795fe360b063170d4390d917a49eb1e06ee2160",
+  "reports/task-driver-validation-20261019/run-1-plan-and-goals.md": "18f7f66b41c9a1bdcaac01737c9ac469897c962cf1fa0eb54321c105209a95b5",
+  "reports/task-driver-validation-20261019/run-2-metadata.json": "fe9c0f5271dbc0cf9d5ae25f5f76d47ee3dc1fb2771f55fe3ca33886a21f4191",
+  "reports/task-driver-validation-20261019/README.md": "37f216751f0f9ce5b2effa9f198264855a547f556a718f8603b0b9dccceb4880",
+  "reports/task-driver-validation-20261019/run-2-events.jsonl": "2b60fb82e6cbcfed98fffd26d0200754eb40b0fb54fa6aa1e5373365beb1f06a",
+  "reports/task-driver-validation-20261019/candidate-manifest.json": "51285d63e4d716a7955dbf479fcb4fffc4bbffb5ae8107a842385d7dc64899ea",
+  "reports/task-driver-validation-20261019/project-before.json": "65fce3376c3e576392fd4bb2c6ccb4726bf6bf1995f586246b2e1dff9bebf368",
+  "reports/task-driver-validation-20261019/baseline-to-candidate.patch": "240720737d7ee12edce4f0d438c707107cdea1b7c87014b04203d2d2c8177b31"
+}

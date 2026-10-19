@@ -8,4 +8,4 @@ CLAUDE.md
 AGENTS.md
 .codex/
 __pycache__/
-*.pyc
+*.py[cod]

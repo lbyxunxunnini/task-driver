@@ -1,0 +1,15 @@
+{
+  "plugin": "/var/folders/40/69djlhqn515fkd6tzfpqqhp8h0s5p6/T/task-driver-live-validation-bbhd2o1a/plugin",
+  "settings": "/var/folders/40/69djlhqn515fkd6tzfpqqhp8h0s5p6/T/task-driver-live-validation-bbhd2o1a/readonly-settings.json",
+  "files": {
+    "SKILL.md": "4ab4e1f09b485c87cf098d7708d0c8cf6efdb2c71122f336d0f8b22c84087631",
+    "references/.DS_Store": "18a07c825f31b60a7ade7078630332f60006d48b0dc771233f1b6821303d5449",
+    "references/faq.md": "21f05e16d0158195e27b3e1e673aca4d217ecab02c8e962a18cc033e500c6b50",
+    "references/quick-start.md": "89ccc007464b7a8e9144f17595626e45bb6eccb7dce370ecf2b05a4a61f9f883",
+    "references/scenarios.md": "0e5aec0db65aeab7b35e51010b04095451063b6d6f23e1e49942d013585525b5",
+    "references/templates.md": "a5b8f92afe722f951c23008cdebade59bdba0a01415dd543dc5f417f2dffc50f"
+  },
+  "claude_version": "2.1.236",
+  "project": "/Users/agi00114/Desktop/flutter项目/facesong_flutter",
+  "write_tools_exposed": false
+}

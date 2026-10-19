@@ -1,0 +1,67 @@
+fvm flutter test --no-pub --no-test-assets test/common/utils/extension_duration_test.dart test/common/utils/extension_list_test.dart 2>&1 | tail -30
+
+
+00:00 +0: loading /private/var/folders/40/69djlhqn515fkd6tzfpqqhp8h0s5p6/T/task-driver-final-review-_os8wk47/facesong_flutter/test/common/utils/extension_duration_test.dart                           
+00:01 +0: loading /private/var/folders/40/69djlhqn515fkd6tzfpqqhp8h0s5p6/T/task-driver-final-review-_os8wk47/facesong_flutter/test/common/utils/extension_duration_test.dart                           
+00:01 +0: /private/var/folders/40/69djlhqn515fkd6tzfpqqhp8h0s5p6/T/task-driver-final-review-_os8wk47/facesong_flutter/test/common/utils/extension_duration_test.dart: mmss formats zero duration       
+00:01 +1: /private/var/folders/40/69djlhqn515fkd6tzfpqqhp8h0s5p6/T/task-driver-final-review-_os8wk47/facesong_flutter/test/common/utils/extension_duration_test.dart: mmss formats zero duration       
+00:01 +1: ... mmss formats seconds below one minute                                                                                                                                                    
+00:01 +2: ... mmss formats seconds below one minute                                                                                                                                                    
+00:01 +2: ... mmss formats one minute boundaries                                                                                                                                                       
+00:01 +3: ... mmss formats one minute boundaries                                                                                                                                                       
+00:01 +3: /private/var/folders/40/69djlhqn515fkd6tzfpqqhp8h0s5p6/T/task-driver-final-review-_os8wk47/facesong_flutter/test/common/utils/extension_duration_test.dart: ... formats 59 minutes 59 seconds
+00:01 +4: /private/var/folders/40/69djlhqn515fkd6tzfpqqhp8h0s5p6/T/task-driver-final-review-_os8wk47/facesong_flutter/test/common/utils/extension_duration_test.dart: ... formats 59 minutes 59 seconds
+00:01 +4: /private/var/folders/40/69djlhqn515fkd6tzfpqqhp8h0s5p6/T/task-driver-final-review-_os8wk47/facesong_flutter/test/common/utils/extension_duration_test.dart: ... one hour as 60 minutes       
+00:01 +5: /private/var/folders/40/69djlhqn515fkd6tzfpqqhp8h0s5p6/T/task-driver-final-review-_os8wk47/facesong_flutter/test/common/utils/extension_duration_test.dart: ... one hour as 60 minutes       
+00:01 +5: /private/var/folders/40/69djlhqn515fkd6tzfpqqhp8h0s5p6/T/task-driver-final-review-_os8wk47/facesong_flutter/test/common/utils/extension_duration_test.dart: ... not cap minutes at two digits
+00:01 +6: /private/var/folders/40/69djlhqn515fkd6tzfpqqhp8h0s5p6/T/task-driver-final-review-_os8wk47/facesong_flutter/test/common/utils/extension_duration_test.dart: ... not cap minutes at two digits
+00:01 +6: ... mmss - boundary truncates milliseconds below one second                                                                                                                                  
+00:01 +7: ... mmss - boundary truncates milliseconds below one second                                                                                                                                  
+00:01 +7: ... mmss - boundary truncates sub-second remainder instead of rounding                                                                                                                       
+00:01 +8: ... mmss - boundary truncates sub-second remainder instead of rounding                                                                                                                       
+00:01 +8: /private/var/folders/40/69djlhqn515fkd6tzfpqqhp8h0s5p6/T/task-driver-final-review-_os8wk47/facesong_flutter/test/common/utils/extension_duration_test.dart: ... not cap hours at two digits  
+00:01 +9: /private/var/folders/40/69djlhqn515fkd6tzfpqqhp8h0s5p6/T/task-driver-final-review-_os8wk47/facesong_flutter/test/common/utils/extension_duration_test.dart: ... not cap hours at two digits  
+00:01 +9: /private/var/folders/40/69djlhqn515fkd6tzfpqqhp8h0s5p6/T/task-driver-final-review-_os8wk47/facesong_flutter/test/common/utils/extension_duration_test.dart: ... current output for -5 seconds
+00:01 +10: ... mmss - negative duration (non-contract) records current output for -5 seconds                                                                                                           
+00:01 +10: ... mmss - negative duration (non-contract) records current output for -65 seconds                                                                                                          
+00:01 +11: ... mmss - negative duration (non-contract) records current output for -65 seconds                                                                                                          
+00:01 +11: loading /private/var/folders/40/69djlhqn515fkd6tzfpqqhp8h0s5p6/T/task-driver-final-review-_os8wk47/facesong_flutter/test/common/utils/extension_list_test.dart                              
+00:01 +11: /private/var/folders/40/69djlhqn515fkd6tzfpqqhp8h0s5p6/T/task-driver-final-review-_os8wk47/facesong_flutter/test/common/utils/extension_list_test.dart: ... empty list for an empty iterable
+00:01 +12: /private/var/folders/40/69djlhqn515fkd6tzfpqqhp8h0s5p6/T/task-driver-final-review-_os8wk47/facesong_flutter/test/common/utils/extension_list_test.dart: ... empty list for an empty iterable
+00:01 +12: /private/var/folders/40/69djlhqn515fkd6tzfpqqhp8h0s5p6/T/task-driver-final-review-_os8wk47/facesong_flutter/test/common/utils/extension_list_test.dart: ... a separator for a single element
+00:01 +13: /private/var/folders/40/69djlhqn515fkd6tzfpqqhp8h0s5p6/T/task-driver-final-review-_os8wk47/facesong_flutter/test/common/utils/extension_list_test.dart: ... a separator for a single element
+00:01 +13: ... joinWith inserts the separator between elements only                                                                                                                                    
+00:01 +14: ... joinWith inserts the separator between elements only                                                                                                                                    
+00:01 +14: ... joinWith inserts by position even when the separator equals element values                                                                                                              
+00:01 +15: ... joinWith inserts by position even when the separator equals element values                                                                                                              
+00:01 +15: /private/var/folders/40/69djlhqn515fkd6tzfpqqhp8h0s5p6/T/task-driver-final-review-_os8wk47/facesong_flutter/test/common/utils/extension_list_test.dart: joinWith works with a Set iterable  
+00:01 +16: /private/var/folders/40/69djlhqn515fkd6tzfpqqhp8h0s5p6/T/task-driver-final-review-_os8wk47/facesong_flutter/test/common/utils/extension_list_test.dart: joinWith works with a Set iterable  
+00:01 +16: /private/var/folders/40/69djlhqn515fkd6tzfpqqhp8h0s5p6/T/task-driver-final-review-_os8wk47/facesong_flutter/test/common/utils/extension_list_test.dart: ... with a lazily generated iterable
+00:01 +17: /private/var/folders/40/69djlhqn515fkd6tzfpqqhp8h0s5p6/T/task-driver-final-review-_os8wk47/facesong_flutter/test/common/utils/extension_list_test.dart: ... with a lazily generated iterable
+00:01 +17: /private/var/folders/40/69djlhqn515fkd6tzfpqqhp8h0s5p6/T/task-driver-final-review-_os8wk47/facesong_flutter/test/common/utils/extension_list_test.dart: joinWith returns a List instance    
+00:01 +18: /private/var/folders/40/69djlhqn515fkd6tzfpqqhp8h0s5p6/T/task-driver-final-review-_os8wk47/facesong_flutter/test/common/utils/extension_list_test.dart: joinWith returns a List instance    
+00:01 +18: /private/var/folders/40/69djlhqn515fkd6tzfpqqhp8h0s5p6/T/task-driver-final-review-_os8wk47/facesong_flutter/test/common/utils/extension_list_test.dart: ... instance instead of copying it  
+00:01 +19: /private/var/folders/40/69djlhqn515fkd6tzfpqqhp8h0s5p6/T/task-driver-final-review-_os8wk47/facesong_flutter/test/common/utils/extension_list_test.dart: ... instance instead of copying it  
+00:01 +19: /private/var/folders/40/69djlhqn515fkd6tzfpqqhp8h0s5p6/T/task-driver-final-review-_os8wk47/facesong_flutter/test/common/utils/extension_list_test.dart: ... removes the element at index 0  
+00:01 +20: /private/var/folders/40/69djlhqn515fkd6tzfpqqhp8h0s5p6/T/task-driver-final-review-_os8wk47/facesong_flutter/test/common/utils/extension_list_test.dart: ... removes the element at index 0  
+00:01 +20: /private/var/folders/40/69djlhqn515fkd6tzfpqqhp8h0s5p6/T/task-driver-final-review-_os8wk47/facesong_flutter/test/common/utils/extension_list_test.dart: ... the element at a middle index   
+00:01 +21: /private/var/folders/40/69djlhqn515fkd6tzfpqqhp8h0s5p6/T/task-driver-final-review-_os8wk47/facesong_flutter/test/common/utils/extension_list_test.dart: ... the element at a middle index   
+00:01 +21: /private/var/folders/40/69djlhqn515fkd6tzfpqqhp8h0s5p6/T/task-driver-final-review-_os8wk47/facesong_flutter/test/common/utils/extension_list_test.dart: ... the element at the last index   
+00:01 +22: /private/var/folders/40/69djlhqn515fkd6tzfpqqhp8h0s5p6/T/task-driver-final-review-_os8wk47/facesong_flutter/test/common/utils/extension_list_test.dart: ... the element at the last index   
+00:01 +22: /private/var/folders/40/69djlhqn515fkd6tzfpqqhp8h0s5p6/T/task-driver-final-review-_os8wk47/facesong_flutter/test/common/utils/extension_list_test.dart: ... the only element is excluded    
+00:02 +23: /private/var/folders/40/69djlhqn515fkd6tzfpqqhp8h0s5p6/T/task-driver-final-review-_os8wk47/facesong_flutter/test/common/utils/extension_list_test.dart: ... the only element is excluded    
+00:02 +23: /private/var/folders/40/69djlhqn515fkd6tzfpqqhp8h0s5p6/T/task-driver-final-review-_os8wk47/facesong_flutter/test/common/utils/extension_list_test.dart: ... given index when values repeat  
+00:02 +24: /private/var/folders/40/69djlhqn515fkd6tzfpqqhp8h0s5p6/T/task-driver-final-review-_os8wk47/facesong_flutter/test/common/utils/extension_list_test.dart: ... given index when values repeat  
+00:02 +24: /private/var/folders/40/69djlhqn515fkd6tzfpqqhp8h0s5p6/T/task-driver-final-review-_os8wk47/facesong_flutter/test/common/utils/extension_list_test.dart: ... empty list for an empty iterable
+00:02 +25: /private/var/folders/40/69djlhqn515fkd6tzfpqqhp8h0s5p6/T/task-driver-final-review-_os8wk47/facesong_flutter/test/common/utils/extension_list_test.dart: ... empty list for an empty iterable
+00:02 +25: /private/var/folders/40/69djlhqn515fkd6tzfpqqhp8h0s5p6/T/task-driver-final-review-_os8wk47/facesong_flutter/test/common/utils/extension_list_test.dart: ... elements for a negative index   
+00:02 +26: /private/var/folders/40/69djlhqn515fkd6tzfpqqhp8h0s5p6/T/task-driver-final-review-_os8wk47/facesong_flutter/test/common/utils/extension_list_test.dart: ... elements for a negative index   
+00:02 +26: /private/var/folders/40/69djlhqn515fkd6tzfpqqhp8h0s5p6/T/task-driver-final-review-_os8wk47/facesong_flutter/test/common/utils/extension_list_test.dart: ... when the index equals the length
+00:02 +27: /private/var/folders/40/69djlhqn515fkd6tzfpqqhp8h0s5p6/T/task-driver-final-review-_os8wk47/facesong_flutter/test/common/utils/extension_list_test.dart: ... when the index equals the length
+00:02 +27: /private/var/folders/40/69djlhqn515fkd6tzfpqqhp8h0s5p6/T/task-driver-final-review-_os8wk47/facesong_flutter/test/common/utils/extension_list_test.dart: ... index is far beyond the length  
+00:02 +28: /private/var/folders/40/69djlhqn515fkd6tzfpqqhp8h0s5p6/T/task-driver-final-review-_os8wk47/facesong_flutter/test/common/utils/extension_list_test.dart: ... index is far beyond the length  
+00:02 +28: /private/var/folders/40/69djlhqn515fkd6tzfpqqhp8h0s5p6/T/task-driver-final-review-_os8wk47/facesong_flutter/test/common/utils/extension_list_test.dart: ... lazy Iterable rather than a List
+00:02 +29: /private/var/folders/40/69djlhqn515fkd6tzfpqqhp8h0s5p6/T/task-driver-final-review-_os8wk47/facesong_flutter/test/common/utils/extension_list_test.dart: ... lazy Iterable rather than a List
+00:02 +29: /private/var/folders/40/69djlhqn515fkd6tzfpqqhp8h0s5p6/T/task-driver-final-review-_os8wk47/facesong_flutter/test/common/utils/extension_list_test.dart: ... can be iterated more than once  
+00:02 +30: /private/var/folders/40/69djlhqn515fkd6tzfpqqhp8h0s5p6/T/task-driver-final-review-_os8wk47/facesong_flutter/test/common/utils/extension_list_test.dart: ... can be iterated more than once  
+00:02 +30: All tests passed!

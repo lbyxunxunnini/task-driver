@@ -1,0 +1,14 @@
+{
+  "plugin": "/var/folders/40/69djlhqn515fkd6tzfpqqhp8h0s5p6/T/task-driver-followup-szran5k0/plugin",
+  "settings": "/var/folders/40/69djlhqn515fkd6tzfpqqhp8h0s5p6/T/task-driver-followup-szran5k0/readonly-settings.json",
+  "files": {
+    "SKILL.md": "73393d92d5c7ec4297327381d2d1851f2ee18267446bd2f7e3baa043533a115c",
+    "references/faq.md": "21f05e16d0158195e27b3e1e673aca4d217ecab02c8e962a18cc033e500c6b50",
+    "references/quick-start.md": "89ccc007464b7a8e9144f17595626e45bb6eccb7dce370ecf2b05a4a61f9f883",
+    "references/scenarios.md": "0e5aec0db65aeab7b35e51010b04095451063b6d6f23e1e49942d013585525b5",
+    "references/templates.md": "a5b8f92afe722f951c23008cdebade59bdba0a01415dd543dc5f417f2dffc50f"
+  },
+  "claude_version": "2.1.236 (Claude Code)",
+  "project": "/Users/agi00114/Desktop/flutter项目/facesong_flutter",
+  "write_tools_exposed": false
+}

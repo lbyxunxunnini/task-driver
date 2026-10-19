@@ -1,0 +1,21 @@
+{
+  "protected_existing_file_count": 129,
+  "protected_files_unchanged": true,
+  "skill_only_handoff_replacement": true,
+  "contract_only_append": true,
+  "source_files_sha256": {
+    "SKILL.md": "06443ec772e98f5a4a5d92f622375b4552477e7cc9a00b11a29b44aafe9049f0",
+    "tests/dialogue-contracts/review-authority-summary.md": "c669e1c371f6ab8c3a5c3f4dfdd0299ab37dbd303fe98a827d7e9be7323d5906"
+  },
+  "check_contracts": "passed",
+  "git_diff_check": "passed",
+  "whole_project_agent_review": "static protocol review: no new substantiated conflict found",
+  "real_claude_code_replay": "not run in this phase",
+  "input_probes": {
+    "mixed_previous_verdict_and_self_evaluation": "rejected as invalid",
+    "clean_requirements_and_command_output": "accepted and independently checked"
+  },
+  "source_unchanged_after_review": true,
+  "metadata_check": "passed by independent reviewer",
+  "full_flow_passed": null
+}

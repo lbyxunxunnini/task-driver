@@ -1,0 +1,2 @@
+# 回放日志和差异文件保留原始空白，不改写历史证据。
+reports/** whitespace=-blank-at-eol,-blank-at-eof

@@ -1,0 +1,18 @@
+{
+  "session_id": "2afead97-318a-43ef-8864-ac1fe16d0d3e",
+  "models": [
+    "deepseek-v4.1-flash"
+  ],
+  "tool_counts": {
+    "Read": 17,
+    "Grep": 12,
+    "Glob": 2,
+    "AskUserQuestion": 1
+  },
+  "candidate_injected": true,
+  "plan_found": true,
+  "goals_found": true,
+  "first_event": "2026-10-19T09:32:03.022Z",
+  "last_event": "2026-10-19T09:34:59.387Z",
+  "source_log_sha256": "4d3fa58a7fe0b72cfc8bd0a4e75cf9e195d19de9fe01f5bb552045b11dc8459d"
+}

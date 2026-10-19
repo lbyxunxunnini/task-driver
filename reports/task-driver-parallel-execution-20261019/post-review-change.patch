@@ -1,0 +1,11 @@
+--- reviewed/extension_list_test.dart
++++ final/extension_list_test.dart
+@@ -87,7 +87,7 @@
+   });
+ 
+   group('excludeIndex 当前实现的疑似缺陷行为（非约定契约）', () {
+-    test('越界与负数下标被静默忽略，返回全部元素', () {
++    test('越界与负数下标被静默忽略，不抛异常且不改变元素', () {
+       // 以下为当前实现的实际输出，不是约定契约。
+       expect(<int>[1, 2, 3].excludeIndex(3).toList(), <int>[1, 2, 3]);
+       expect(<int>[1, 2, 3].excludeIndex(99).toList(), <int>[1, 2, 3]);

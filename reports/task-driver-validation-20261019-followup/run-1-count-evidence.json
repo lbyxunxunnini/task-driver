@@ -1,0 +1,230 @@
+[
+  {
+    "source_line": 25,
+    "input": {
+      "pattern": ".claude/**/*"
+    },
+    "metadata": {
+      "numFiles": 6,
+      "totalMatches": 6,
+      "countIsComplete": true,
+      "truncated": false
+    }
+  },
+  {
+    "source_line": 26,
+    "input": {
+      "pattern": "test/**/*"
+    },
+    "metadata": {
+      "numFiles": 12,
+      "totalMatches": 12,
+      "countIsComplete": true,
+      "truncated": false
+    }
+  },
+  {
+    "source_line": 27,
+    "input": {
+      "pattern": "integration_test/**/*"
+    },
+    "metadata": {
+      "numFiles": 0,
+      "totalMatches": 0,
+      "countIsComplete": true,
+      "truncated": false
+    }
+  },
+  {
+    "source_line": 89,
+    "input": {
+      "pattern": "lib/**/*.dart"
+    },
+    "metadata": {
+      "numFiles": 100,
+      "totalMatches": 790,
+      "countIsComplete": true,
+      "truncated": true
+    }
+  },
+  {
+    "source_line": 90,
+    "input": {
+      "pattern": "lib/common/utils/*.dart"
+    },
+    "metadata": {
+      "numFiles": 32,
+      "totalMatches": 32,
+      "countIsComplete": true,
+      "truncated": false
+    }
+  },
+  {
+    "source_line": 91,
+    "input": {
+      "pattern": "lib/controllers/**/*.dart"
+    },
+    "metadata": {
+      "numFiles": 35,
+      "totalMatches": 35,
+      "countIsComplete": true,
+      "truncated": false
+    }
+  },
+  {
+    "source_line": 92,
+    "input": {
+      "pattern": "lib/beans/**/*.dart"
+    },
+    "metadata": {
+      "numFiles": 100,
+      "totalMatches": 104,
+      "countIsComplete": true,
+      "truncated": true
+    }
+  },
+  {
+    "source_line": 93,
+    "input": {
+      "pattern": "lib/services/*.dart"
+    },
+    "metadata": {
+      "numFiles": 23,
+      "totalMatches": 23,
+      "countIsComplete": true,
+      "truncated": false
+    }
+  },
+  {
+    "source_line": 107,
+    "input": {
+      "pattern": "{.github/**,.gitlab-ci.yml,ci/**,Makefile,melos.yaml}"
+    },
+    "metadata": {
+      "numFiles": 0,
+      "totalMatches": 0,
+      "countIsComplete": true,
+      "truncated": false
+    }
+  },
+  {
+    "source_line": 108,
+    "input": {
+      "pattern": "lib/screens/**/*.dart"
+    },
+    "metadata": {
+      "numFiles": 100,
+      "totalMatches": 343,
+      "countIsComplete": true,
+      "truncated": true
+    }
+  },
+  {
+    "source_line": 109,
+    "input": {
+      "pattern": "lib/common/widgets/**/*.dart"
+    },
+    "metadata": {
+      "numFiles": 100,
+      "totalMatches": 160,
+      "countIsComplete": true,
+      "truncated": true
+    }
+  },
+  {
+    "source_line": 110,
+    "input": {
+      "pattern": "lib/**/*_test.dart"
+    },
+    "metadata": {
+      "numFiles": 2,
+      "totalMatches": 2,
+      "countIsComplete": true,
+      "truncated": false
+    }
+  },
+  {
+    "source_line": 147,
+    "input": {
+      "pattern": "lib/pay/**/*.dart"
+    },
+    "metadata": {
+      "numFiles": 5,
+      "totalMatches": 5,
+      "countIsComplete": true,
+      "truncated": false
+    }
+  },
+  {
+    "source_line": 148,
+    "input": {
+      "pattern": "test/**/*.dart"
+    },
+    "metadata": {
+      "numFiles": 12,
+      "totalMatches": 12,
+      "countIsComplete": true,
+      "truncated": false
+    }
+  },
+  {
+    "source_line": 190,
+    "input": {
+      "pattern": "lib/screens/create/**/*.dart"
+    },
+    "metadata": {
+      "numFiles": 60,
+      "totalMatches": 60,
+      "countIsComplete": true,
+      "truncated": false
+    }
+  },
+  {
+    "source_line": 204,
+    "input": {
+      "pattern": "docs/**/*"
+    },
+    "metadata": {
+      "numFiles": 0,
+      "totalMatches": 0,
+      "countIsComplete": true,
+      "truncated": false
+    }
+  },
+  {
+    "source_line": 205,
+    "input": {
+      "pattern": ".project-context/**/*"
+    },
+    "metadata": {
+      "numFiles": 62,
+      "totalMatches": 62,
+      "countIsComplete": true,
+      "truncated": false
+    }
+  },
+  {
+    "source_line": 237,
+    "input": {
+      "pattern": "docs/*"
+    },
+    "metadata": {
+      "numFiles": 0,
+      "totalMatches": 0,
+      "countIsComplete": true,
+      "truncated": false
+    }
+  },
+  {
+    "source_line": 238,
+    "input": {
+      "pattern": "*.md"
+    },
+    "metadata": {
+      "numFiles": 100,
+      "totalMatches": 193,
+      "countIsComplete": true,
+      "truncated": true
+    }
+  }
+]

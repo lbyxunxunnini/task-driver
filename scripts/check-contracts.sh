@@ -35,6 +35,7 @@ forbid_match() {
 
 require_file SKILL.md
 require_file README.md
+require_file CLAUDE.md
 require_file references/quick-start.md
 require_file references/faq.md
 require_file references/scenarios.md
@@ -53,47 +54,23 @@ require_file tests/dialogue-contracts/unified-exception-notice.md
 require_file tests/dialogue-contracts/progressive-doc-routing.md
 require_file tests/dialogue-contracts/deferred-goal-tools.md
 require_file tests/dialogue-contracts/visible-reply-boundary.md
-require_file tests/dialogue-contracts/discussion-summary-write.md
-require_file scripts/behavior_checks.py
 
-DOC_SCOPE='SKILL.md README.md references/quick-start.md references/faq.md references/scenarios.md references/templates.md'
+DOC_SCOPE='SKILL.md README.md CLAUDE.md references/quick-start.md references/faq.md references/scenarios.md'
 
-# 文本契约检查不执行模型对话，也不能证明实际行为符合协议。
-# 主流程保留讨论门禁，允许合并展示计划与目标并确认执行。
+# 主流程保留必要讨论，条件合并与统一执行确认不得重复。
 require_match '仔细询问并逐项讨论' SKILL.md
 require_match '输出计划' SKILL.md
+require_match '讨论并确认计划' SKILL.md
 require_match '输出并确认验收目标' SKILL.md
 require_match '确认执行' SKILL.md
 require_match '逐项确认' SKILL.md
-require_match '倾向一并展示并确认' SKILL.md
-require_match '不先按任务大小或验证类型分类' SKILL.md
-require_match '用户明确确认整体执行请求后，直接创建目标并执行' SKILL.md
-require_match '保留已确认内容.*不重新走完整流程' SKILL.md
-require_match '实际运行或时间相关验证.*不自动增加执行前的确认轮次' SKILL.md
-require_match '只确认内容、只看计划或暂不执行均不能视为执行授权' SKILL.md
+require_match '计划确认后直接输出验收目标草案' SKILL.md
 require_match '创建目标并执行' SKILL.md
 require_match '未达标或无法确认达标时先分类' SKILL.md
 require_match '可修复问题打回修复，最多 3 次；其他异常进入对应路径' SKILL.md
 
 # 讨论阶段不能被完整草案替代。
-require_match '一次只讨论一个关键问题' SKILL.md
-require_match '不要求每轮必须提问' SKILL.md
-require_match '区分目的、观察到的现象和提出的办法' SKILL.md
-require_match '判断问题与方案是否成立' SKILL.md
-require_match '用户方案不合理时，明确指出问题、影响和更合理的建议' SKILL.md
-require_match '证据不足时说明不确定性' SKILL.md
-require_match '只询问分析后仍需用户决定' SKILL.md
-require_match '不强制每轮提问、固定分析模板或长篇分析' SKILL.md
-require_match '首轮直接输出计划，不套用讨论格式、不重新提问' SKILL.md
-require_match '至多问一个决定当前方向的必要问题' SKILL.md
-require_match '必须给出可直接选择的互斥选项' SKILL.md
-require_match '各选项的关键影响' SKILL.md
-require_match '明确标注推荐项.*推荐理由' SKILL.md
-require_match '简洁不能省略必要的影响和理由' SKILL.md
-require_match '不可用时用编号或字母选项' SKILL.md
-require_match '不能仅因还有受众、形式等字段未填就继续追问' SKILL.md
-require_match '宿主实际展示的原生选择提问' SKILL.md
-require_match '推荐或预选不代表用户已同意' SKILL.md
+require_match '每轮只处理一个具体决策点' SKILL.md
 require_match '已确认事实' SKILL.md
 require_match '待确认建议' SKILL.md
 require_match '已确认决定' SKILL.md
@@ -104,7 +81,7 @@ require_match '## 回复提交门禁' SKILL.md
 require_match '用户可见回复' SKILL.md
 require_match '发出回复后立即结束本轮' SKILL.md
 require_match 'reasoning、工具调用说明、工具参数和内部状态不算回复' SKILL.md
-require_match '讨论期间不得提前创建目标' SKILL.md
+require_match '不得在同一轮继续预演下一阶段' SKILL.md
 require_match '不为了满足格式制造新选项' SKILL.md
 require_match '发出回复后立即结束本轮' tests/dialogue-contracts/visible-reply-boundary.md
 
@@ -118,8 +95,8 @@ require_match '需要合并或拆分时，必须说明来源和原因' SKILL.md
 require_match '不能把模型偏好偷偷写入计划' SKILL.md
 require_match '不计作新的用户需求或问题' SKILL.md
 
-# 最终验收目标可以局部讨论，但仍需最小化并原样进入目标模式。
-require_match '不重新询问未变化的已确认事项' SKILL.md
+# 最终验收目标必须可分流、最小化并原样进入目标模式。
+require_match '用户选择生成前，不得输出完整验收目标草案' SKILL.md
 require_match '对每个候选目标进行删除判断' SKILL.md
 require_match '不强制表格，也不设置固定条数' SKILL.md
 require_match '不得按文件、模块、测试场景或实施步骤拆分最终目标' SKILL.md
@@ -138,18 +115,13 @@ require_match 'TaskUpdate.*同步任务状态' SKILL.md
 require_match '为什么调用 TaskCreate 会连续出现 Invalid tool parameters' references/faq.md
 require_match '为什么工作完成了，宿主任务仍然显示未完成' references/faq.md
 require_match '宿主任务只映射最终验收目标' README.md
-require_match '已开启时，自检达标后仍保持未完成' SKILL.md
-require_match '已开启的审查尚未开始、进行中或尚未通过时，保持未完成' SKILL.md
-require_match '同步宿主目标或任务为已完成，再进入最终交付' SKILL.md
-require_match '独立审查全部通过且无回归破坏后' tests/dialogue-contracts/deferred-goal-tools.md
-require_match '没有独立审查通过证据时.*保持未完成' tests/dialogue-contracts/deferred-goal-tools.md
 require_match '实施步骤不创建为宿主任务' tests/dialogue-contracts/deferred-goal-tools.md
 require_match '工作完成后只更新内部状态，不调用 `TaskUpdate`' tests/dialogue-contracts/deferred-goal-tools.md
 require_match '中断恢复或调用失败后重复创建相同任务' tests/dialogue-contracts/deferred-goal-tools.md
 
 # 执行、权限、恢复和质量闭环仍然保留。
 require_match '不默认新建分支' SKILL.md
-require_match '不自动合并临时分支' SKILL.md
+require_match '已有明确授权必须复用' SKILL.md
 require_match '工程测试只能作为辅助检查' SKILL.md
 require_match '质量判断' SKILL.md
 require_match '质量判断只分两档' SKILL.md
@@ -165,12 +137,6 @@ require_match '高风险复核' SKILL.md
 require_match '大任务写入规则' SKILL.md
 require_match '轻量计划摘要' SKILL.md
 require_match '\.task-driver/\{任务标题\}-\{YYYYMMDDHHmmss\}-计划摘要\.md' SKILL.md
-require_match '上述澄清期写入是讨论阶段禁写规则的唯一例外' SKILL.md
-require_match '不写业务文件.*仅按该章节的例外维护摘要' SKILL.md
-require_match '普通讨论未触发条件时仍不写摘要' SKILL.md
-require_match '讨论期能写计划摘要吗' references/faq.md
-require_match '澄清问答已超过 20 轮' tests/dialogue-contracts/discussion-summary-write.md
-require_match '只允许维护同一份计划摘要，不修改业务文件、其他记录或仓库状态' tests/dialogue-contracts/discussion-summary-write.md
 
 # 任务规模必须按业务关系判断，拆分范围由用户确认。
 require_match '任务规模与拆分边界' SKILL.md
@@ -221,45 +187,57 @@ require_match '各文档只承担自己的职责，不大段复制完整协议' 
 # 面向用户的说明必须与主协议一致。
 require_match '仔细询问并逐项讨论' README.md
 require_match '每个计划事项必须展示“已确认”和“实施方案”' README.md
-require_match '倾向合并展示计划与验收目标' README.md
+require_match '计划确认后先输出验收目标草案' README.md
 require_match '用户确认后的目标原样进入目标模式' README.md
 require_match '需要用户验收时' README.md
-require_match '当前版本：v1.0.1' README.md
+require_match '当前版本：v0.9.5' README.md
+require_match '仔细询问并逐项讨论' CLAUDE.md
+require_match '计划确认后先输出验收目标草案' CLAUDE.md
+require_match '任务规模必须按业务目标、权限、风险、交付和回滚关系判断' CLAUDE.md
+require_match '只有可修复问题进入最多 3 次的修复循环' CLAUDE.md
 require_match '逐项讨论' references/quick-start.md
 require_match '计划包含实施方案' tests/dialogue-contracts/plan-with-implementation.md
 require_match '五项目标覆盖' tests/dialogue-contracts/end-to-end-small-case.md
 require_match '模型一次只讨论一个问题' tests/dialogue-contracts/end-to-end-small-case.md
 require_match '提供继续讨论或生成计划的选择' tests/dialogue-contracts/end-to-end-small-case.md
 require_match '每项展示已确认决策和实施方案' tests/dialogue-contracts/end-to-end-small-case.md
-require_match '一并输出两个与原问题对应的必要终极目标' tests/dialogue-contracts/end-to-end-small-case.md
-require_match '输出两个与原问题对应的必要终极目标' tests/dialogue-contracts/end-to-end-small-case.md
-require_match '用户确认后原样创建目标并执行' tests/dialogue-contracts/end-to-end-small-case.md
+require_match '输出两个最终验收目标草案，并提供三个执行选项' tests/dialogue-contracts/end-to-end-small-case.md
+require_match '选择执行后原样创建已展示的目标并执行' tests/dialogue-contracts/end-to-end-small-case.md
 require_match '用户验收补位' tests/dialogue-contracts/user-acceptance-handoff.md
 require_match '用户反馈前不把目标标记为已达成或达标' tests/dialogue-contracts/user-acceptance-handoff.md
-require_match '用户确认整体执行请求后，原样创建目标并执行' tests/dialogue-contracts/acceptance-goal-discussion.md
-require_match '保留其他已确认内容，不重启流程' tests/dialogue-contracts/acceptance-goal-discussion.md
-require_match '仅记录计划内容已确认，不创建目标或执行' tests/dialogue-contracts/acceptance-goal-discussion.md
-require_match '先自行检查保存及退出逻辑' tests/dialogue-contracts/explicit-discussion-request.md
-require_match '不制造问题和选项' tests/dialogue-contracts/explicit-discussion-request.md
-require_match '若上一轮已明确展示计划、最终验收目标及整体执行请求' tests/dialogue-contracts/visible-reply-boundary.md
 
 # 防止旧的“先输出表格草案再讨论”协议回退。
-require_match '### 可选品质依据' SKILL.md
-require_match '普通 Bug、配置或结果明确的任务不增加评分' SKILL.md
-require_match '新的隔离上下文' SKILL.md
-require_match '没有带来可证实的改善' SKILL.md
-require_match '开发评测工具不属于运行依赖' SKILL.md
-require_match '## 与业务 Skill 交接' references/scenarios.md
-require_match '## 术语怎样对应' references/faq.md
-forbid_match '计划确认后先输出验收目标草案|计划确认后直接输出验收目标草案' "$DOC_SCOPE"
-forbid_match '每轮只处理一个具体决策点|每轮只处理一个用户决策点' "$DOC_SCOPE"
 forbid_match '必须使用轻量表格' "$DOC_SCOPE"
 forbid_match '计划确认只代表“可以进入验收标准草案”' "$DOC_SCOPE"
 forbid_match '够用|有瑕疵|不够用' "$DOC_SCOPE"
-forbid_match '仔细询问[[:space:]]*$' 'README.md references/quick-start.md'
+forbid_match '仔细询问[[:space:]]*$' 'README.md CLAUDE.md references/quick-start.md'
 forbid_match 'SpecPacket|PlanPacket|TaskResult|ReviewReport|VerificationReport|GoalDraft' "$DOC_SCOPE"
 forbid_match 'gate_mode|execution_mode|brainstorming|planning|executing|verification' "$DOC_SCOPE"
 forbid_match 'approved spec|approved plan|Acceptance Criteria|Target Coverage Matrix|Decomposition Strategy|File Map' "$DOC_SCOPE"
 forbid_match '\.task-driver/(specs|plans|ledgers)' "$DOC_SCOPE"
+
+# 七项整改只检查协议结构与关键边界，不代表真实对话通过。
+require_file tests/dialogue-contracts/research-and-questioning.md
+require_file tests/dialogue-contracts/review-authority-summary.md
+require_match '开始需求调研前，必须读取' SKILL.md
+require_match '先用自身知识分析场景和可行路径，再联网' SKILL.md
+require_match '禁止把明确需求重新变成问题' SKILL.md
+require_match '无须提问不代表讨论完成' SKILL.md
+require_match '禁止逐项改写成验收话术' SKILL.md
+require_match '任一条件不满足，禁止合并展示' SKILL.md
+require_match '执行，开启子代理' SKILL.md
+require_match '执行，不开启子代理' SKILL.md
+require_match '不执行，继续讨论' SKILL.md
+require_match '必须标注一个推荐项' SKILL.md
+require_match '禁止再问是否确认目标' SKILL.md
+require_match '原生提问展示后等待实际回答' SKILL.md
+require_match '超时或无回答均不等于执行授权' SKILL.md
+require_match '已开启时必须等独立审查通过' SKILL.md
+require_match '无法判断 → 补证据' SKILL.md
+require_match '已开启审查时还须审查通过' references/templates.md
+require_match '用户明确禁止写文件时，该例外也不生效' SKILL.md
+require_match '## 调研与讨论方法' references/scenarios.md
+require_match '## 原生选择器怎样使用' references/faq.md
+forbid_match '拿不准的目标.*不阻塞|草案末尾提供两个选择|最终确认前，先询问是否开启' 'SKILL.md README.md references/quick-start.md references/faq.md references/templates.md'
 
 printf 'check-contracts: ok\n'
