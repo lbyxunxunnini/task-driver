@@ -84,6 +84,16 @@ require_match '用户方案不合理时，明确指出问题、影响和更合�
 require_match '证据不足时说明不确定性' SKILL.md
 require_match '只询问分析后仍需用户决定' SKILL.md
 require_match '不强制每轮提问、固定分析模板或长篇分析' SKILL.md
+require_match '首轮直接输出计划，不套用讨论格式、不重新提问' SKILL.md
+require_match '至多问一个决定当前方向的必要问题' SKILL.md
+require_match '必须给出可直接选择的互斥选项' SKILL.md
+require_match '各选项的关键影响' SKILL.md
+require_match '明确标注推荐项.*推荐理由' SKILL.md
+require_match '简洁不能省略必要的影响和理由' SKILL.md
+require_match '不可用时用编号或字母选项' SKILL.md
+require_match '不能仅因还有受众、形式等字段未填就继续追问' SKILL.md
+require_match '宿主实际展示的原生选择提问' SKILL.md
+require_match '推荐或预选不代表用户已同意' SKILL.md
 require_match '已确认事实' SKILL.md
 require_match '待确认建议' SKILL.md
 require_match '已确认决定' SKILL.md
@@ -214,7 +224,7 @@ require_match '每个计划事项必须展示“已确认”和“实施方案�
 require_match '倾向合并展示计划与验收目标' README.md
 require_match '用户确认后的目标原样进入目标模式' README.md
 require_match '需要用户验收时' README.md
-require_match '当前版本：v1.0.0' README.md
+require_match '当前版本：v1.0.1' README.md
 require_match '逐项讨论' references/quick-start.md
 require_match '计划包含实施方案' tests/dialogue-contracts/plan-with-implementation.md
 require_match '五项目标覆盖' tests/dialogue-contracts/end-to-end-small-case.md

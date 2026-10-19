@@ -109,7 +109,8 @@ def assess(case, events, tool_events, sandbox):
     return {'status': 'failed' if errors else 'passed', 'errors': errors,
             'reply': reply, 'tools': names, 'turns': result.get('num_turns'),
             'cost_usd': result.get('total_cost_usd'),
-            'usage': result.get('usage', {}), 'models': sorted(result.get('modelUsage', {}))}
+            'usage': result.get('usage', {}), 'models': sorted(result.get('modelUsage', {})),
+            'semantic_review': 'not_performed', 'manual_checks': case.get('manual_checks', [])}
 
 
 def serve(sandbox):
@@ -329,6 +330,8 @@ def recheck(path, output):
                 errors.append('write outside approved fixture path')
         row['errors'] = errors
         row['status'] = 'failed' if errors or row.get('returncode') else 'passed'
+        row['semantic_review'] = 'not_performed'
+        row['manual_checks'] = case.get('manual_checks', [])
     dump(output, report)
     return report
 
