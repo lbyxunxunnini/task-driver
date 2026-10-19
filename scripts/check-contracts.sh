@@ -110,12 +110,14 @@ require_match 'Invalid tool parameters' SKILL.md
 require_match '禁止重复创建' SKILL.md
 require_match '保存宿主返回的目标或任务 ID' SKILL.md
 require_match 'TaskUpdate.*更新为执行中' SKILL.md
+require_match '首次写入文档骨架也属于实际工作' SKILL.md
 require_match 'TaskUpdate.*同步任务状态' SKILL.md
 require_match '为什么调用 TaskCreate 会连续出现 Invalid tool parameters' references/faq.md
 require_match '为什么工作完成了，宿主任务仍然显示未完成' references/faq.md
 require_match '宿主任务只映射最终验收目标' README.md
 require_match '实施步骤不创建为宿主任务' tests/dialogue-contracts/deferred-goal-tools.md
 require_match '工作完成后只更新内部状态，不调用 `TaskUpdate`' tests/dialogue-contracts/deferred-goal-tools.md
+require_match '首次写入文档骨架后才把对应任务更新为执行中' tests/dialogue-contracts/deferred-goal-tools.md
 require_match '中断恢复或调用失败后重复创建相同任务' tests/dialogue-contracts/deferred-goal-tools.md
 
 # 执行、权限、恢复和质量闭环仍然保留。
@@ -128,8 +130,8 @@ require_match '达标：满足最终验收目标' SKILL.md
 require_match '未达标：没有满足最终验收目标' SKILL.md
 require_match '发现任何瑕疵都必须判断为“未达标”' SKILL.md
 require_match '### 用户验收补位' SKILL.md
-require_match '必须明确通知“需要用户验收”' SKILL.md
-require_match '验收步骤必须针对当前目标编写' SKILL.md
+require_match '必须明确通知“需要用户验收”' references/templates.md
+require_match '验收步骤必须针对当前目标编写' references/templates.md
 require_match '用户无法完成必要验收且没有其他可靠证据时' SKILL.md
 require_match '不得在必要的用户验收尚未返回结果时标记目标完成' SKILL.md
 require_match '高风险复核' SKILL.md
@@ -159,11 +161,13 @@ require_match '下一次修复改变实施策略或修复内容' tests/dialogue-
 
 # 异常通知只保留决策所需信息；用户操作必须可执行、可判断。
 require_match '### 统一异常通知' SKILL.md
-require_match '当前结果：' SKILL.md
-require_match '原因：' SKILL.md
-require_match '已完成：' SKILL.md
-require_match '下一步：' SKILL.md
-require_match '不粘贴长日志或内部状态转储' SKILL.md
+require_match '通知前必须读取并遵守\[统一异常通知骨架\]' SKILL.md
+require_match '通知前必须读取并遵守\[用户验收通知格式\]' SKILL.md
+require_match '当前结果：' references/templates.md
+require_match '原因：' references/templates.md
+require_match '已完成：' references/templates.md
+require_match '下一步：' references/templates.md
+require_match '不粘贴长日志或内部状态转储' references/templates.md
 require_match '编号验收步骤和每步预期结果' tests/dialogue-contracts/unified-exception-notice.md
 require_match '明确通过条件和反馈要求' tests/dialogue-contracts/unified-exception-notice.md
 
@@ -173,6 +177,10 @@ require_match 'references/quick-start.md' README.md
 require_match 'references/faq.md' README.md
 require_match 'references/scenarios.md' README.md
 require_match '不要求每次任务无条件加载全部参考文件' SKILL.md
+require_match '### 确认与授权' SKILL.md
+require_match '## 问题索引' references/faq.md
+require_match 'quick-start.md#典型反例' references/faq.md
+require_match '发出异常通知前必须读取模板对应章节' tests/dialogue-contracts/progressive-doc-routing.md
 require_match '## 三次修复是必须执行三次吗' references/faq.md
 require_match '## 怎样判断任务是否应该拆分' references/faq.md
 require_match '## 低风险 Bug 修复' references/scenarios.md
@@ -189,7 +197,7 @@ require_match '每个计划事项必须展示“已确认”和“实施方案�
 require_match '计划确认后先输出验收目标草案' README.md
 require_match '用户确认后的目标原样进入目标模式' README.md
 require_match '需要用户验收时' README.md
-require_match '当前版本：v1.0.2' README.md
+require_match '当前版本：v1.0.3' README.md
 require_match '逐项讨论' references/quick-start.md
 require_match '计划包含实施方案' tests/dialogue-contracts/plan-with-implementation.md
 require_match '五项目标覆盖' tests/dialogue-contracts/end-to-end-small-case.md

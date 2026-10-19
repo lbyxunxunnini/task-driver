@@ -1,0 +1,16 @@
+{
+  "original_project_protected_files": 1513,
+  "original_sensitive_files_not_read": 5,
+  "original_changed_files": [],
+  "original_head_unchanged": true,
+  "original_status_unchanged": true,
+  "fixture_existing_files": 892,
+  "fixture_changed_existing_files": [],
+  "fixture_added_files": [
+    "docs/creation-playback-history-regression.md"
+  ],
+  "skill_runtime_changed": [],
+  "first_write_before_task_progress_seconds": 14.553,
+  "completed_task_calls": 0,
+  "unfinished_document_sha256": "9c8dad13e697a1bff8d572aafd733a0e649f66581ae8f8ab3a0d3412fc19c690"
+}
