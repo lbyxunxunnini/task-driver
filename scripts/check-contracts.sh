@@ -53,6 +53,8 @@ require_file tests/dialogue-contracts/unified-exception-notice.md
 require_file tests/dialogue-contracts/progressive-doc-routing.md
 require_file tests/dialogue-contracts/deferred-goal-tools.md
 require_file tests/dialogue-contracts/visible-reply-boundary.md
+require_file tests/dialogue-contracts/discussion-summary-write.md
+require_file scripts/behavior_checks.py
 
 DOC_SCOPE='SKILL.md README.md references/quick-start.md references/faq.md references/scenarios.md references/templates.md'
 
@@ -126,6 +128,11 @@ require_match 'TaskUpdate.*同步任务状态' SKILL.md
 require_match '为什么调用 TaskCreate 会连续出现 Invalid tool parameters' references/faq.md
 require_match '为什么工作完成了，宿主任务仍然显示未完成' references/faq.md
 require_match '宿主任务只映射最终验收目标' README.md
+require_match '已开启时，自检达标后仍保持未完成' SKILL.md
+require_match '已开启的审查尚未开始、进行中或尚未通过时，保持未完成' SKILL.md
+require_match '同步宿主目标或任务为已完成，再进入最终交付' SKILL.md
+require_match '独立审查全部通过且无回归破坏后' tests/dialogue-contracts/deferred-goal-tools.md
+require_match '没有独立审查通过证据时.*保持未完成' tests/dialogue-contracts/deferred-goal-tools.md
 require_match '实施步骤不创建为宿主任务' tests/dialogue-contracts/deferred-goal-tools.md
 require_match '工作完成后只更新内部状态，不调用 `TaskUpdate`' tests/dialogue-contracts/deferred-goal-tools.md
 require_match '中断恢复或调用失败后重复创建相同任务' tests/dialogue-contracts/deferred-goal-tools.md
@@ -148,6 +155,12 @@ require_match '高风险复核' SKILL.md
 require_match '大任务写入规则' SKILL.md
 require_match '轻量计划摘要' SKILL.md
 require_match '\.task-driver/\{任务标题\}-\{YYYYMMDDHHmmss\}-计划摘要\.md' SKILL.md
+require_match '上述澄清期写入是讨论阶段禁写规则的唯一例外' SKILL.md
+require_match '不写业务文件.*仅按该章节的例外维护摘要' SKILL.md
+require_match '普通讨论未触发条件时仍不写摘要' SKILL.md
+require_match '讨论期能写计划摘要吗' references/faq.md
+require_match '澄清问答已超过 20 轮' tests/dialogue-contracts/discussion-summary-write.md
+require_match '只允许维护同一份计划摘要，不修改业务文件、其他记录或仓库状态' tests/dialogue-contracts/discussion-summary-write.md
 
 # 任务规模必须按业务关系判断，拆分范围由用户确认。
 require_match '任务规模与拆分边界' SKILL.md
@@ -221,6 +234,13 @@ require_match '不制造问题和选项' tests/dialogue-contracts/explicit-discu
 require_match '若上一轮已明确展示计划、最终验收目标及整体执行请求' tests/dialogue-contracts/visible-reply-boundary.md
 
 # 防止旧的“先输出表格草案再讨论”协议回退。
+require_match '### 可选品质依据' SKILL.md
+require_match '普通 Bug、配置或结果明确的任务不增加评分' SKILL.md
+require_match '新的隔离上下文' SKILL.md
+require_match '没有带来可证实的改善' SKILL.md
+require_match '开发评测工具不属于运行依赖' SKILL.md
+require_match '## 与业务 Skill 交接' references/scenarios.md
+require_match '## 术语怎样对应' references/faq.md
 forbid_match '计划确认后先输出验收目标草案|计划确认后直接输出验收目标草案' "$DOC_SCOPE"
 forbid_match '每轮只处理一个具体决策点|每轮只处理一个用户决策点' "$DOC_SCOPE"
 forbid_match '必须使用轻量表格' "$DOC_SCOPE"
