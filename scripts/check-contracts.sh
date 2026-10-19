@@ -35,7 +35,6 @@ forbid_match() {
 
 require_file SKILL.md
 require_file README.md
-require_file CLAUDE.md
 require_file references/quick-start.md
 require_file references/faq.md
 require_file references/scenarios.md
@@ -55,7 +54,7 @@ require_file tests/dialogue-contracts/progressive-doc-routing.md
 require_file tests/dialogue-contracts/deferred-goal-tools.md
 require_file tests/dialogue-contracts/visible-reply-boundary.md
 
-DOC_SCOPE='SKILL.md README.md CLAUDE.md references/quick-start.md references/faq.md references/scenarios.md'
+DOC_SCOPE='SKILL.md README.md references/quick-start.md references/faq.md references/scenarios.md'
 
 # 主流程保留必要讨论，条件合并与统一执行确认不得重复。
 require_match '仔细询问并逐项讨论' SKILL.md
@@ -190,11 +189,7 @@ require_match '每个计划事项必须展示“已确认”和“实施方案�
 require_match '计划确认后先输出验收目标草案' README.md
 require_match '用户确认后的目标原样进入目标模式' README.md
 require_match '需要用户验收时' README.md
-require_match '当前版本：v0.9.5' README.md
-require_match '仔细询问并逐项讨论' CLAUDE.md
-require_match '计划确认后先输出验收目标草案' CLAUDE.md
-require_match '任务规模必须按业务目标、权限、风险、交付和回滚关系判断' CLAUDE.md
-require_match '只有可修复问题进入最多 3 次的修复循环' CLAUDE.md
+require_match '当前版本：v1.0.2' README.md
 require_match '逐项讨论' references/quick-start.md
 require_match '计划包含实施方案' tests/dialogue-contracts/plan-with-implementation.md
 require_match '五项目标覆盖' tests/dialogue-contracts/end-to-end-small-case.md
@@ -210,7 +205,7 @@ require_match '用户反馈前不把目标标记为已达成或达标' tests/dia
 forbid_match '必须使用轻量表格' "$DOC_SCOPE"
 forbid_match '计划确认只代表“可以进入验收标准草案”' "$DOC_SCOPE"
 forbid_match '够用|有瑕疵|不够用' "$DOC_SCOPE"
-forbid_match '仔细询问[[:space:]]*$' 'README.md CLAUDE.md references/quick-start.md'
+forbid_match '仔细询问[[:space:]]*$' 'README.md references/quick-start.md'
 forbid_match 'SpecPacket|PlanPacket|TaskResult|ReviewReport|VerificationReport|GoalDraft' "$DOC_SCOPE"
 forbid_match 'gate_mode|execution_mode|brainstorming|planning|executing|verification' "$DOC_SCOPE"
 forbid_match 'approved spec|approved plan|Acceptance Criteria|Target Coverage Matrix|Decomposition Strategy|File Map' "$DOC_SCOPE"
