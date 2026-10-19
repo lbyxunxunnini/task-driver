@@ -4,3 +4,6 @@ CLAUDE.local.md
 .claude/
 .DS_Store
 references/.DS_Store
+CLAUDE.md
+AGENTS.md
+.codex/
