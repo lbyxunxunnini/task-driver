@@ -132,6 +132,7 @@ require_match '发现任何瑕疵都必须判断为“未达标”' SKILL.md
 require_match '### 用户验收补位' SKILL.md
 require_match '必须明确通知“需要用户验收”' references/templates.md
 require_match '验收步骤必须针对当前目标编写' references/templates.md
+require_match '不得新增模型自造标准、无关操作或信息要求' references/templates.md
 require_match '用户无法完成必要验收且没有其他可靠证据时' SKILL.md
 require_match '不得在必要的用户验收尚未返回结果时标记目标完成' SKILL.md
 require_match '高风险复核' SKILL.md
@@ -192,12 +193,20 @@ require_match '场景建议不能代替用户决定' references/scenarios.md
 require_match '各文档只承担自己的职责，不大段复制完整协议' tests/dialogue-contracts/progressive-doc-routing.md
 
 # 面向用户的说明必须与主协议一致。
+require_match '## 能力边界与环境适配' README.md
+require_match 'references/faq.md#原生选择器怎样使用' README.md
+require_match 'SKILL.md#宿主目标工具协议' README.md
+require_match 'SKILL.md#异常分类' README.md
+require_match 'README.md#能力边界与环境适配' references/faq.md
+require_match '禁止要求用户再次确认已知限制' README.md
+require_match '禁止展开后续需求清单、技术选型或确认继续的选项' references/scenarios.md
+require_match '协议可本地读取不等于国内环境下所有模型' tests/dialogue-contracts/progressive-doc-routing.md
 require_match '仔细询问并逐项讨论' README.md
 require_match '每个计划事项必须展示“已确认”和“实施方案”' README.md
 require_match '计划确认后先输出验收目标草案' README.md
 require_match '用户确认后的目标原样进入目标模式' README.md
 require_match '需要用户验收时' README.md
-require_match '当前版本：v1.0.3' README.md
+require_match '当前版本：v1.0.4' README.md
 require_match '逐项讨论' references/quick-start.md
 require_match '计划包含实施方案' tests/dialogue-contracts/plan-with-implementation.md
 require_match '五项目标覆盖' tests/dialogue-contracts/end-to-end-small-case.md
