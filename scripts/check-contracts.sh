@@ -61,7 +61,7 @@ require_match '仔细询问并逐项讨论' SKILL.md
 require_match '输出计划' SKILL.md
 require_match '讨论并确认计划' SKILL.md
 require_match '输出并确认验收目标' SKILL.md
-require_match '确认执行' SKILL.md
+require_match '必须在展示验收目标的同一回复中提供统一执行选项' SKILL.md
 require_match '逐项确认' SKILL.md
 require_match '计划确认后直接输出验收目标草案' SKILL.md
 require_match '创建目标并执行' SKILL.md
@@ -69,7 +69,7 @@ require_match '未达标或无法确认达标时先分类' SKILL.md
 require_match '可修复问题打回修复，最多 3 次；其他异常进入对应路径' SKILL.md
 
 # 讨论阶段不能被完整草案替代。
-require_match '每轮只处理一个具体决策点' SKILL.md
+require_match '每轮只处理一个需要用户决定的具体决策点' SKILL.md
 require_match '已确认事实' SKILL.md
 require_match '待确认建议' SKILL.md
 require_match '已确认决定' SKILL.md
@@ -78,11 +78,26 @@ require_match '继续讨论，或结束讨论并生成计划' SKILL.md
 require_match '普通“确认”“继续”“可以”' SKILL.md
 require_match '## 回复提交门禁' SKILL.md
 require_match '用户可见回复' SKILL.md
-require_match '发出回复后立即结束本轮' SKILL.md
+require_match '未收到实际回答时，补齐正文后立即结束本轮' SKILL.md
 require_match 'reasoning、工具调用说明、工具参数和内部状态不算回复' SKILL.md
 require_match '不得在同一轮继续预演下一阶段' SKILL.md
-require_match '不为了满足格式制造新选项' SKILL.md
-require_match '发出回复后立即结束本轮' tests/dialogue-contracts/visible-reply-boundary.md
+require_match '不得因模板字段空白追问' SKILL.md
+require_match '未收到实际回答时，补齐正文后立即结束本轮' tests/dialogue-contracts/visible-reply-boundary.md
+require_match '原生选择器不能替代正文' SKILL.md
+require_match '已知当前交互使必要内容仅留在折叠过程区.*未收到实际回答的必须改用最终答复' SKILL.md
+require_match '已收到实际回答的必须补齐正文并按原回答及其明确范围承接，不重复确认' SKILL.md
+require_match '不能只记录用户点名的问题' SKILL.md
+require_match '仅要求推荐不属于该授权' SKILL.md
+require_match '承接决定必须保留确认依据和范围' SKILL.md
+require_match '禁止把模型自己的推荐、建议或方案在用户未确认时记为已确认' SKILL.md
+require_match '把未确认推荐记为已闭合，再据此宣布讨论充分' SKILL.md
+require_match '讨论不以穷尽所有潜在问题为前提' SKILL.md
+require_match '原生选择器只承载真实方案选择' SKILL.md
+require_match '确认式：核对已展示的理解' SKILL.md
+require_match '每项已确认决定对照用户原回答及其对象' SKILL.md
+require_match '不得在汇总中首次夹带未经讨论的重要方案' SKILL.md
+require_match '写歌会话对照回放' tests/dialogue-contracts/discussion-transition.md
+forbid_match '最终文本或宿主实际展示的原生提问|发出回复后立即结束本轮' SKILL.md
 
 # 计划必须说明实施方法，并以已确认事项为顶层结构。
 require_match '顶层计划事项必须按照已确认的需求或问题组织' SKILL.md
@@ -110,6 +125,8 @@ require_match 'ToolSearch query="select:TaskUpdate"' SKILL.md
 require_match 'Invalid tool parameters' SKILL.md
 require_match '禁止重复创建' SKILL.md
 require_match '保存宿主返回的目标或任务 ID' SKILL.md
+require_match '目标工具不可用时，必须自动降级为计划步进执行.*目标和计划工具均不可用时，才在对话中维护轻量目标' SKILL.md
+require_match '必要验收未通过或受阻时保持未完成' SKILL.md
 require_match 'TaskUpdate.*更新为执行中' SKILL.md
 require_match '首次写入文档骨架也属于实际工作' SKILL.md
 require_match 'TaskUpdate.*同步任务状态' SKILL.md
@@ -125,11 +142,15 @@ require_match '中断恢复或调用失败后重复创建相同任务' tests/dia
 require_match '不默认新建分支' SKILL.md
 require_match '已有明确授权必须复用' SKILL.md
 require_match '工程测试只能作为辅助检查' SKILL.md
-require_match '质量判断' SKILL.md
+require_match '无论是否开启子代理，执行模型都必须.*可修复问题必须修复后重新自检' SKILL.md
+require_match '禁止以关闭子代理、产物已生成或需要用户主观评价为由' SKILL.md
 require_match '质量判断只分两档' SKILL.md
 require_match '达标：满足最终验收目标' SKILL.md
 require_match '未达标：没有满足最终验收目标' SKILL.md
 require_match '发现任何瑕疵都必须判断为“未达标”' SKILL.md
+require_match '前文说无法核实字段或选项，后文却承诺可直接粘贴、勾选或使用' SKILL.md
+require_match '质量判断必须逐项对照实际交付、用户确认的最终验收目标及实际检查证据.*结论不得超出证据覆盖范围' SKILL.md
+require_match '影响目标达成的必要条件尚未核实' tests/dialogue-contracts/exception-routing.md
 require_match '### 用户验收补位' SKILL.md
 require_match '必须明确通知“需要用户验收”' references/templates.md
 require_match '验收步骤必须针对当前目标编写' references/templates.md
@@ -213,7 +234,7 @@ require_match 'references/templates.md#用户验收通知格式' README.md
 require_match '示例的已确认目标是' references/quick-start.md
 require_match 'templates.md#统一异常通知骨架' references/quick-start.md
 require_match 'templates.md#用户验收通知格式' references/quick-start.md
-require_match '当前版本：v1.0.4' README.md
+require_match '当前版本：v1.0.5' README.md
 require_match '逐项讨论' references/quick-start.md
 require_match '计划包含实施方案' tests/dialogue-contracts/plan-with-implementation.md
 require_match '五项目标覆盖' tests/dialogue-contracts/end-to-end-small-case.md
@@ -239,7 +260,8 @@ forbid_match '\.task-driver/(specs|plans|ledgers)' "$DOC_SCOPE"
 require_file tests/dialogue-contracts/research-and-questioning.md
 require_file tests/dialogue-contracts/review-authority-summary.md
 require_match '开始需求调研前，必须读取' SKILL.md
-require_match '先用自身知识分析场景和可行路径，再联网' references/scenarios.md
+require_match '先用自身知识分析场景和可行路径' references/scenarios.md
+require_match '无法联网时必须基于自身知识继续深入分析' references/scenarios.md
 require_match '禁止把明确需求重新变成问题' SKILL.md
 require_match '无须提问不代表讨论完成' SKILL.md
 require_match '禁止逐项改写成验收话术' SKILL.md
