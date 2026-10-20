@@ -112,6 +112,7 @@ check_patterns SKILL.md \
   '需要用户验收.*不计修复次数' '需要用户授权或决定.*不计修复次数' \
   '\| 受阻 \|.*不计修复次数' \
   '无范围内已知缺陷或回归破坏' '等待不等于用户无法验收'
+check_patterns SKILL.md '先交付结果，再更新完成' '下次自然续接时核对后补记' '不为补记额外索取用户确认'
 check_patterns SKILL.md \
   '无法完成必要验收，且无其他可靠证据.*受阻' \
   '已开启独立复核.*已通过且覆盖当前交付版本' \
@@ -161,6 +162,7 @@ check_patterns tests/dialogue-contracts/retry-strategy-change.md '第三次修�
 check_patterns tests/dialogue-contracts/review-authority-summary.md '独立首审的必要证据' \
   '无子代理的完整闭环' '输入不合规' '未受影响内容的审查证据可以复用'
 check_patterns tests/dialogue-contracts/deferred-goal-tools.md '场景四' '工具输出' '正常正文' 'completed'
+check_patterns tests/dialogue-contracts/deferred-goal-tools.md '本轮保留工具未完成' '不额外要求确认'
 check_patterns tests/dialogue-contracts/progressive-doc-routing.md '不采用时仍不得伪造目标或越权' '静态|行为|复测|单一宿主'
 check_patterns tests/dialogue-contracts/user-acceptance-handoff.md '编号操作步骤' '预期结果和通过条件'
 check_patterns tests/dialogue-contracts/visible-reply-boundary.md '原生选择器不能替代正文' '异步' '同步'
