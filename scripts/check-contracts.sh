@@ -103,6 +103,7 @@ require_match '原样进入目标模式' SKILL.md
 require_match '不能增加工程目标、改变粒度或重新解释' SKILL.md
 
 # Deferred 目标工具必须先加载 schema，并与宿主任务形成状态闭环。
+require_match '用户未禁止写入时，以下情况必须写或更新' SKILL.md
 require_match 'ToolSearch query="select:TaskCreate"' SKILL.md
 require_match 'ToolSearch query="select:TaskList"' SKILL.md
 require_match 'ToolSearch query="select:TaskUpdate"' SKILL.md
@@ -114,7 +115,7 @@ require_match '首次写入文档骨架也属于实际工作' SKILL.md
 require_match 'TaskUpdate.*同步任务状态' SKILL.md
 require_match '为什么调用 TaskCreate 会连续出现 Invalid tool parameters' references/faq.md
 require_match '为什么工作完成了，宿主任务仍然显示未完成' references/faq.md
-require_match '宿主任务只映射最终验收目标' README.md
+require_match '宿主目标或任务必须原样来自最终验收目标' SKILL.md
 require_match '实施步骤不创建为宿主任务' tests/dialogue-contracts/deferred-goal-tools.md
 require_match '工作完成后只更新内部状态，不调用 `TaskUpdate`' tests/dialogue-contracts/deferred-goal-tools.md
 require_match '首次写入文档骨架后才把对应任务更新为执行中' tests/dialogue-contracts/deferred-goal-tools.md
@@ -202,10 +203,16 @@ require_match '禁止要求用户再次确认已知限制' README.md
 require_match '禁止展开后续需求清单、技术选型或确认继续的选项' references/scenarios.md
 require_match '协议可本地读取不等于国内环境下所有模型' tests/dialogue-contracts/progressive-doc-routing.md
 require_match '仔细询问并逐项讨论' README.md
-require_match '每个计划事项必须展示“已确认”和“实施方案”' README.md
-require_match '计划确认后先输出验收目标草案' README.md
-require_match '用户确认后的目标原样进入目标模式' README.md
-require_match '需要用户验收时' README.md
+require_match '每个计划事项必须包含 ### 已确认 和 ### 实施方案' SKILL.md
+require_match '计划确认后先输出验收目标草案' references/quick-start.md
+require_match '用户确认后的目标必须原样进入目标模式' SKILL.md
+require_match 'SKILL.md#用户验收补位' README.md
+require_match 'SKILL.md#第二步输出计划' README.md
+require_match 'SKILL.md#轻量计划摘要' README.md
+require_match 'references/templates.md#用户验收通知格式' README.md
+require_match '示例的已确认目标是' references/quick-start.md
+require_match 'templates.md#统一异常通知骨架' references/quick-start.md
+require_match 'templates.md#用户验收通知格式' references/quick-start.md
 require_match '当前版本：v1.0.4' README.md
 require_match '逐项讨论' references/quick-start.md
 require_match '计划包含实施方案' tests/dialogue-contracts/plan-with-implementation.md
@@ -232,7 +239,7 @@ forbid_match '\.task-driver/(specs|plans|ledgers)' "$DOC_SCOPE"
 require_file tests/dialogue-contracts/research-and-questioning.md
 require_file tests/dialogue-contracts/review-authority-summary.md
 require_match '开始需求调研前，必须读取' SKILL.md
-require_match '先用自身知识分析场景和可行路径，再联网' SKILL.md
+require_match '先用自身知识分析场景和可行路径，再联网' references/scenarios.md
 require_match '禁止把明确需求重新变成问题' SKILL.md
 require_match '无须提问不代表讨论完成' SKILL.md
 require_match '禁止逐项改写成验收话术' SKILL.md
@@ -249,6 +256,11 @@ require_match '无法判断 → 补证据' SKILL.md
 require_match '已开启审查时还须审查通过' references/templates.md
 require_match '用户明确禁止写文件时，该例外也不生效' SKILL.md
 require_match '## 调研与讨论方法' references/scenarios.md
+require_match '决定执行方式前，必须读取并遵守\[执行并发判断与分派细则\]' SKILL.md
+require_match '以下条件全部满足时，必须拆分并发' references/scenarios.md
+require_match '任一条件不满足或无法确认满足时，必须由主线程串行执行' references/scenarios.md
+require_match '交接前必须读取并遵守\[独立审查交接模板\]' SKILL.md
+require_match '第一次写之前必须短句告知' SKILL.md
 require_match '## 原生选择器怎样使用' references/faq.md
 forbid_match '拿不准的目标.*不阻塞|草案末尾提供两个选择|最终确认前，先询问是否开启' 'SKILL.md README.md references/quick-start.md references/faq.md references/templates.md'
 
