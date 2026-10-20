@@ -1,289 +1,263 @@
 #!/usr/bin/env bash
+# 文档结构、约束入口与本地链接检查；不证明真实模型或宿主行为通过。
 set -euo pipefail
-
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT_DIR"
 
-fail() {
-  printf 'check-contracts: %s\n' "$1" >&2
-  exit 1
+fail() { printf 'check-contracts: %s\n' "$1" >&2; exit 1; }
+require_file() { [[ -f "$1" ]] || fail "missing required file: $1"; }
+require_match() { rg -q -- "$1" "$2" || fail "missing constraint in $2: $1"; }
+check_patterns() {
+  local file="$1"
+  shift
+  local pattern
+  for pattern in "$@"; do require_match "$pattern" "$file"; done
 }
-
-require_file() {
-  local path="$1"
-  [[ -f "$path" ]] || fail "missing required file: $path"
-}
-
-require_match() {
-  local pattern="$1"
-  local path="$2"
-  rg -q -- "$pattern" "$path" || fail "missing pattern in $path: $pattern"
-}
-
 forbid_match() {
   local pattern="$1"
-  local scope="$2"
-  local tmp
-  tmp="$(mktemp)"
-  if rg -n -- "$pattern" $scope >"$tmp"; then
-    cat "$tmp" >&2
-    rm -f "$tmp"
-    fail "forbidden pattern found: $pattern"
+  shift
+  if rg -n -- "$pattern" "$@"; then
+    fail "retired protocol found: $pattern"
+  else
+    local result=$?
+    [[ "$result" == 1 ]] || fail "cannot scan retired protocol: $pattern"
   fi
-  rm -f "$tmp"
 }
 
-require_file SKILL.md
-require_file README.md
-require_file references/quick-start.md
-require_file references/faq.md
-require_file references/scenarios.md
-require_file references/templates.md
-require_file VERSION.md
-require_file tests/dialogue-contracts/explicit-discussion-request.md
-require_file tests/dialogue-contracts/discussion-transition.md
-require_file tests/dialogue-contracts/plan-with-implementation.md
-require_file tests/dialogue-contracts/acceptance-goal-discussion.md
-require_file tests/dialogue-contracts/end-to-end-small-case.md
-require_file tests/dialogue-contracts/user-acceptance-handoff.md
-require_file tests/dialogue-contracts/task-splitting.md
-require_file tests/dialogue-contracts/exception-routing.md
-require_file tests/dialogue-contracts/retry-strategy-change.md
-require_file tests/dialogue-contracts/unified-exception-notice.md
-require_file tests/dialogue-contracts/progressive-doc-routing.md
-require_file tests/dialogue-contracts/deferred-goal-tools.md
-require_file tests/dialogue-contracts/visible-reply-boundary.md
+for file in SKILL.md README.md VERSION.md .skillhub.json \
+  references/quick-start.md references/faq.md references/scenarios.md references/templates.md; do
+  require_file "$file"
+done
+for name in explicit-discussion-request discussion-transition plan-with-implementation \
+  acceptance-goal-discussion end-to-end-small-case user-acceptance-handoff task-splitting \
+  exception-routing retry-strategy-change unified-exception-notice progressive-doc-routing \
+  deferred-goal-tools visible-reply-boundary research-and-questioning review-authority-summary; do
+  require_file "tests/dialogue-contracts/$name.md"
+done
 
-DOC_SCOPE='SKILL.md README.md references/quick-start.md references/faq.md references/scenarios.md'
+# 阶段、分支与公共门槛。只匹配短约束，不锁定整段写法。
+check_patterns SKILL.md \
+  '^## 协议结构' '^## 固定链路' \
+  '^## 第一步：调查分析并逐项讨论' '^## 第二步：输出计划' \
+  '^## 第三步：讨论并确认计划' '^## 第四步：输出并确认验收目标' \
+  '^## 第五步：创建目标并执行' '^## 第六步：审查与修复闭环' \
+  '^## 第七步：独立复核要求' '^## 第八步：' \
+  '^### 完成判定与复审' '^### 异常分类' '^### 用户验收补位' \
+  '可修复问题.*重新审查' '选择执行.*直接创建目标并执行' \
+  '首审.*必要验收.*正文交付.*先完成'
 
-# 主流程保留必要讨论，条件合并与统一执行确认不得重复。
-require_match '仔细询问并逐项讨论' SKILL.md
-require_match '输出计划' SKILL.md
-require_match '讨论并确认计划' SKILL.md
-require_match '输出并确认验收目标' SKILL.md
-require_match '必须在展示验收目标的同一回复中提供统一执行选项' SKILL.md
-require_match '逐项确认' SKILL.md
-require_match '计划确认后直接输出验收目标草案' SKILL.md
-require_match '创建目标并执行' SKILL.md
-require_match '未达标或无法确认达标时先分类' SKILL.md
-require_match '可修复问题打回修复，最多 3 次；其他异常进入对应路径' SKILL.md
+check_patterns SKILL.md \
+  '确认与授权' '仅要求推荐不属于委托决定' \
+  '未反对.*回答其他事项.*模型汇总' '最终验收目标未确认前不得执行' \
+  '用户实际肯定回答.*只确认其明确对象和范围' '模型建议或推荐.*仍为待确认' \
+  '新建分支、提交、推送、合并、删除或发布.*必须另有明确授权' \
+  '工程测试只是辅助证据，不能代替最终验收目标' \
+  '已有执行授权.*必须复用' '项目外宿主记忆' '实际收费动作' \
+  '每轮最多处理一个' '无须提问不代表讨论完成' \
+  '不能只登记用户点名事项' '局部回答扩大为整体确认' \
+  '模型不能自行结束讨论' '不增加确认汇总轮次' \
+  '开始需求调研前.*必须读取' '明确需求不得重开为选项' \
+  '未确认推荐不得算作已闭合' '未经确认或委托不得进入计划' \
+  '不得因字段空白.*追问一般细节' '不设置固定问答轮数' \
+  '逐项对照事实原始证据、用户回答对象及委托范围' \
+  '不得先承认选项未知，后又承诺' '首次夹带重要新方案' \
+  '用户选择生成计划后必须实际输出计划' \
+  '尚需讨论时，首轮不得输出完整计划、验收目标或实施代码' \
+  '不因“确认、1、继续”重新初始化' \
+  '范围完整的工具总数' '不得声称精确总数或全部覆盖'
 
-# 讨论阶段不能被完整草案替代。
-require_match '每轮只处理一个需要用户决定的具体决策点' SKILL.md
-require_match '已确认事实' SKILL.md
-require_match '待确认建议' SKILL.md
-require_match '已确认决定' SKILL.md
-require_match '用户选择生成计划前，不得输出完整计划' SKILL.md
-require_match '继续讨论，或结束讨论并生成计划' SKILL.md
-require_match '普通“确认”“继续”“可以”' SKILL.md
-require_match '## 回复提交门禁' SKILL.md
-require_match '用户可见回复' SKILL.md
-require_match '未收到实际回答时，补齐正文后立即结束本轮' SKILL.md
-require_match 'reasoning、工具调用说明、工具参数和内部状态不算回复' SKILL.md
-require_match '不得在同一轮继续预演下一阶段' SKILL.md
-require_match '不得因模板字段空白追问' SKILL.md
-require_match '未收到实际回答时，补齐正文后立即结束本轮' tests/dialogue-contracts/visible-reply-boundary.md
-require_match '原生选择器不能替代正文' SKILL.md
-require_match '已知当前交互使必要内容仅留在折叠过程区.*未收到实际回答的必须改用最终答复' SKILL.md
-require_match '已收到实际回答的必须补齐正文并按原回答及其明确范围承接，不重复确认' SKILL.md
-require_match '不能只记录用户点名的问题' SKILL.md
-require_match '仅要求推荐不属于该授权' SKILL.md
-require_match '承接决定必须保留确认依据和范围' SKILL.md
-require_match '禁止把模型自己的推荐、建议或方案在用户未确认时记为已确认' SKILL.md
-require_match '把未确认推荐记为已闭合，再据此宣布讨论充分' SKILL.md
-require_match '讨论不以穷尽所有潜在问题为前提' SKILL.md
-require_match '原生选择器只承载真实方案选择' SKILL.md
-require_match '确认式：核对已展示的理解' SKILL.md
-require_match '每项已确认决定对照用户原回答及其对象' SKILL.md
-require_match '不得在汇总中首次夹带未经讨论的重要方案' SKILL.md
-require_match '写歌会话对照回放' tests/dialogue-contracts/discussion-transition.md
-forbid_match '最终文本或宿主实际展示的原生提问|发出回复后立即结束本轮' SKILL.md
+check_patterns SKILL.md \
+  '正常对话正文交付' '同步选择器' '异步选择器' \
+  'reasoning、工具说明/参数、内部状态、折叠过程消息和选择器不能替代正文' \
+  '不得臆测界面已经验证' '未获回答时用最终正文和编号选项等待' \
+  '已获回答时补齐正文并按原范围承接，不重问' \
+  '补齐正文后立即结束本轮' '不重复文字提问' '原生选择器' \
+  '开放了解事实' '核对理解' '原生自由输入' \
+  '最终正文编号选项' '推荐.*超时或无回答.*不算执行授权'
 
-# 计划必须说明实施方法，并以已确认事项为顶层结构。
-require_match '顶层计划事项必须按照已确认的需求或问题组织' SKILL.md
-require_match '### 已确认' SKILL.md
-require_match '### 实施方案' SKILL.md
-require_match '### 涉及位置' SKILL.md
-require_match '### 内部验证' SKILL.md
-require_match '需要合并或拆分时，必须说明来源和原因' SKILL.md
-require_match '不能把模型偏好偷偷写入计划' SKILL.md
-require_match '不计作新的用户需求或问题' SKILL.md
+check_patterns SKILL.md \
+  '### 已确认' '### 实施方案' '核心机制.*作用边界.*关键约束' \
+  '顶层按已确认的独立需求或问题组织' '合并或拆分必须说明来源和原因' \
+  '预期变化、涉及位置、内部验证按需补充' '不另计需求或问题' \
+  '统一实施工作' '任一不满足，禁止合并' \
+  '同一回复.*统一执行选项' '执行，开启子代理' '执行，不开启子代理' \
+  '不执行，继续讨论' '不增第四个业务选项' \
+  '必须根据当前任务标注一个推荐、理由及各项影响' \
+  '记录已确认计划，直接输出并讨论验收目标' \
+  '用户选择生成后再输出完整目标草案' '不强制表格或条数' \
+  '原样跟踪，不增工程目标、不改粒度或解释' \
+  '删除判断' '不得.*施工步骤.*反推' '禁止按文件、模块、测试场景或实施步骤拆目标'
 
-# 最终验收目标必须可分流、最小化并原样进入目标模式。
-require_match '用户选择生成前，不得输出完整验收目标草案' SKILL.md
-require_match '对每个候选目标进行删除判断' SKILL.md
-require_match '不强制表格，也不设置固定条数' SKILL.md
-require_match '不得按文件、模块、测试场景或实施步骤拆分最终目标' SKILL.md
-require_match '原样进入目标模式' SKILL.md
-require_match '不能增加工程目标、改变粒度或重新解释' SKILL.md
+check_patterns SKILL.md \
+  '实际工具和 schema' 'select:TaskCreate' 'select:TaskList' 'select:TaskUpdate' \
+  'Invalid tool parameters' '重试一次' '必须先查询已有任务' '禁止重复创建' \
+  '保存返回 ID' '原样跟踪目标.*保留无关条目' '两类工具均不可用才在对话中跟踪' \
+  '展示草案不等于创建目标' '实际工作前.*首次文档骨架' \
+  '用 `TaskUpdate` 或实际计划工具先更新执行中' \
+  '按真实结果映射 `TaskUpdate` 或计划工具状态' \
+  '聚合目标完整承载已确认目标.*每条目标只对应一条任务' \
+  '先恢复执行中' '复核整项目标' '超过 200 行' \
+  '未达成、受阻' '不得伪记完成'
 
-# Deferred 目标工具必须先加载 schema，并与宿主任务形成状态闭环。
-require_match '用户未禁止写入时，以下情况必须写或更新' SKILL.md
-require_match 'ToolSearch query="select:TaskCreate"' SKILL.md
-require_match 'ToolSearch query="select:TaskList"' SKILL.md
-require_match 'ToolSearch query="select:TaskUpdate"' SKILL.md
-require_match 'Invalid tool parameters' SKILL.md
-require_match '禁止重复创建' SKILL.md
-require_match '保存宿主返回的目标或任务 ID' SKILL.md
-require_match '目标工具不可用时，必须自动降级为计划步进执行.*目标和计划工具均不可用时，才在对话中维护轻量目标' SKILL.md
-require_match '必要验收未通过或受阻时保持未完成' SKILL.md
-require_match 'TaskUpdate.*更新为执行中' SKILL.md
-require_match '首次写入文档骨架也属于实际工作' SKILL.md
-require_match 'TaskUpdate.*同步任务状态' SKILL.md
-require_match '为什么调用 TaskCreate 会连续出现 Invalid tool parameters' references/faq.md
-require_match '为什么工作完成了，宿主任务仍然显示未完成' references/faq.md
-require_match '宿主目标或任务必须原样来自最终验收目标' SKILL.md
-require_match '实施步骤不创建为宿主任务' tests/dialogue-contracts/deferred-goal-tools.md
-require_match '工作完成后只更新内部状态，不调用 `TaskUpdate`' tests/dialogue-contracts/deferred-goal-tools.md
-require_match '首次写入文档骨架后才把对应任务更新为执行中' tests/dialogue-contracts/deferred-goal-tools.md
-require_match '中断恢复或调用失败后重复创建相同任务' tests/dialogue-contracts/deferred-goal-tools.md
+check_patterns SKILL.md \
+  '无论是否开启子代理.*主模型.*必须' '主模型审查实际交付' \
+  '不得因关闭子代理、产物已生成或需要主观验收就跳过检查' \
+  '判断必须对应原目标、实际交付和证据' '不得新增标准或超出检查范围' \
+  '质量判断只分两档' '\| 达标 \|' '\| 未达标 \|' \
+  '\| 可修复 \|' '\| 需要用户验收 \|' '\| 需要用户授权或决定 \|' '\| 受阻 \|' \
+  '同一最终目标最多修复 3 次' '第三次修复后仍必须完成复验' \
+  '改变策略或修复内容' '相同原因与处理方式反复失败' \
+  '独立审查最多 3 次' '输入不合规后的重审均计入' \
+  '目标.*保持未完成|保持未完成' '工具内生成或准备输出不算交付' \
+  '需要用户验收.*不计修复次数' '需要用户授权或决定.*不计修复次数' \
+  '\| 受阻 \|.*不计修复次数' \
+  '无范围内已知缺陷或回归破坏' '等待不等于用户无法验收'
+check_patterns SKILL.md \
+  '无法完成必要验收，且无其他可靠证据.*受阻' \
+  '已开启独立复核.*已通过且覆盖当前交付版本' \
+  '发出前必须读取并遵守\[统一异常通知骨架\]' \
+  '通知前必须读取并遵守\[用户验收通知格式\]'
 
-# 执行、权限、恢复和质量闭环仍然保留。
-require_match '不默认新建分支' SKILL.md
-require_match '已有明确授权必须复用' SKILL.md
-require_match '工程测试只能作为辅助检查' SKILL.md
-require_match '无论是否开启子代理，执行模型都必须.*可修复问题必须修复后重新自检' SKILL.md
-require_match '禁止以关闭子代理、产物已生成或需要用户主观评价为由' SKILL.md
-require_match '质量判断只分两档' SKILL.md
-require_match '达标：满足最终验收目标' SKILL.md
-require_match '未达标：没有满足最终验收目标' SKILL.md
-require_match '发现任何瑕疵都必须判断为“未达标”' SKILL.md
-require_match '前文说无法核实字段或选项，后文却承诺可直接粘贴、勾选或使用' SKILL.md
-require_match '质量判断必须逐项对照实际交付、用户确认的最终验收目标及实际检查证据.*结论不得超出证据覆盖范围' SKILL.md
-require_match '影响目标达成的必要条件尚未核实' tests/dialogue-contracts/exception-routing.md
-require_match '### 用户验收补位' SKILL.md
-require_match '必须明确通知“需要用户验收”' references/templates.md
-require_match '验收步骤必须针对当前目标编写' references/templates.md
-require_match '不得新增模型自造标准、无关操作或信息要求' references/templates.md
-require_match '用户无法完成必要验收且没有其他可靠证据时' SKILL.md
-require_match '不得在必要的用户验收尚未返回结果时标记目标完成' SKILL.md
-require_match '高风险复核' SKILL.md
-require_match '大任务写入规则' SKILL.md
-require_match '轻量计划摘要' SKILL.md
-require_match '\.task-driver/\{任务标题\}-\{YYYYMMDDHHmmss\}-计划摘要\.md' SKILL.md
+check_patterns SKILL.md \
+  '首审和复审均使用独立上下文' '交接.*独立审查交接模板' \
+  '禁止执行者自评和前次审查结论' '无法判断：审查输入不合规' \
+  '保留原记录' '全新独立上下文重审' '不得删改原审查报告' \
+  '输入检查和输出要求原文' '可访问协议位置' '不扩大核实权限' \
+  '\| 状态 \|' '\| 证据 \|' '\| 阻断原因 \|' '\| 回归破坏 \|' \
+  '不只采信汇总' '未受影响的有效证据可复用'
+check_patterns SKILL.md '不静默关闭或声称已审查' '未达成、回归或无法判断均按第六步分类'
 
-# 任务规模必须按业务关系判断，拆分范围由用户确认。
-require_match '任务规模与拆分边界' SKILL.md
-require_match '业务目标、权限、风险、交付和回滚关系' SKILL.md
-require_match '不按固定文件数、计划项数或验收目标数机械判断' SKILL.md
-require_match '模型先说明拆分依据、建议的第一批范围和延期事项，再让用户确认本轮范围' SKILL.md
-require_match '轻量计划摘要' SKILL.md
-require_match '模型只请用户确认本轮范围' tests/dialogue-contracts/task-splitting.md
+check_patterns SKILL.md \
+  '条件独立触发' '超过 20 轮' '禁止写入时不得写' \
+  '首次写前必须告知' '计划摘要.md' '单份|同一任务只维护' \
+  '回滚关系' '不得静默拆分' '决定执行方式前.*必须读取' \
+  '不按文件数、计划项数或目标数机械判断' \
+  '提出拆分依据、建议首批范围和延期事项，请用户确认本轮范围' \
+  '只读取当前任务所需资料，不要求每次全量加载' \
+  '统一异常通知骨架' '用户验收通知格式' '高风险复核' \
+  '没有必要验收要求时不得新增人工确认' '已有修复/审查次数' \
+  '实际差异' '不得批量伪标完成'
 
-# 四类异常路由与修复策略变化不可回退。
-require_match '### 异常分类' SKILL.md
-require_match '可修复：' SKILL.md
-require_match '需要用户验收：' SKILL.md
-require_match '需要用户授权或决定：' SKILL.md
-require_match '受阻：' SKILL.md
-require_match '非可修复异常不得为了凑次数重复执行' SKILL.md
-require_match '每次修复必须改变实施策略或修复内容' SKILL.md
-require_match '停止机械重试' SKILL.md
-require_match '后三类异常不消耗最多 3 次的修复次数' tests/dialogue-contracts/exception-routing.md
-require_match '下一次修复改变实施策略或修复内容' tests/dialogue-contracts/retry-strategy-change.md
+# 引用资料各司其职；保留历史验证限制。
+check_patterns README.md '## 30 秒选择器' '即使不采用' '不得伪造验收目标或越权' \
+  '禁止要求用户再次确认已知限制' \
+  '## 能力边界与环境适配' '## 文档导航' '历史整体复测尚未全部通过'
+check_patterns references/quick-start.md 'README.md#30-秒选择器' '核心链路' '每一步怎么说' '典型反例'
+check_patterns references/faq.md '## 问题索引' '## 原生选择器怎样使用' \
+  '## 三次修复是必须执行三次吗' '## 用户验收和独立复核谁先' '第三次也必须复验'
+check_patterns references/scenarios.md '## 调研与讨论方法' '无法联网时必须基于自身知识继续深入分析' \
+  '先用自身知识分析场景和可行路径' '场景建议不能代替用户决定' \
+  '以下条件全部满足时，必须拆分并发' '必须由主线程串行执行' \
+  '## 低风险 Bug 修复' '## 新功能或新模块建设' '## 跨模块重构' \
+  '## 生产配置、外部接口或费用任务' '## UI、设备体验或主观质量任务' \
+  '禁止展开后续需求清单、技术选型或确认继续的选项'
+check_patterns references/templates.md '必须明确通知“需要用户验收”' \
+  '不得新增模型自造标准' '不粘贴长日志或内部状态转储' \
+  '当前结果：' '原因：' '已完成：' '下一步：' \
+  '第七步：独立复核要求'
 
-# 异常通知只保留决策所需信息；用户操作必须可执行、可判断。
-require_match '### 统一异常通知' SKILL.md
-require_match '通知前必须读取并遵守\[统一异常通知骨架\]' SKILL.md
-require_match '通知前必须读取并遵守\[用户验收通知格式\]' SKILL.md
-require_match '当前结果：' references/templates.md
-require_match '原因：' references/templates.md
-require_match '已完成：' references/templates.md
-require_match '下一步：' references/templates.md
-require_match '不粘贴长日志或内部状态转储' references/templates.md
-require_match '编号验收步骤和每步预期结果' tests/dialogue-contracts/unified-exception-notice.md
-require_match '明确通过条件和反馈要求' tests/dialogue-contracts/unified-exception-notice.md
+# 契约描述行为与失败路径，不以它们的存在代替回放。
+check_patterns tests/dialogue-contracts/retry-strategy-change.md '第三次修复' '第四次修复' '独立审查三次'
+check_patterns tests/dialogue-contracts/review-authority-summary.md '独立首审的必要证据' \
+  '无子代理的完整闭环' '输入不合规' '未受影响内容的审查证据可以复用'
+check_patterns tests/dialogue-contracts/deferred-goal-tools.md '场景四' '工具输出' '正常正文' 'completed'
+check_patterns tests/dialogue-contracts/progressive-doc-routing.md '不采用时仍不得伪造目标或越权' '静态|行为|复测|单一宿主'
+check_patterns tests/dialogue-contracts/user-acceptance-handoff.md '编号操作步骤' '预期结果和通过条件'
+check_patterns tests/dialogue-contracts/visible-reply-boundary.md '原生选择器不能替代正文' '异步' '同步'
+check_patterns tests/dialogue-contracts/deferred-goal-tools.md \
+  '实施步骤不创建为宿主任务' '工作完成后只更新内部状态，不调用 `TaskUpdate`' \
+  '首次写入文档骨架后才把对应任务更新为执行中' '中断恢复或调用失败后重复创建相同任务'
+check_patterns tests/dialogue-contracts/exception-routing.md \
+  '影响目标达成的必要条件尚未核实' '后三类异常不消耗最多 3 次的修复次数'
+check_patterns tests/dialogue-contracts/discussion-transition.md '写歌会话对照回放'
+check_patterns tests/dialogue-contracts/task-splitting.md '模型只请用户确认本轮范围'
+check_patterns tests/dialogue-contracts/end-to-end-small-case.md \
+  '五项目标覆盖' '模型一次只讨论一个问题' '提供继续讨论或生成计划的选择' \
+  '每项展示已确认决策和实施方案' '输出两个最终验收目标草案，并提供三个执行选项' \
+  '选择执行后原样创建已展示的目标并执行'
+check_patterns tests/dialogue-contracts/unified-exception-notice.md \
+  '编号验收步骤和每步预期结果' '明确通过条件和反馈要求'
 
-# FAQ、场景指南和渐进式入口各自承担独立职责。
-require_match '## 文档导航' README.md
-require_match 'references/quick-start.md' README.md
-require_match 'references/faq.md' README.md
-require_match 'references/scenarios.md' README.md
-require_match '不要求每次任务无条件加载全部参考文件' SKILL.md
-require_match '### 确认与授权' SKILL.md
-require_match '## 问题索引' references/faq.md
-require_match 'quick-start.md#典型反例' references/faq.md
-require_match '发出异常通知前必须读取模板对应章节' tests/dialogue-contracts/progressive-doc-routing.md
-require_match '## 三次修复是必须执行三次吗' references/faq.md
-require_match '## 怎样判断任务是否应该拆分' references/faq.md
-require_match '## 低风险 Bug 修复' references/scenarios.md
-require_match '## 新功能或新模块建设' references/scenarios.md
-require_match '## 跨模块重构' references/scenarios.md
-require_match '## 生产配置、外部接口或费用任务' references/scenarios.md
-require_match '## UI、设备体验或主观质量任务' references/scenarios.md
-require_match '场景建议不能代替用户决定' references/scenarios.md
-require_match '各文档只承担自己的职责，不大段复制完整协议' tests/dialogue-contracts/progressive-doc-routing.md
+set -- SKILL.md README.md references/quick-start.md references/faq.md references/scenarios.md references/templates.md
+forbid_match 'SpecPacket|PlanPacket|TaskResult|ReviewReport|VerificationReport|GoalDraft' "$@"
+forbid_match 'gate_mode|execution_mode|brainstorming|planning|executing|verification' "$@"
+forbid_match '\.task-driver/(specs|plans|ledgers)|必须使用轻量表格' "$@"
+forbid_match '计划确认只代表“可以进入验收标准草案”|够用|有瑕疵|不够用' "$@"
+forbid_match 'approved spec|approved plan|Acceptance Criteria|Target Coverage Matrix|Decomposition Strategy|File Map' "$@"
+forbid_match '拿不准的目标.*不阻塞|草案末尾提供两个选择|最终确认前，先询问是否开启' "$@"
+forbid_match '仔细询问[[:space:]]*$' README.md references/quick-start.md
+forbid_match '^## 30 秒选择器|发出回复后立即结束本轮|最终文本或宿主实际展示的原生提问' SKILL.md
 
-# 面向用户的说明必须与主协议一致。
-require_match '## 能力边界与环境适配' README.md
-require_match 'references/faq.md#原生选择器怎样使用' README.md
-require_match 'SKILL.md#宿主目标工具协议' README.md
-require_match 'SKILL.md#异常分类' README.md
-require_match 'README.md#能力边界与环境适配' references/faq.md
-require_match '禁止要求用户再次确认已知限制' README.md
-require_match '禁止展开后续需求清单、技术选型或确认继续的选项' references/scenarios.md
-require_match '协议可本地读取不等于国内环境下所有模型' tests/dialogue-contracts/progressive-doc-routing.md
-require_match '仔细询问并逐项讨论' README.md
-require_match '每个计划事项必须包含 ### 已确认 和 ### 实施方案' SKILL.md
-require_match '计划确认后先输出验收目标草案' references/quick-start.md
-require_match '用户确认后的目标必须原样进入目标模式' SKILL.md
-require_match 'SKILL.md#用户验收补位' README.md
-require_match 'SKILL.md#第二步输出计划' README.md
-require_match 'SKILL.md#轻量计划摘要' README.md
-require_match 'references/templates.md#用户验收通知格式' README.md
-require_match '示例的已确认目标是' references/quick-start.md
-require_match 'templates.md#统一异常通知骨架' references/quick-start.md
-require_match 'templates.md#用户验收通知格式' references/quick-start.md
-require_match '当前版本：v1.0.5' README.md
-require_match '逐项讨论' references/quick-start.md
-require_match '计划包含实施方案' tests/dialogue-contracts/plan-with-implementation.md
-require_match '五项目标覆盖' tests/dialogue-contracts/end-to-end-small-case.md
-require_match '模型一次只讨论一个问题' tests/dialogue-contracts/end-to-end-small-case.md
-require_match '提供继续讨论或生成计划的选择' tests/dialogue-contracts/end-to-end-small-case.md
-require_match '每项展示已确认决策和实施方案' tests/dialogue-contracts/end-to-end-small-case.md
-require_match '输出两个最终验收目标草案，并提供三个执行选项' tests/dialogue-contracts/end-to-end-small-case.md
-require_match '选择执行后原样创建已展示的目标并执行' tests/dialogue-contracts/end-to-end-small-case.md
-require_match '用户验收补位' tests/dialogue-contracts/user-acceptance-handoff.md
-require_match '用户反馈前不把目标标记为已达成或达标' tests/dialogue-contracts/user-acceptance-handoff.md
+# 本地路径和标题锚点是真实引用检查；只扫描维护中的文档，不改写历史报告。
+python3 - <<'PY'
+import re
+import sys
+from pathlib import Path
+from urllib.parse import unquote, urlsplit
 
-# 防止旧的“先输出表格草案再讨论”协议回退。
-forbid_match '必须使用轻量表格' "$DOC_SCOPE"
-forbid_match '计划确认只代表“可以进入验收标准草案”' "$DOC_SCOPE"
-forbid_match '够用|有瑕疵|不够用' "$DOC_SCOPE"
-forbid_match '仔细询问[[:space:]]*$' 'README.md references/quick-start.md'
-forbid_match 'SpecPacket|PlanPacket|TaskResult|ReviewReport|VerificationReport|GoalDraft' "$DOC_SCOPE"
-forbid_match 'gate_mode|execution_mode|brainstorming|planning|executing|verification' "$DOC_SCOPE"
-forbid_match 'approved spec|approved plan|Acceptance Criteria|Target Coverage Matrix|Decomposition Strategy|File Map' "$DOC_SCOPE"
-forbid_match '\.task-driver/(specs|plans|ledgers)' "$DOC_SCOPE"
+root = Path.cwd()
+docs = [Path("SKILL.md"), Path("README.md")]
+docs += sorted(Path("references").glob("*.md"))
+docs += sorted(Path("tests/dialogue-contracts").glob("*.md"))
 
-# 七项整改只检查协议结构与关键边界，不代表真实对话通过。
-require_file tests/dialogue-contracts/research-and-questioning.md
-require_file tests/dialogue-contracts/review-authority-summary.md
-require_match '开始需求调研前，必须读取' SKILL.md
-require_match '先用自身知识分析场景和可行路径' references/scenarios.md
-require_match '无法联网时必须基于自身知识继续深入分析' references/scenarios.md
-require_match '禁止把明确需求重新变成问题' SKILL.md
-require_match '无须提问不代表讨论完成' SKILL.md
-require_match '禁止逐项改写成验收话术' SKILL.md
-require_match '任一条件不满足，禁止合并展示' SKILL.md
-require_match '执行，开启子代理' SKILL.md
-require_match '执行，不开启子代理' SKILL.md
-require_match '不执行，继续讨论' SKILL.md
-require_match '必须标注一个推荐项' SKILL.md
-require_match '禁止再问是否确认目标' SKILL.md
-require_match '原生提问展示后等待实际回答' SKILL.md
-require_match '超时或无回答均不等于执行授权' SKILL.md
-require_match '已开启时必须等独立审查通过' SKILL.md
-require_match '无法判断 → 补证据' SKILL.md
-require_match '已开启审查时还须审查通过' references/templates.md
-require_match '用户明确禁止写文件时，该例外也不生效' SKILL.md
-require_match '## 调研与讨论方法' references/scenarios.md
-require_match '决定执行方式前，必须读取并遵守\[执行并发判断与分派细则\]' SKILL.md
-require_match '以下条件全部满足时，必须拆分并发' references/scenarios.md
-require_match '任一条件不满足或无法确认满足时，必须由主线程串行执行' references/scenarios.md
-require_match '交接前必须读取并遵守\[独立审查交接模板\]' SKILL.md
-require_match '第一次写之前必须短句告知' SKILL.md
-require_match '## 原生选择器怎样使用' references/faq.md
-forbid_match '拿不准的目标.*不阻塞|草案末尾提供两个选择|最终确认前，先询问是否开启' 'SKILL.md README.md references/quick-start.md references/faq.md references/templates.md'
+def prose(text):
+    fence = None
+    for line in text.splitlines():
+        stripped = line.lstrip()
+        if stripped.startswith((chr(96) * 3, "~" * 3)):
+            marker = stripped[0]
+            if fence is None:
+                fence = marker
+            elif fence == marker:
+                fence = None
+            continue
+        if fence is None:
+            yield line
 
-printf 'check-contracts: ok\n'
+def anchors(path):
+    used = {}
+    result = set()
+    for line in prose(path.read_text(encoding="utf-8")):
+        match = re.match(r"^#{1,6}\s+(.+?)\s*#*\s*$", line)
+        if not match:
+            continue
+        title = re.sub(r"\[([^]]+)\]\([^)]*\)", r"\1", match.group(1))
+        slug = re.sub(r"[^\w -]", "", title.lower()).replace(" ", "-")
+        number = used.get(slug, 0)
+        used[slug] = number + 1
+        result.add(slug if number == 0 else f"{slug}-{number}")
+    return result
+
+errors = []
+checked = 0
+cache = {}
+for doc in docs:
+    for line_number, line in enumerate(prose(doc.read_text(encoding="utf-8")), 1):
+        for href in re.findall(r"\[[^]\n]+\]\(([^)\n]+)\)", line):
+            href = href.strip().strip("<>")
+            parsed = urlsplit(href)
+            if parsed.scheme or parsed.netloc:
+                continue
+            target = (doc.parent / unquote(parsed.path)).resolve() if parsed.path else doc.resolve()
+            if not target.is_file():
+                errors.append(f"{doc}: local link target missing: {href}")
+                continue
+            if parsed.fragment:
+                if target not in cache:
+                    cache[target] = anchors(target)
+                if unquote(parsed.fragment) not in cache[target]:
+                    errors.append(f"{doc}: heading anchor missing: {href}")
+            checked += 1
+
+version = Path("VERSION.md").read_text(encoding="utf-8").strip()
+markers = re.findall(r"^当前版本：(\S+)\s*$", Path("README.md").read_text(encoding="utf-8"), re.M)
+if markers != [version]:
+    errors.append("README current version does not match VERSION.md")
+
+if errors:
+    print("\n".join(errors), file=sys.stderr)
+    sys.exit(1)
+print(f"check-contracts: local links ok ({checked})")
+PY
+
+printf 'check-contracts: ok (static constraints; not a model replay)\n'
