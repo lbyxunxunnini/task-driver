@@ -76,7 +76,7 @@ check_patterns references/templates.md '用户原话或消息来源' '实际确�
   '当前事项及未答部分' '产物版本' '第七步|独立复核要求'
 check_patterns references/scenarios.md '多轮正反例' '环境恢复' '创作设计' '测试方案' \
   '执行中澄清后继续' '未知不等于取消'
-check_patterns README.md '## 30 秒选择器' '## 文档导航' '历史整体复测尚未全部通过'
+check_patterns README.md '## 30 秒选择器' '## 文档导航' '## 当前版本' '## 本版改进'
 forbid_match '只请用户决定关键缺口|关键事项闭合后停止挖问题|不要求穷尽全部潜在问题' SKILL.md references/*.md
 forbid_match 'SpecPacket|PlanPacket|TaskResult|ReviewReport|VerificationReport|GoalDraft' SKILL.md references/*.md
 forbid_match '补齐正文后立即结束本轮|禁止展开后续需求清单' SKILL.md references/*.md
