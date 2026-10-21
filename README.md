@@ -74,7 +74,7 @@ tdr- 先和我讨论登录页按钮错位的修复范围，再形成计划并执
 - [业务场景最佳实践](references/scenarios.md)：调研前必读对应方法，覆盖已有改造、新增诉求、空项目和业务场景。
 - [模板参考](references/templates.md)：计划摘要、计划草案、异常通知和用户验收通知的展示模板。
 - [主控协议](SKILL.md)：状态、路由、授权、展示策略与完成门槛。
-- 职责模块：[调查分析](references/analysis.md)、[逐项讨论](references/discussion.md)、[计划](references/planning.md)、[目标](references/goals.md)、[执行](references/execution.md)、[验证](references/verification.md)、[审查](references/review.md)、[记录恢复](references/state-recovery.md)。各模块分别维护对应方法，按主控路由读取。
+- 职责模块：[调查分析](references/analysis.md)、[逐项讨论](references/discussion.md)、[计划](references/planning.md)、[目标](references/goals.md)、[子代理管理](references/subagents.md)、[执行](references/execution.md)、[验证](references/verification.md)、[审查](references/review.md)、[记录恢复](references/state-recovery.md)。各模块分别维护对应方法，按主控路由读取。
 
 “每次只问一项”不等于“只问一项关键问题”：模型先展开当前目标内的相关决策，再根据每次回答补查分支与遗漏。具体交互见[连续深挖示例](references/quick-start.md#连续深挖示例)，边界见[穷举拷问 FAQ](references/faq.md#穷举拷问会不会变成无限问卷)。
 
@@ -82,6 +82,7 @@ tdr- 先和我讨论登录页按钮错位的修复范围，再形成计划并执
 
 - 计划与目标：[计划要求](references/planning.md#输出计划)、[目标定义](references/goals.md#输出并确认验收目标)、[展示模板](references/templates.md#计划草案展示模板)。
 - 执行与权限：[宿主工具](references/execution.md#宿主目标工具协议)、[授权边界](SKILL.md#确认与授权)。
+- 子代理分工与并发：[执行方式](references/subagents.md#选择执行方式)、[依赖与安全条件](references/subagents.md#并发准入与依赖)、[运行调度](references/subagents.md#运行调度与异常接管)。开启后按收益决定执行分派，独立复核仍按原要求追加。
 - 规模与摘要：[任务拆分](SKILL.md#任务规模与拆分边界)、[摘要规则](SKILL.md#轻量计划摘要)。
 - 验收与交付：[用户验收](references/verification.md#用户验收补位)、[通知格式](references/templates.md#用户验收通知格式)、[完成与复审](SKILL.md#完成门槛)。
 
@@ -117,17 +118,17 @@ tdr- 先和我讨论登录页按钮错位的修复范围，再形成计划并执
 
 ## 当前版本
 
-当前版本：v1.1.0
+当前版本：v1.1.1
 
 ## 本版改进
 
-- 一个主控配合八个职责模块，统一管理阶段转换、授权、展示与完成条件，各模块分别提供调查、讨论、计划、目标、执行、验证、审查和恢复方法。
-- 逐项深入讨论：先分析相关决策，每次只问一个独立问题，回答后继续核对分支和遗漏，形成实施方案与验收目标。
-- 按当前环节加载所需模块，完整保留的内容直接复用；模板与 FAQ 按需读取，减少重复定义。
-- 长任务在同一份记录中维护决定、计划进度和操作标识；中断后核对现场，承接有效决定与授权。
-- 集中维护工具降级、验证取证、审查修复与正文交付规则，并提供对应场景、反例和模板。
+- 新增按需读取的子代理管理模块，主控配合九个职责模块；执行分工与运行调度集中维护。
+- 按分派收益、依赖及安全条件选择主线程、串行委派或并发，不再因满足安全条件就强制分派。
+- 按当前就绪任务调度，前置结果产生并稳定公共约定后，重新判断独立分支能否并发。
+- 完善结果收取、容量控制、局部失败接管、停止后核实和整合验证；主线程维护同一份运行记录。
+- 区分执行代理交接与独立复核四字段，保留原有审查标准、独立上下文、修复责任和次数；同步调度契约与静态检查。
 
-发布内容见 [v1.1.0 变更记录](CHANGELOG.md#v110-2026-10-21)。
+发布内容见 [v1.1.1 变更记录](CHANGELOG.md#v111-2026-10-21)。
 
 ## 自测
 

@@ -28,14 +28,14 @@ forbid_match() {
 for file in SKILL.md README.md VERSION.md .skillhub.json references/quick-start.md \
   references/faq.md references/scenarios.md references/templates.md \
   references/analysis.md references/discussion.md references/planning.md references/goals.md \
-  references/execution.md references/verification.md references/review.md references/state-recovery.md; do
+  references/execution.md references/subagents.md references/verification.md references/review.md references/state-recovery.md; do
   require_file "$file"
 done
 for name in explicit-discussion-request discussion-transition plan-with-implementation \
   acceptance-goal-discussion end-to-end-small-case user-acceptance-handoff task-splitting \
   exception-routing retry-strategy-change unified-exception-notice progressive-doc-routing \
   deferred-goal-tools visible-reply-boundary research-and-questioning review-authority-summary \
-  exhaustive-discussion state-recovery nine-corrections decision-driven-transition routing-control; do
+  exhaustive-discussion state-recovery nine-corrections decision-driven-transition routing-control subagent-scheduling; do
   require_file "tests/dialogue-contracts/$name.md"
 done
 check_patterns SKILL.md '^## 状态与主控职责' '^## 阶段转换' '^## 展示与确认策略' \
@@ -43,7 +43,7 @@ check_patterns SKILL.md '^## 状态与主控职责' '^## 阶段转换' '^## 展�
   '链接不是递归加载指令' '动作前核对条件' '根据实际结果更新'  \
   '每轮最多一个独立回答请求' \
   '用户只授权审查子代理时不扩大为执行分派' '结果未知的副作用操作先核实' \
-  '执行，开启子代理' '执行，不开启子代理' '不执行，继续讨论'
+  '执行，开启子代理' '执行，不开启子代理' '不执行，继续讨论' 'references/subagents.md'
 check_patterns references/analysis.md '用户目标 → 实际使用过程' '不等于删除支付覆盖' \
   '未知条件若会改变' '不伪装|不得伪装'
 check_patterns references/discussion.md '^## 回答后的推进' '^## 讨论完成门禁' '^### 先形成决策项' '^### 再生成并检查当前问题' \
@@ -57,8 +57,15 @@ check_patterns references/goals.md '目标来自需求' '删除判断' '通过�
 check_patterns references/execution.md '^### 执行入口' '实际工具和 schema' 'select:TaskCreate' 'select:TaskList' \
   'select:TaskUpdate' 'Invalid tool parameters' '重试一次' '必须先查询已有任务' \
   '禁止重复创建' '保存返回 ID' '两类工具均不可用才在对话中跟踪' \
-  '每条目标只对应一条任务' '先更新执行中' '必须由主线程串行执行' \
-  '以下条件全部满足时，必须拆分并发' '关闭子代理时，禁止启用执行子代理'
+  '每条目标只对应一条任务' '先更新执行中' 'subagents.md'
+check_patterns references/subagents.md '^## 选择执行方式' '^## 并发准入与依赖' \
+  '^## 分派与交接' '^## 运行调度与异常接管' '^## 整合与审查交接' \
+  '安全独立只是准入条件' '不以安全条件满足强制分派' '当前就绪任务' \
+  '不同时修改同一内容' '不争用会相互干扰的运行资源' '不假定前序结果' \
+  '用户关闭子代理或没有对应授权' '只授权审查时不扩大为执行分派' \
+  '执行入口' '不得作为额外的宿主验收任务创建' '不另建管理代理' \
+  '不重复代理正在做的任务' '停止请求不是已停止的证据' '结果未知' \
+  '不作为该产物的独立复核者' '次数均由审查模块唯一维护'
 check_patterns references/verification.md '静态检查可以直接证明文本类目标' \
   '实际输入' '观察结果' '不把旧快照结果拼成新版本通过' \
   '判据留在测试侧' '反馈不通过' '受阻'
@@ -80,6 +87,7 @@ check_patterns README.md '## 30 秒选择器' '## 文档导航' '## 当前版本
 forbid_match '只请用户决定关键缺口|关键事项闭合后停止挖问题|不要求穷尽全部潜在问题' SKILL.md references/*.md
 forbid_match 'SpecPacket|PlanPacket|TaskResult|ReviewReport|VerificationReport|GoalDraft' SKILL.md references/*.md
 forbid_match '补齐正文后立即结束本轮|禁止展开后续需求清单' SKILL.md references/*.md
+forbid_match '以下条件全部满足时，必须拆分并发|必须由主线程串行执行|八模块|八个职责模块' SKILL.md README.md references/*.md
 
 # 本地路径和标题锚点是真实引用检查；只扫描维护中的文档，不改写历史报告。
 python3 - <<'PY'
