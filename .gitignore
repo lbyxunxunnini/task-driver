@@ -13,3 +13,6 @@ __pycache__/
 # 本地回放原始记录含其他项目源码与会话输出，仅保留在本机
 /reports/task-driver-recovery-loop-20261019/
 /reports/task-driver-targeted-remediation-20261019/
+
+# 本地项目记忆与会话索引
+.project-context/
