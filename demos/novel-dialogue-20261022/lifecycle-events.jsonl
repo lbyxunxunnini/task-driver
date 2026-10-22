@@ -1,0 +1,2 @@
+{"event": "user_requested_stop", "time": "2026-10-22T22:12:34+08:00", "actual_started": ["01", "02", "03", "04"], "goal_paused_confirmed": ["02", "03"], "unstarted": ["05", "06"], "snapshot": "stopped-snapshot/"}
+{"event": "user_explicitly_resumed", "time": "2026-10-22T22:16:22.254845+08:00", "scope": ["01", "02", "03", "04"], "user_text": "我刚刚看到有误，你继续让这四个子代理，一直执行到结束，拿到产物，我们要进行整流程的探索。", "actions": "02/03原任务恢复；01第35轮按推荐委托剩余方案；04首问待槽位回复；不启动05/06"}

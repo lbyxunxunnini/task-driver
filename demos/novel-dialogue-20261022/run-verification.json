@@ -1,0 +1,116 @@
+{
+  "observed_at": "2026-10-22T23:51:02.482633+08:00",
+  "scope": "four existing agents 01-04 only; prior autonomous-writing run excluded",
+  "all_four_complete_after_actual_root_acceptance": true,
+  "discussion_exchanges_total": 125,
+  "controller_replies_including_confirmations_and_review": 145,
+  "total_body_han_uniform_method": 77789,
+  "models_same": true,
+  "skill_version": "1.1.6",
+  "source_head": "9cb92c56a73c2b57e681d3d35d8ae38567aac477",
+  "all_14_protocol_hashes_match": true,
+  "git_diff_check_exit": 0,
+  "counting_note": "Author04 counts ideographic zero U+3007 as Han; its stated 18882 differs from uniform CJK unified-and-extension count 18881 by exactly one 〇. Both within agreed tolerance.",
+  "authors": [
+    {
+      "author": 1,
+      "title": "收工以后",
+      "discussion_exchanges": 35,
+      "phase_confirmation_turns": [
+        36,
+        37,
+        38
+      ],
+      "last_controller_turn": 39,
+      "full_text_and_all_final_differences_read_by_root": true,
+      "novel_sha256": "2270dde55306c76b2407400b1cf8815fa98b295745a77001c1dbd5e44de4f7f4",
+      "body_han_unified_and_extensions": 19597,
+      "goal_status": "complete",
+      "goal_thread_id": "01a163d8-3220-7ff0-8bf3-8930ffb6874d",
+      "completed_at": "2026-10-22T14:45:32.606Z",
+      "completion_evidence": "first-delivered/author-01/completion-evidence.json",
+      "acceptance_evidence": "dialogues/agent-01/turn-0039.json",
+      "models_observed": [
+        {
+          "model": "gpt-6.1-sol",
+          "effort": "high"
+        }
+      ]
+    },
+    {
+      "author": 2,
+      "title": "原处",
+      "discussion_exchanges": 23,
+      "phase_confirmation_turns": [
+        24,
+        25,
+        26
+      ],
+      "last_controller_turn": 29,
+      "full_text_and_all_final_differences_read_by_root": true,
+      "novel_sha256": "a639ab64c47c37552ffef8075dd03b2489ca2a0b2d832d374281c45887ca57e5",
+      "body_han_unified_and_extensions": 19036,
+      "goal_status": "complete",
+      "goal_thread_id": "01a163d8-5089-7c80-b176-951d1ce28ff0",
+      "completed_at": "2026-10-22T14:38:19.515Z",
+      "completion_evidence": "accepted-revisions/author-02/completion-evidence.json",
+      "acceptance_evidence": "dialogues/agent-02/turn-0029.json",
+      "models_observed": [
+        {
+          "model": "gpt-6.1-sol",
+          "effort": "high"
+        }
+      ]
+    },
+    {
+      "author": 3,
+      "title": "不用带东西来",
+      "discussion_exchanges": 16,
+      "phase_confirmation_turns": [
+        17,
+        18,
+        19
+      ],
+      "last_controller_turn": 20,
+      "full_text_and_all_final_differences_read_by_root": true,
+      "novel_sha256": "391b95da64e25914ec6e3361a81de3d68aca5a59f9f0a50d9f4e51c2fd1d23ed",
+      "body_han_unified_and_extensions": 20275,
+      "goal_status": "complete",
+      "goal_thread_id": "01a163d8-7205-7570-801e-a72e7e5464ad",
+      "completed_at": "2026-10-22T14:29:59.524Z",
+      "completion_evidence": "first-delivered/author-03/completion-evidence.json",
+      "acceptance_evidence": "dialogues/agent-03/turn-0020.json",
+      "models_observed": [
+        {
+          "model": "gpt-6.1-sol",
+          "effort": "high"
+        }
+      ]
+    },
+    {
+      "author": 4,
+      "title": "余量",
+      "discussion_exchanges": 51,
+      "phase_confirmation_turns": [
+        52,
+        53,
+        54
+      ],
+      "last_controller_turn": 57,
+      "full_text_and_all_final_differences_read_by_root": true,
+      "novel_sha256": "2916e0218cb13dea15bb4437b98399b8d602b96370606e58eb8f88d8ee285b66",
+      "body_han_unified_and_extensions": 18881,
+      "goal_status": "complete",
+      "goal_thread_id": "01a163f3-0338-7692-adfe-63162599d615",
+      "completed_at": "2026-10-22T15:49:46.059Z",
+      "completion_evidence": "first-delivered/author-04/completion-evidence.json",
+      "acceptance_evidence": "dialogues/agent-04/turn-0057.json",
+      "models_observed": [
+        {
+          "model": "gpt-6.1-sol",
+          "effort": "high"
+        }
+      ]
+    }
+  ]
+}

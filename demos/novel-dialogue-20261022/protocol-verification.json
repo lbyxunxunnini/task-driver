@@ -1,0 +1,91 @@
+{
+  "version": "1.1.6",
+  "head_at_start": "9cb92c56a73c2b57e681d3d35d8ae38567aac477",
+  "all_14_match": true,
+  "files": [
+    {
+      "file": "SKILL.md",
+      "expected": "c6d9f7325a6e5a961c7ac02684cd0a6e1033eab28f217b4738043fd152aa3b86",
+      "source_matches": true,
+      "frozen_matches": true
+    },
+    {
+      "file": "references/analysis.md",
+      "expected": "f93729d1d5d0334d31ca50897501bd72b516c7f35f9fe669eb2ef94ed11b67fc",
+      "source_matches": true,
+      "frozen_matches": true
+    },
+    {
+      "file": "references/discussion.md",
+      "expected": "978fb90cb4c655f1b74b2a51982674cf35170cb8566f54ae0634c9af826c4adf",
+      "source_matches": true,
+      "frozen_matches": true
+    },
+    {
+      "file": "references/execution.md",
+      "expected": "2b4d178b1d9c0904872d48dca4bfa2a71c47607e2f04f50424c3b2a0dd113060",
+      "source_matches": true,
+      "frozen_matches": true
+    },
+    {
+      "file": "references/faq.md",
+      "expected": "ff498e19f12ef34b6948606b918ce115045b06f03d3f9cc1ecffd8b0ec4e9414",
+      "source_matches": true,
+      "frozen_matches": true
+    },
+    {
+      "file": "references/goals.md",
+      "expected": "6d69ea52fbf3049c7a794d64782e0e9bf98b0af5b4b72b7a9ca41bceb863dfea",
+      "source_matches": true,
+      "frozen_matches": true
+    },
+    {
+      "file": "references/planning.md",
+      "expected": "b511d4fe0aaa9c88d688716ffb72f4fb8d713e521036918edec2deb976019d5e",
+      "source_matches": true,
+      "frozen_matches": true
+    },
+    {
+      "file": "references/quick-start.md",
+      "expected": "e4f4522840c932e331a4a3836cafeee9f91b9aefd6cffc0cf5007b2a56c60806",
+      "source_matches": true,
+      "frozen_matches": true
+    },
+    {
+      "file": "references/review.md",
+      "expected": "70098635a4152a11d2d2f103b0e267018ae418ebe800acf127b3c8493ed337a1",
+      "source_matches": true,
+      "frozen_matches": true
+    },
+    {
+      "file": "references/scenarios.md",
+      "expected": "4b085224055c3f5244ff84e332c8a72fdee319bc74c7915379bedb9267b5359a",
+      "source_matches": true,
+      "frozen_matches": true
+    },
+    {
+      "file": "references/state-recovery.md",
+      "expected": "fc3586dd2cb8ebeacd92f482bba956f60895493899f4f1d1bc9409a6374508bc",
+      "source_matches": true,
+      "frozen_matches": true
+    },
+    {
+      "file": "references/subagents.md",
+      "expected": "cc771e1a6fca124c679f1d0ee89ccee6f4a9c4a7a8e5e03cbaaadea652e8bb40",
+      "source_matches": true,
+      "frozen_matches": true
+    },
+    {
+      "file": "references/templates.md",
+      "expected": "3132878fc2a96eca659b763c308f2627eded62bfafcc9972bf135f5e1cb92317",
+      "source_matches": true,
+      "frozen_matches": true
+    },
+    {
+      "file": "references/verification.md",
+      "expected": "d2f3cc0322ccedafb6b86da50e35378e0ebd0ace6b07eeabb0b8923ef52f038d",
+      "source_matches": true,
+      "frozen_matches": true
+    }
+  ]
+}

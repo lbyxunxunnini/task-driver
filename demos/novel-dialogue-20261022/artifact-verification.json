@@ -1,0 +1,96 @@
+{
+  "counting_method": "Exclude Markdown heading lines; count CJK unified and extension Han characters. Non-whitespace includes punctuation. Exact duplicate paragraphs are only a screening signal, not a literary judgment.",
+  "authors": [
+    {
+      "author": 1,
+      "path": "author-01/novel.md",
+      "exists": true,
+      "han_characters_body": 19597,
+      "non_whitespace_body": 22306,
+      "length_pass": true,
+      "sha256": "2270dde55306c76b2407400b1cf8815fa98b295745a77001c1dbd5e44de4f7f4",
+      "headings": [
+        "# 收工以后",
+        "## 一 回厂",
+        "## 二 另一种声音",
+        "## 三 六万元",
+        "## 四 初剪",
+        "## 五 停机",
+        "## 六 截止",
+        "## 七 重来",
+        "## 八 收工以后"
+      ],
+      "long_exact_duplicate_paragraphs": [],
+      "process_exists": true
+    },
+    {
+      "author": 2,
+      "path": "author-02/novel.md",
+      "exists": true,
+      "han_characters_body": 19036,
+      "non_whitespace_body": 22023,
+      "length_pass": true,
+      "sha256": "a639ab64c47c37552ffef8075dd03b2489ca2a0b2d832d374281c45887ca57e5",
+      "headings": [
+        "# 原处",
+        "## 一 回家",
+        "## 二 答应",
+        "## 三 不卖了",
+        "## 四 另一座城",
+        "## 五 摊开",
+        "## 六 自己说",
+        "## 七 交钥匙",
+        "## 八 新地址"
+      ],
+      "long_exact_duplicate_paragraphs": [],
+      "process_exists": true
+    },
+    {
+      "author": 3,
+      "path": "author-03/novel.md",
+      "exists": true,
+      "han_characters_body": 20275,
+      "non_whitespace_body": 23432,
+      "length_pass": true,
+      "sha256": "391b95da64e25914ec6e3361a81de3d68aca5a59f9f0a50d9f4e51c2fd1d23ed",
+      "headings": [
+        "# 不用带东西来",
+        "## 第一章 空出来的一格",
+        "## 第二章 两份清单",
+        "## 第三章 备用钥匙",
+        "## 第四章 送饭的人",
+        "## 第五章 先问一声",
+        "## 第六章 屋里有人",
+        "## 第七章 吃不完的菜",
+        "## 第八章 还给你",
+        "## 第九章 晚场电影",
+        "## 第十章 不用带东西来"
+      ],
+      "long_exact_duplicate_paragraphs": [],
+      "process_exists": true
+    },
+    {
+      "author": 4,
+      "path": "author-04/novel.md",
+      "exists": true,
+      "han_characters_body": 18881,
+      "non_whitespace_body": 21760,
+      "length_pass": true,
+      "sha256": "2916e0218cb13dea15bb4437b98399b8d602b96370606e58eb8f88d8ee285b66",
+      "headings": [
+        "# 余量",
+        "## 一 邀请",
+        "## 二 旧柜",
+        "## 三 旧账",
+        "## 四 薄处",
+        "## 五 告知",
+        "## 六 限期",
+        "## 七 交还",
+        "## 八 余量"
+      ],
+      "long_exact_duplicate_paragraphs": [],
+      "process_exists": true
+    }
+  ],
+  "all_length_pass": true
+}
