@@ -15,6 +15,7 @@ STATUSES = {'continue', 'wait_user', 'wait_tool', 'blocked', 'paused', 'complete
 GATES = ('plan', 'goals', 'execution')
 GUIDANCE = {
     'present_incomplete_plan': '在正文交付标明缺口的讨论稿，不能称为正式计划或请求执行。',
+    'verify_plan_request': '核对当前计划请求与已交付草案的实际对应关系，再更新状态；不要重复提问或编造交付。',
     'present_plan': '在正文实际列出正式计划；计划展示不等于确认或执行授权。计划或目标尚无有效确认时，不提供执行选项；用户明确本轮不执行时交付其要求的计划或目标及缺口，不附执行选择。',
     'request_plan_transition': '总结有效决定，请用户确认结束讨论并生成计划。',
     'resolve_pending': '处理尚有影响的事项：能调查先调查，委托范围内自行决定，其余讨论；不要重问已决事项。',
@@ -73,6 +74,14 @@ def validate(s):
         errors.append('plan.draft_presented must be true or false')
     elif plan.get('draft_presented') is True and (not isinstance(plan.get('draft_evidence'), str) or not plan['draft_evidence'].strip()):
         errors.append('presented draft requires evidence')
+    for key in ('draft_for_request', 'draft_not_for_request'):
+        if key in plan:
+            if not isinstance(plan[key], str) or not plan[key].strip():
+                errors.append(key + ' must be a nonempty reference')
+            elif plan.get('draft_presented') is not True:
+                errors.append(key + ' requires presented draft')
+    if plan.get('draft_for_request') and plan.get('draft_for_request') == plan.get('draft_not_for_request'):
+        errors.append('draft request references conflict')
     plan_required = s.get('plan_required', True)
     if not isinstance(plan_required, bool):
         errors.append('plan_required must be true or false')
@@ -225,6 +234,21 @@ def validate_transition(previous, current):
     return errors
 
 
+def pending_plan_request_action(s):
+    """Distinguish a delivered draft for this request from an older draft."""
+    if not s['plan_requested'] or s['plan']['presented']:
+        return None
+    plan = s['plan']
+    if not plan.get('draft_presented', False):
+        return 'present_incomplete_plan'
+    request = s['plan_request_source']
+    if plan.get('draft_for_request') == request:
+        return None
+    if plan.get('draft_not_for_request') == request:
+        return 'present_incomplete_plan'
+    return 'verify_plan_request'
+
+
 def route(s):
     """Return the next required category based on supplied facts, not model prose."""
     errors = validate(s)
@@ -242,21 +266,23 @@ def route(s):
             if checks:
                 result['independent_checks'] = checks
         return result
-    if s.get('local_only'):
-        if s.get('local_done'):
-            return {'action': 'local_complete'}
-        return {'action': 'continue_local', 'next_action': s['next_action']}
+    if s.get('local_only') and s.get('local_done'):
+        return {'action': 'local_complete'}
     for operation in s.get('operations', []):
         if isinstance(operation, dict) and operation.get('blocks_next') is True and operation.get('side_effect') is True and operation.get('status') in ('unknown', 'running'):
             return {'action': 'check_operation', 'reference': operation.get('reference')}
+    if s.get('local_only'):
+        return {'action': 'continue_local', 'next_action': s['next_action']}
     if s['phase'] in ('discussion', 'planning'):
         if not s['coverage_checked']:
-            if s['plan_requested'] and not s['plan']['presented'] and not s['plan'].get('draft_presented', False):
-                return {'action': 'present_incomplete_plan'}
+            action = pending_plan_request_action(s)
+            if action:
+                return {'action': action}
             return {'action': 'check_coverage'}
         if any(i.get('status') == 'pending' and i.get('blocks_plan', True) is not False for i in s['decisions']):
-            if s['plan_requested'] and not s['plan']['presented'] and not s['plan'].get('draft_presented', False):
-                return {'action': 'present_incomplete_plan'}
+            action = pending_plan_request_action(s)
+            if action:
+                return {'action': action}
             return {'action': 'resolve_pending', 'next_action': s['next_action']}
         if s.get('plan_required', True) and not s['plan']['presented']:
             return {'action': 'present_plan' if s['plan_requested'] else 'request_plan_transition'}

@@ -48,7 +48,7 @@ class ControlTests(unittest.TestCase):
     def test_unpresented_plan_advances_only_after_discussion_is_ready(self):
         s = state()
         self.assertEqual('present_incomplete_plan', controller.route(s)['action'])
-        s['plan'].update(draft_presented=True, draft_evidence='上一轮已发送草案')
+        s['plan'].update(draft_presented=True, draft_evidence='上一轮已发送草案', draft_for_request=s['plan_request_source'])
         self.assertEqual('resolve_pending', controller.route(s)['action'])
         s['decisions'][0].update(status='decided', value='用户选定范围', source='用户回答')
         self.assertEqual('present_plan', controller.route(s)['action'])
@@ -128,7 +128,7 @@ class ControlTests(unittest.TestCase):
     def test_current_request_draft_and_local_scope(self):
         s = state(coverage_checked=False)
         self.assertEqual('present_incomplete_plan', controller.route(s)['action'])
-        s['plan'].update(draft_presented=True, draft_evidence='上一轮已发送草案')
+        s['plan'].update(draft_presented=True, draft_evidence='上一轮已发送草案', draft_for_request=s['plan_request_source'])
         self.assertEqual('check_coverage', controller.route(s)['action'])
         s.update(local_only=True, local_done=False)
         self.assertEqual('continue_local', controller.route(s)['action'])
@@ -168,6 +168,42 @@ class ControlTests(unittest.TestCase):
                   'draft_delivery':{'status':'reported','evidence':'旧草案'}},
                   gates={'plan':'用户确认计划','goals':None,'execution':None})
         self.assertEqual('continue_current_phase', controller.route(s)['action'])
+
+    def test_new_plan_request_is_not_satisfied_by_old_draft(self):
+        s=state(plan_request_source='本轮请求',plan={'presented':False,'draft_presented':True,
+                'draft_evidence':'上一轮草案','draft_for_request':'旧请求'})
+        self.assertEqual('verify_plan_request',controller.route(s)['action'])
+        s['plan']['draft_not_for_request']='本轮请求'
+        self.assertEqual('present_incomplete_plan',controller.route(s)['action'])
+        s['plan'].pop('draft_not_for_request')
+        s['plan']['draft_for_request']='本轮请求'
+        self.assertEqual('resolve_pending',controller.route(s)['action'])
+        s['plan'].pop('draft_for_request')
+        self.assertEqual('verify_plan_request',controller.route(s)['action'])
+        s['decisions']=[]
+        self.assertEqual('present_plan',controller.route(s)['action'])
+
+    def test_old_draft_can_be_distinguished_without_old_request_reference(self):
+        s=state(plan_request_source='本轮请求',plan={'presented':False,'draft_presented':True,
+                'draft_evidence':'旧草案先于本轮请求','draft_not_for_request':'本轮请求'})
+        self.assertEqual('present_incomplete_plan',controller.route(s)['action'])
+        s['plan']['draft_for_request']='本轮请求'
+        self.assertIn('draft request references conflict',controller.validate(s))
+        self.assertEqual('repair_state',controller.route(s)['action'])
+
+    def test_new_request_draft_lifecycle_does_not_repeat(self):
+        s=state(plan_request_source='本轮请求',plan={'presented':False,'draft_presented':True,
+                'draft_evidence':'旧草案','draft_not_for_request':'本轮请求'})
+        self.assertEqual('present_incomplete_plan',controller.route(s)['action'])
+        s['plan'].update(draft_evidence='本轮已交付草案',draft_for_request='本轮请求')
+        s['plan'].pop('draft_not_for_request')
+        self.assertEqual('resolve_pending',controller.route(s)['action'])
+
+    def test_draft_request_reference_requires_a_delivered_draft(self):
+        s=state(plan={'presented':False,'draft_for_request':'某条请求'})
+        self.assertIn('draft_for_request requires presented draft',controller.validate(s))
+        s['plan']['draft_for_request']=''
+        self.assertIn('draft_for_request must be a nonempty reference',controller.validate(s))
 
     def test_reported_draft_does_not_block_new_formal_plan(self):
         s = state(decisions=[], plan={'presented':False,'draft_presented':True,
@@ -226,6 +262,19 @@ class ControlTests(unittest.TestCase):
         self.assertIn('nonblocking operation requires reason',controller.validate(s))
         op['blocks_next']='false'
         self.assertIn('operation blocks_next must be boolean',controller.validate(s))
+
+    def test_local_work_checks_blocking_unknown_side_effect_before_retry(self):
+        op={'id':'a','reference':'原操作','status':'unknown','side_effect':True,'blocks_next':True}
+        s=state(phase='execution', decisions=[], plan={'presented':True,'evidence':'已展示计划'},
+                gates={'plan':'确认','goals':'确认','execution':'授权'},local_only=True,local_done=False,
+                next_action='重试原操作',operations=[op])
+        self.assertEqual('check_operation',controller.route(s)['action'])
+        op['blocks_next']=False
+        self.assertEqual('continue_local',controller.route(s)['action'])
+        op['blocks_next']=True;s['local_done']=True
+        self.assertEqual('local_complete',controller.route(s)['action'])
+        s.update(status='paused',wait_reason='用户暂停')
+        self.assertEqual('paused',controller.route(s)['action'])
 
     def test_duplicate_operations_are_not_treated_as_new_work(self):
         op={'id':'a','reference':'同一个作业','status':'unknown','side_effect':True,'blocks_next':True}

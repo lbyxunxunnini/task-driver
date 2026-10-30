@@ -4,7 +4,7 @@
 
 需要检查结构或阶段条件时，可以调用 `scripts/workflow_control.py`；脚本只读标准输入或指定的 JSON 状态，不创建、覆盖或更新任务记录。例如 `python3 -B "<skill目录>/scripts/workflow_control.py" next --state -` 从标准输入读取；`check` 只检查结构。脚本未运行或失败不等于检查通过；不可用时说明限制，并按主控协议继续。
 
-状态包含 `task_id`、`phase`、`status`、`next_action`、`decisions`、`plan`、`coverage_checked`、`plan_requested` 和 `gates`。决定项记录稳定 `id`、主题 `subject`、`status`、实际决定 `value` 和 `source`；待定项不需要 `value`。计划的 `presented` 和 `evidence` 来自对话中实际可见的内容，不由脚本自行判断消息是否送达；计划请求和授权分别保留来源。用户只回答一部分时，只更新实际覆盖的决定。填写状态前先查对话和材料，无法恢复的事实标为未知，不猜测。
+状态包含 `task_id`、`phase`、`status`、`next_action`、`decisions`、`plan`、`coverage_checked`、`plan_requested` 和 `gates`。决定项记录稳定 `id`、主题 `subject`、`status`、实际决定 `value` 和 `source`；待定项不需要 `value`。计划的 `presented` 和 `evidence` 来自对话中实际可见的内容，不由脚本自行判断消息是否送达；计划请求和授权分别保留来源。每个计划请求的 `plan_request_source` 使用能唯一标识该次请求的实际消息引用。同一请求的草案已交付时，`plan.draft_for_request` 填完全相同的请求引用；若有依据确认旧草案不对应当前请求，`plan.draft_not_for_request` 填当前请求引用，即使旧请求的来源无法恢复也不编造。新草案实际交付后同步更新草案证据和 `draft_for_request`，清除对应的 `draft_not_for_request`；不能提前记录交付。不同引用可能只是不同写法，未确认关系时脚本返回 `verify_plan_request`，先核对对话再更新，不推定已送达或重复提问；确实无法判断时保留未知，不假称核实。用户只回答一部分时，只更新实际覆盖的决定。填写状态前先查对话和材料，无法恢复的事实标为未知，不猜测。
 
 以下是结构示意，必须按实际对话填写，不把示例当作已有决定：
 
