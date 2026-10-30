@@ -31,23 +31,25 @@ for file in SKILL.md README.md VERSION.md .skillhub.json references/quick-start.
   references/execution.md references/subagents.md references/verification.md references/review.md references/state-recovery.md; do
   require_file "$file"
 done
+require_file scripts/workflow_control.py
+require_file references/workflow-control.md
 for name in explicit-discussion-request discussion-transition plan-with-implementation \
   acceptance-goal-discussion end-to-end-small-case user-acceptance-handoff task-splitting \
   exception-routing retry-strategy-change unified-exception-notice progressive-doc-routing \
   deferred-goal-tools visible-reply-boundary research-and-questioning review-authority-summary \
-  exhaustive-discussion state-recovery nine-corrections decision-driven-transition routing-control subagent-scheduling; do
+  exhaustive-discussion discussion-continuity-dedup state-recovery nine-corrections decision-driven-transition routing-control subagent-scheduling; do
   require_file "tests/dialogue-contracts/$name.md"
 done
 check_patterns SKILL.md '^## 状态与主控职责' '^## 阶段转换' '^## 展示与确认策略' \
   '^## 确认与授权' '^## 完成门槛' '已有完整授权必须复用' \
   '链接不是递归加载指令' '动作前核对条件' '根据实际结果更新'  \
-  '每轮最多一个独立回答请求' \
+  '同一场景可展示边界清楚的完整方案' \
+  '讨论中的局部请求完成后' '仅有阶段标记、总结或继续的承诺不算续接' \
   '用户只授权审查子代理时不扩大为执行分派' '结果未知的副作用操作先核实' \
   '执行，开启子代理' '执行，不开启子代理' '不执行，继续讨论' 'references/subagents.md'
 check_patterns references/analysis.md '用户目标 → 实际使用过程' '不等于删除支付覆盖' \
   '未知条件若会改变' '不伪装|不得伪装'
-check_patterns references/discussion.md '^## 回答后的推进' '^## 讨论完成门禁' '^### 先形成决策项' '^### 再生成并检查当前问题' \
-  '变量名与裸取值' '自由输入提示' \
+check_patterns references/discussion.md '^## 回答后的推进' '^## 讨论完成门禁' '^## 决策项与提问' '仅更新原话实际覆盖的内容' \
   '不是否定、不可用、取消或委托' '覆盖核对' '决定核对' \
   '先保存本轮有效变化，再问下一项'
 check_patterns references/planning.md '### 已确认' '### 实施方案' '核心机制' \
@@ -75,7 +77,7 @@ check_patterns references/review.md '无论是否开启子代理' '主模型审�
   '用户明确指定本任务循环上限' '首审和复审均使用独立上下文' \
   '禁止执行者自评和前次审查结论' '无法判断：审查输入不合规' \
   '不得删改原审查报告' '独立审查最多 3 次' '未受影响的有效证据可复用'
-check_patterns references/state-recovery.md '同一任务仅一份' '超过 20 轮' \
+check_patterns references/state-recovery.md '同一任务仅一份' '10 次用户回答' \
   '先保存并核对成功' '保存后再提问' '长计划开始执行前' \
   '步骤全部打勾不等于目标达成' '结果未知先核查' '终端断开不代表进程停止' \
   '不盲目重试' '不重置|次数继续有效' '不保存凭据或秘密' '本轮记录“正文待交付、状态待同步”'
