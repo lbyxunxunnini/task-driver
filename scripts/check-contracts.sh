@@ -37,7 +37,8 @@ for name in explicit-discussion-request discussion-transition plan-with-implemen
   acceptance-goal-discussion end-to-end-small-case user-acceptance-handoff task-splitting \
   exception-routing retry-strategy-change unified-exception-notice progressive-doc-routing \
   deferred-goal-tools visible-reply-boundary research-and-questioning review-authority-summary \
-  exhaustive-discussion discussion-continuity-dedup state-recovery nine-corrections decision-driven-transition routing-control subagent-scheduling; do
+  exhaustive-discussion discussion-continuity-dedup state-recovery nine-corrections decision-driven-transition routing-control subagent-scheduling \
+  progress-anchor addressable-summary design-doc-is-not-plan; do
   require_file "tests/dialogue-contracts/$name.md"
 done
 check_patterns SKILL.md '^## 状态与主控职责' '^## 阶段转换' '^## 展示与确认策略' \
@@ -46,17 +47,29 @@ check_patterns SKILL.md '^## 状态与主控职责' '^## 阶段转换' '^## 展�
   '同一场景可展示边界清楚的完整方案' \
   '讨论中的局部请求完成后' '仅有阶段标记、总结或继续的承诺不算续接' \
   '用户只授权审查子代理时不扩大为执行分派' '结果未知的副作用操作先核实' \
-  '执行，开启子代理' '执行，不开启子代理' '不执行，继续讨论' 'references/subagents.md'
+  '执行，开启子代理' '执行，不开启子代理' '不执行，继续讨论' 'references/subagents.md' \
+  '进度锚点' '只读检查代理' '不得写成已独立检查' \
+  '四项可追溯证据' '四项引证' '不构成任何一项内容确认' '不能把执行意图当作内容确认' \
+  '计划已在对话中实际展示或摘要展示' '用户确认该计划内容' '用户确认最终验收目标' \
+  '用户授权执行范围与子代理设置' '每项都必须能回溯到实际用户消息' \
+  '①仍须展示或明确豁免' '明确委托模型在该范围内决定' '明确表示不需要该阶段确认' \
+  '用户明确表示不需要展示计划' '可直接判断的最终结果或通过条件' '不含笼统的' \
+  '明确委托模型/表示不需要该阶段确认' '请求中已写明的可直接判断结果或通过条件' \
+  '只作为目标依据' '可作为目标依据' '不替代计划确认或执行设置' \
+  '目标可来自请求中已写明的可直接判断结果或通过条件' '方案与执行设置仍须各自具备证据' \
+  '明确委托模型决定执行设置' \
+  '有记录来源且未变化的已确认条件不重走' '调用本 skill 表示按固定链路推进'
 check_patterns references/analysis.md '用户目标 → 实际使用过程' '不等于删除支付覆盖' \
   '未知条件若会改变' '不伪装|不得伪装'
 check_patterns references/discussion.md '^## 回答后的推进' '^## 讨论完成门禁' '^## 决策项与提问' '仅更新原话实际覆盖的内容' \
   '不是否定、不可用、取消或委托' '覆盖核对' '决定核对' \
-  '先保存本轮有效变化，再问下一项'
+  '先保存本轮有效变化，再问下一项' '不得进入下一阶段'
 check_patterns references/planning.md '### 已确认' '### 实施方案' '核心机制' \
   '具体实施方案' '长计划'
 check_patterns references/goals.md '目标来自需求' '删除判断' '通过条件' \
   '不得从自选施工步骤反推目标'
-check_patterns references/execution.md '^### 执行入口' '实际工具和 schema' 'select:TaskCreate' 'select:TaskList' \
+check_patterns references/execution.md '^### 执行入口' '四项证据' '计划展示（展示或明确豁免）' \
+  '不得先创建宿主目标再补引证' '回溯到实际用户消息' '实际工具和 schema' 'select:TaskCreate' 'select:TaskList' \
   'select:TaskUpdate' 'Invalid tool parameters' '重试一次' '必须先查询已有任务' \
   '禁止重复创建' '保存返回 ID' '两类工具均不可用才在对话中跟踪' \
   '每条目标只对应一条任务' '先更新执行中' 'subagents.md'
@@ -80,7 +93,20 @@ check_patterns references/review.md '无论是否开启子代理' '主模型审�
 check_patterns references/state-recovery.md '同一任务仅一份' '10 次用户回答' \
   '先保存并核对成功' '保存后再提问' '长计划开始执行前' \
   '步骤全部打勾不等于目标达成' '结果未知先核查' '终端断开不代表进程停止' \
-  '不盲目重试' '不重置|次数继续有效' '不保存凭据或秘密' '本轮记录“正文待交付、状态待同步”'
+  '不盲目重试' '不重置|次数继续有效' '不保存凭据或秘密' '本轮记录“正文待交付、状态待同步”' \
+  '^## 引用与展开' '^## 进度锚点' '不保留悬空引用' \
+  '每 3 个阶段结果最多 1 次' '阶段结果指' 'A\{n\}' '不得把锚点写成已独立检查' \
+  '不产生或恢复子代理授权'
+check_patterns references/subagents.md '^## 只读检查代理' '不冒称已检查' \
+  '不产生或恢复子代理授权' '不能消除与主控同模型' '不计入修复次数与独立复核次数'
+check_patterns references/review.md '属于执行途中的只读路线复查'
+check_patterns references/templates.md '进度锚点交接模板' '引用与展开' '四项引证' \
+  '\| 编号（如 F1） \|' '\| 编号（如 D1） \|' '\| 编号（如 G1） \|'
+check_patterns tests/dialogue-contracts/progress-anchor.md '不触发' '阶段结果' '不恢复子代理授权'
+check_patterns tests/dialogue-contracts/addressable-summary.md '记录编号' '用户选项'
+check_patterns tests/dialogue-contracts/design-doc-is-not-plan.md '创建执行目标' '只更新该决定' \
+  '文档存在不等于计划已展示' '不用给我看计划' '目标不用确认' '完成/做好/第一版' \
+  '可直接判断的结果' '把执行意图或文档引用写进计划、目标证据' '越权执行'
 check_patterns references/templates.md '用户原话或消息来源' '实际确认或委托的内容' '恢复后第一步' \
   '当前事项及未答部分' '产物版本' '第七步|独立复核要求'
 check_patterns references/scenarios.md '多轮正反例' '环境恢复' '创作设计' '测试方案' \

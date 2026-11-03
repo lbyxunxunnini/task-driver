@@ -110,6 +110,23 @@ class ControlTests(unittest.TestCase):
                   gates={'plan': None, 'goals': '用户确认目标', 'execution': '用户授权执行'})
         self.assertIn('plan evidence required for execution or later', controller.validate(s))
 
+    def test_gate_strings_do_not_replace_plan_presentation(self):
+        s = state(phase='execution', decisions=[], plan={'presented': False},
+                  gates={'plan': '消息#3', 'goals': '消息#4', 'execution': '消息#5'})
+        self.assertIn('plan must be presented before goals or execution', controller.validate(s))
+
+    def test_document_reference_alone_is_not_plan_presentation(self):
+        s = state(phase='execution', decisions=[],
+                  plan={'presented': False, 'evidence': '用户要求按设计文档执行'},
+                  gates={'plan': '消息#3', 'goals': '消息#4', 'execution': '消息#5'})
+        self.assertIn('plan must be presented before goals or execution', controller.validate(s))
+
+    def test_presented_plan_still_needs_goal_evidence(self):
+        s = state(phase='execution', decisions=[],
+                  plan={'presented': True, 'evidence': '对话中已展示派生计划摘要'},
+                  gates={'plan': '消息#4 用户确认计划', 'goals': None, 'execution': '消息#5'})
+        self.assertIn('goals evidence required for execution or later', controller.validate(s))
+
     def test_plan_request_requires_a_traceable_source(self):
         s = state(decisions=[])
         del s['plan_request_source']
