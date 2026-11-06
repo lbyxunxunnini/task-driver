@@ -60,7 +60,7 @@ check_patterns SKILL.md '^## 状态与主控职责' '^## 阶段转换' '^## 展�
   '明确委托模型决定执行设置' \
   '有记录来源且未变化的已确认条件不重走' '调用本 skill 表示按固定链路推进'
 check_patterns references/analysis.md '用户目标 → 实际使用过程' '不等于删除支付覆盖' \
-  '未知条件若会改变' '不伪装|不得伪装'
+  '未知条件若会改变' '不编造调查结果' '已核实的原有情况' '候选方案'
 check_patterns references/discussion.md '^## 回答后的推进' '^## 讨论完成门禁' '^## 决策项与提问' '仅更新原话实际覆盖的内容' \
   '不是否定、不可用、取消或委托' '覆盖核对' '决定核对' \
   '先保存本轮有效变化，再问下一项' '不得进入下一阶段'
@@ -68,7 +68,7 @@ check_patterns references/planning.md '### 已确认' '### 实施方案' '核心
   '具体实施方案' '长计划'
 check_patterns references/goals.md '目标来自需求' '删除判断' '通过条件' \
   '不得从自选施工步骤反推目标'
-check_patterns references/execution.md '^### 执行入口' '四项证据' '计划展示（展示或明确豁免）' \
+check_patterns references/execution.md '^### 执行入口' '主控四项证据' '计划展示、计划确认、目标确认及执行授权' \
   '不得先创建宿主目标再补引证' '回溯到实际用户消息' '实际工具和 schema' 'select:TaskCreate' 'select:TaskList' \
   'select:TaskUpdate' 'Invalid tool parameters' '重试一次' '必须先查询已有任务' \
   '禁止重复创建' '保存返回 ID' '两类工具均不可用才在对话中跟踪' \
