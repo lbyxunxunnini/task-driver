@@ -25,14 +25,18 @@ forbid_match() {
 }
 
 # 每个判断有单一归属；只检查模块入口和必要约束，不把文本匹配当行为验收。
-for file in SKILL.md README.md VERSION.md .skillhub.json references/quick-start.md \
+for file in SKILL.md README.md VERSION.md .skillhub.json CHANGELOG.md references/quick-start.md \
   references/faq.md references/scenarios.md references/templates.md \
   references/analysis.md references/discussion.md references/planning.md references/goals.md \
   references/execution.md references/subagents.md references/verification.md references/review.md references/state-recovery.md; do
   require_file "$file"
 done
 require_file scripts/workflow_control.py
+require_file scripts/build-package.sh
 require_file references/workflow-control.md
+require_file tests/workflow-control/test_workflow_control.py
+check_patterns SKILL.md '仅由用户显式调用' '不因任务复杂而自动启用' '不另设轻量模式'
+check_patterns README.md '仅由用户显式调用' 'scripts/build-package.sh'
 for name in explicit-discussion-request discussion-transition plan-with-implementation \
   acceptance-goal-discussion end-to-end-small-case user-acceptance-handoff task-splitting \
   exception-routing retry-strategy-change unified-exception-notice progressive-doc-routing \
