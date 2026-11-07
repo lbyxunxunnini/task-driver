@@ -72,7 +72,7 @@ tdr- 先和我讨论登录页按钮错位的修复范围，再形成计划并执
 - [四代理小说全流程 demo](demos/novel-dialogue-20261022/README.md)：完整问答、四篇成稿、核验证据，以及大问题和小问题的最终复核。
 - [快速开始](references/quick-start.md)：每个环节怎么说、最常见反例和异常通知示例。
 - [常见问题](references/faq.md)：讨论、计划、验收目标、重试、权限和恢复问题。
-- [业务场景最佳实践](references/scenarios.md)：调研前必读对应方法，覆盖已有改造、新增诉求、空项目和业务场景。
+- [业务场景最佳实践](references/scenarios.md)：需要示例时按需读取，覆盖已有改造、新增诉求、空项目和业务场景。
 - [模板参考](references/templates.md)：计划摘要、计划草案、异常通知和用户验收通知的展示模板。
 - [主控协议](SKILL.md)：状态、路由、授权、展示策略与完成门槛。
 - [轻量状态检查](references/workflow-control.md)：按主控指定时点只读检查状态结构；不会创建任务记录或验证消息来源。

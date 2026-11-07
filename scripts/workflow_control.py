@@ -23,7 +23,7 @@ GUIDANCE = {
     'check_coverage': '先核对目标、已有资料、决定和未决事项，再以新状态检查；不得编造问题。',
     'continue_local': '先完成已获授权的独立或局部动作，不扩大用户限定的范围；原等待或受阻状态保持不变。',
     'local_complete': '交付局部结果并保留原任务恢复点。',
-    'check_operation': '先核实原操作及回执，结果未知时不得重复执行副作用动作。',
+    'check_operation': '仅在查询权限内只读核实原操作及回执；不授权新操作或重试，结果未知时不得重复执行副作用动作。',
     'handle_interruption': '先处理当前临时请求，核对用户与宿主授权；业务执行仍须满足原有执行门槛，不扩大原任务授权。',
     'reconcile_interruption': '核对临时结果、恢复点、最新用户要求和实际现场；正文先交付临时结果，再接回对应事项。用户明确暂停时保持暂停。',
 }
@@ -115,8 +115,8 @@ def validate(s):
             errors.append('decision subject required')
         if status != 'pending' and (not isinstance(item.get('source'), str) or not item['source'].strip()):
             errors.append('resolved decision requires source')
-        if status == 'decided' and (not isinstance(item.get('value'), str) or not item['value'].strip()):
-            errors.append('decided item requires its actual value')
+        if status in ('decided', 'delegated') and (not isinstance(item.get('value'), str) or not item['value'].strip()):
+            errors.append(status + ' item requires its actual value')
         if status == 'pending' and (item.get('blocks_plan') is False or item.get('blocks_completion') is False):
             if not isinstance(item.get('nonblocking_reason'), str) or not item['nonblocking_reason'].strip():
                 errors.append('nonblocking pending decision requires reason')
@@ -176,15 +176,6 @@ def validate(s):
     phase = s.get('phase')
     if phase in ('verification', 'review') and not isinstance(s.get('execution_occurred'), bool):
         errors.append('execution_occurred must be explicitly true or false')
-    needs_execution_gates = phase == 'execution' or (phase in ('verification', 'review') and s.get('execution_occurred') is not False)
-    if needs_execution_gates:
-        if plan_required is False and plan.get('presented') is not True:
-            errors.append('plan must be presented before execution')
-        if not isinstance(goals, dict) or goals.get('presented') is not True:
-            errors.append('goals must be presented before execution')
-        for name in GATES:
-            if not gates.get(name):
-                errors.append(name + ' evidence required for execution or later')
     if s.get('status') in ('wait_user', 'wait_tool', 'blocked', 'paused'):
         reason = s.get('wait_reason')
         if not isinstance(reason, str) or not reason.strip():
@@ -219,6 +210,21 @@ def validate(s):
         if op.get('status') in ('running', 'unknown') and op.get('blocks_completion') is False and (not isinstance(op.get('completion_unblock_reason'), str) or not op['completion_unblock_reason'].strip()):
             errors.append('nonblocking operation requires reason')
     checking_operation = any(isinstance(op, dict) and op.get('blocks_next') is True and op.get('status') in ('unknown', 'running') for op in operations)
+    independent_checks = any(isinstance(op, dict) and op.get('status') in ('unknown', 'running') and
+                             op.get('independent_of_wait') is True for op in operations)
+    querying_operation = (((checking_operation and s.get('status') == 'continue') or
+                           (independent_checks and s.get('status') in ('wait_user', 'wait_tool') and
+                            not s.get('independent_action'))) and not s.get('interruptions') and
+                          not (s.get('local_only') is True and s.get('local_done') is True))
+    needs_execution_gates = phase == 'execution' or (phase in ('verification', 'review') and s.get('execution_occurred') is not False)
+    if needs_execution_gates:
+        if plan_required is False and plan.get('presented') is not True:
+            errors.append('plan must be presented before execution')
+        if not isinstance(goals, dict) or goals.get('presented') is not True:
+            errors.append('goals must be presented before execution')
+        for name in GATES:
+            if not gates.get(name) and not (name == 'execution' and querying_operation):
+                errors.append(name + ' evidence required for execution or later')
     if phase == 'execution' and s.get('status') == 'continue' and not checking_operation and not (s.get('local_only') is True and s.get('local_done') is True):
         if s.get('coverage_checked') is not True:
             errors.append('discussion coverage must be checked before execution')
@@ -303,7 +309,7 @@ def validate_transition(previous, current):
     if not isinstance(removals, dict):
         return errors + ['removed decisions must be an object']
     for ident, old in old_items.items():
-        if old.get('status') != 'decided':
+        if old.get('status') not in ('decided', 'delegated', 'excluded'):
             continue
         item = new_items.get(ident)
         if item is None:
@@ -311,10 +317,17 @@ def validate_transition(previous, current):
             source = removals.get(ident)
             if not isinstance(source, str) or not source.strip():
                 errors.append('removed decision requires source')
-        elif (old.get('value'), old.get('status')) != (item.get('value'), item.get('status')):
+        elif any(old.get(key) != item.get(key) for key in ('subject', 'value', 'status')):
             changed = True
             if item.get('status') != 'pending' and (not item.get('source') or item.get('source') == old.get('source')):
-                errors.append('changed decision requires new source')
+                review = current.get('impact_review')
+                within_delegation = (old.get('status') == item.get('status') == 'delegated' and
+                                     old.get('subject') == item.get('subject') and
+                                     bool(item.get('source')) and
+                                     isinstance(review, dict) and isinstance(review.get('reason'), str) and
+                                     bool(review['reason'].strip()))
+                if not within_delegation:
+                    errors.append('changed decision requires new source')
     old_plan, new_plan = previous.get('plan'), current.get('plan')
     if isinstance(old_plan, dict) and isinstance(new_plan, dict) and old_plan.get('presented') is True and new_plan.get('presented') is True and old_plan.get('evidence') != new_plan.get('evidence'):
         changed = True

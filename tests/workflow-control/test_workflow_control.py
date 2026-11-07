@@ -45,6 +45,23 @@ class ControlTests(unittest.TestCase):
         s['decisions'][1]['id'] = '1'
         self.assertIn('decision id missing or duplicated', controller.validate(s))
 
+    def test_delegation_requires_a_decision_before_closure_or_execution(self):
+        s = state(decisions=[{'id':'d1', 'subject':'备份策略', 'status':'delegated', 'source':'用户委托'}])
+        self.assertEqual('repair_state', controller.route(s)['action'])
+        self.assertIn('delegated item requires its actual value', controller.validate(s))
+        s['decisions'][0]['status'] = 'pending'
+        s['plan_requested'] = False
+        self.assertEqual('resolve_pending', controller.route(s)['action'])
+        s['decisions'][0].update(status='delegated', value='保留一份可恢复备份')
+        s['plan_requested'] = True
+        self.assertEqual('present_plan', controller.route(s)['action'])
+        s.update(phase='execution', plan={'presented':True, 'evidence':'计划'},
+                 goals={'presented':True, 'evidence':'目标'},
+                 gates={'plan':'委托方案', 'goals':'委托目标', 'execution':'执行授权'})
+        self.assertEqual('continue_current_phase', controller.route(s)['action'])
+        s['decisions'][0].pop('value')
+        self.assertEqual('repair_state', controller.route(s)['action'])
+
     def test_waiting_requires_a_previously_presented_question(self):
         s = state(status='wait_user', wait_reason='等待回答')
         self.assertIn('wait_user requires reference to already presented question', controller.validate(s))
@@ -177,6 +194,68 @@ class ControlTests(unittest.TestCase):
         self.assertEqual('check_operation', controller.route(s)['action'])
         operation.update(status='succeeded', evidence='原操作回执')
         self.assertIn('pending decisions prevent execution', controller.validate(s))
+
+    def test_revoked_execution_allows_only_observation_of_the_original_operation(self):
+        op = {'id':'job', 'reference':'原作业', 'status':'unknown', 'side_effect':True, 'blocks_next':True}
+        previous = state(phase='execution', decisions=[], plan={'presented':True,'evidence':'计划'},
+                         goals={'presented':True,'evidence':'目标'}, operations=[op],
+                         gates={'plan':'计划确认','goals':'目标确认','execution':'原执行授权'})
+        current = copy.deepcopy(previous)
+        current['gates']['execution'] = None
+        current['next_action'] = '只读核实原作业'
+        result = subprocess.run([sys.executable, str(SCRIPT), 'next', '--state', '-'],
+                                input=json.dumps({'previous':previous, 'state':current}),
+                                capture_output=True, text=True)
+        self.assertEqual(0, result.returncode, result.stdout)
+        self.assertEqual('check_operation', json.loads(result.stdout)['action'])
+        op = current['operations'][0]
+        for status in ('unknown', 'running'):
+            op['status'] = status
+            self.assertEqual('check_operation', controller.route(current)['action'])
+        for status in ('failed', 'succeeded'):
+            op.update(status=status, evidence='原作业结果')
+            current['next_action'] = '重试或继续下一步'
+            self.assertEqual('repair_state', controller.route(current)['action'])
+        op.update(status='unknown', blocks_next=False)
+        self.assertEqual('repair_state', controller.route(current)['action'])
+
+    def test_operation_observation_keeps_structure_pause_and_completion_guards(self):
+        s = state(phase='execution', decisions=[], plan={'presented':True,'evidence':'计划'},
+                  goals={'presented':True,'evidence':'目标'},
+                  gates={'plan':'计划确认','goals':'目标确认','execution':None},
+                  operations=[{'id':'job','reference':'原作业','status':'unknown','side_effect':True,'blocks_next':True}])
+        s['operations'][0]['reference'] = ''
+        self.assertEqual('repair_state', controller.route(s)['action'])
+        s['operations'][0]['reference'] = '原作业'
+        s['gates']['plan'] = None
+        self.assertEqual('repair_state', controller.route(s)['action'])
+        s['gates']['plan'] = '计划确认'
+        s.update(status='paused', wait_reason='用户暂停')
+        self.assertEqual('paused', controller.route(s)['action'])
+        s.update(status='complete', completion_evidence='声称完成')
+        self.assertEqual('repair_state', controller.route(s)['action'])
+        s.update(status='continue', local_only=True, local_done=True)
+        self.assertEqual('repair_state', controller.route(s)['action'])
+
+    def test_waiting_preserves_independent_observation_after_execution_is_revoked(self):
+        for waiting in ('wait_user', 'wait_tool'):
+            for operation_status in ('unknown', 'running'):
+                with self.subTest(waiting=waiting, operation_status=operation_status):
+                    s = state(phase='execution', status=waiting, decisions=[],
+                              wait_reason='等待后续条件', wait_evidence='已展示的问题',
+                              plan={'presented':True,'evidence':'计划'}, goals={'presented':True,'evidence':'目标'},
+                              gates={'plan':'计划确认','goals':'目标确认','execution':None},
+                              operations=[{'id':'job','reference':'原作业','status':operation_status,
+                                           'side_effect':True,'blocks_next':True,'independent_of_wait':True}])
+                    result = controller.route(s)
+                    self.assertEqual(waiting, result['action'])
+                    self.assertEqual(['原作业'], result['independent_checks'])
+                    self.assertIsNone(s['gates']['execution'])
+                    s['independent_action'] = '继续实施其他修改'
+                    self.assertEqual('repair_state', controller.route(s)['action'])
+                    s.pop('independent_action')
+                    s['operations'][0]['independent_of_wait'] = False
+                    self.assertEqual('repair_state', controller.route(s)['action'])
 
     def test_plan_exception_requires_evidence(self):
         s = state(phase='analysis', plan_required=False, plan_requested=False)
@@ -684,6 +763,42 @@ class ControlTests(unittest.TestCase):
         self.assertEqual([],controller.validate_transition(old,new))
         new.pop('impact_review');new['gates']={'plan':'消息3','goals':'消息3','execution':'消息3'}
         self.assertEqual([],controller.validate_transition(old,new))
+
+    def test_excluded_and_delegated_changes_cannot_silently_reuse_old_authority(self):
+        for status in ('excluded', 'delegated'):
+            with self.subTest(status=status):
+                old = state(decisions=[{'id':'d1','subject':'发布范围','status':status,
+                                        'value':'不发布','source':'原要求'}],
+                            gates={'plan':'原授权','goals':'原授权','execution':'原授权'})
+                new = copy.deepcopy(old)
+                new['decisions'][0].update(status='decided', value='发布')
+                errors = controller.validate_transition(old, new)
+                self.assertIn('changed decision requires new source', errors)
+                self.assertIn('changed scope requires reviewing retained authorizations', errors)
+                new['decisions'][0]['source'] = '用户新的明确要求'
+                new['impact_review'] = {'reason':'核对新要求覆盖的范围', 'retained':list(controller.GATES)}
+                self.assertEqual([], controller.validate_transition(old, new))
+                removed = copy.deepcopy(old)
+                removed['decisions'] = []
+                errors = controller.validate_transition(old, removed)
+                self.assertIn('removed decision requires source', errors)
+                self.assertIn('changed scope requires reviewing retained authorizations', errors)
+                removed['removed_decisions'] = {'d1':'用户明确撤回该事项'}
+                removed['impact_review'] = {'reason':'撤回不影响其余授权', 'retained':list(controller.GATES)}
+                self.assertEqual([], controller.validate_transition(old, removed))
+
+    def test_delegated_adjustment_reuses_its_source_only_with_impact_review(self):
+        old = state(decisions=[{'id':'d1','subject':'标题措辞','status':'delegated',
+                                'value':'方案甲','source':'用户委托标题措辞'}],
+                    gates={'plan':'委托方案','goals':'确认目标','execution':'执行授权'})
+        new = copy.deepcopy(old)
+        new['decisions'][0]['value'] = '方案乙'
+        self.assertTrue(controller.validate_transition(old, new))
+        new['impact_review'] = {'reason':'仍仅调整标题措辞，原委托及其余授权均适用',
+                                'retained':list(controller.GATES)}
+        self.assertEqual([], controller.validate_transition(old, new))
+        new['decisions'][0]['subject'] = '标题和正文'
+        self.assertIn('changed decision requires new source', controller.validate_transition(old, new))
 
     def test_removed_decision_and_new_plan_need_sources_and_impact_review(self):
         old=state(plan={'presented':True,'evidence':'旧计划'},
