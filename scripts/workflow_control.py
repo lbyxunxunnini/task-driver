@@ -17,7 +17,7 @@ INTERRUPTION_STATUSES = STATUSES | {'cancelled'}
 GUIDANCE = {
     'present_incomplete_plan': '在正文交付标明缺口的讨论稿，不能称为正式计划或请求执行。',
     'verify_plan_request': '核对当前计划请求与已交付草案的实际对应关系，再更新状态；不要重复提问或编造交付。',
-    'present_plan': '讨论闭合时默认在正文一起展示正式计划和目标；用户限定只看计划时遵从。展示不等于确认或执行授权，内容尚无有效确认时不提供执行选项；用户明确本轮不执行时不附执行选择。',
+    'present_plan': '讨论闭合后在正文一起展示正式计划和目标；用户明确限制只展示其中一项时，说明严格流程并等待调整范围。展示不等于确认或执行授权，内容尚无有效确认时不提供执行选项；用户明确本轮不执行时不附执行选择。',
     'request_plan_transition': '总结有效决定，请用户确认结束讨论并生成计划。',
     'resolve_pending': '处理尚有影响的事项：能调查先调查，委托范围内自行决定，其余讨论；不要重问已决事项。',
     'check_coverage': '先核对目标、已有资料、决定和未决事项，再以新状态检查；不得编造问题。',
@@ -149,7 +149,9 @@ def validate(s):
         errors.append('plan_required must be true or false')
     elif not plan_required and (not isinstance(s.get('plan_waiver_source'), str) or not s['plan_waiver_source'].strip()):
         errors.append('plan waiver requires source')
-    if plan_required is not False and s.get('phase') in ('goals', 'execution', 'verification', 'review') and plan.get('presented') is not True:
+    if s.get('phase') == 'planning' and plan_required is False and plan.get('presented') is not True:
+        errors.append('plan cannot be waived in planning stage')
+    if (s.get('phase') == 'goals' or (plan_required is not False and s.get('phase') in ('execution', 'verification', 'review'))) and plan.get('presented') is not True:
         errors.append('plan must be presented before goals or execution')
     if not isinstance(s.get('coverage_checked'), bool):
         errors.append('coverage_checked must be true or false')
@@ -216,17 +218,19 @@ def validate(s):
             errors.append('operation result requires evidence')
         if op.get('status') in ('running', 'unknown') and op.get('blocks_completion') is False and (not isinstance(op.get('completion_unblock_reason'), str) or not op['completion_unblock_reason'].strip()):
             errors.append('nonblocking operation requires reason')
-    checking_operation = any(isinstance(op, dict) and op.get('blocks_next') is True and op.get('side_effect') is True and op.get('status') in ('unknown', 'running') for op in operations)
+    checking_operation = any(isinstance(op, dict) and op.get('blocks_next') is True and op.get('status') in ('unknown', 'running') for op in operations)
     if phase == 'execution' and s.get('status') == 'continue' and not checking_operation and not (s.get('local_only') is True and s.get('local_done') is True):
         if s.get('coverage_checked') is not True:
             errors.append('discussion coverage must be checked before execution')
         if any(isinstance(item, dict) and item.get('status') == 'pending' and item.get('blocks_plan', True) is not False for item in items):
             errors.append('pending decisions prevent execution')
     if s.get('status') == 'complete':
-        if any(isinstance(op, dict) and op.get('blocks_completion', True) is not False and op.get('side_effect') is True and op.get('status') in ('unknown', 'running') for op in operations):
-            errors.append('unresolved side-effect operation prevents completion')
+        if any(isinstance(op, dict) and op.get('blocks_completion', True) is not False and op.get('status') in ('unknown', 'running') for op in operations):
+            errors.append('unresolved operation prevents completion')
         if plan_required is not False and plan.get('presented') is not True:
             errors.append('required plan must be presented before completion')
+        if plan_required is not False and (not isinstance(goals, dict) or goals.get('presented') is not True):
+            errors.append('required goals must be presented before completion')
         if plan_required is not False and s.get('phase') in ('discussion', 'planning') and s.get('coverage_checked') is not True:
             errors.append('coverage check required before completion')
         if any(i.get('status') == 'pending' and i.get('blocks_completion', True) is not False for i in items if isinstance(i, dict)):
@@ -396,25 +400,25 @@ def route(s):
             (not isinstance(goals, dict) or goals.get('presented') is not True) and
             s.get('local_only') is not True):
         return {'action': 'continue_local',
-                'next_action': '先核对计划确认、待决事项及当前展示范围；允许时展示目标，否则处理缺口或等待。',
+                'next_action': '先核对计划确认、待决事项及当前展示范围；允许时一起展示计划和目标，否则处理缺口或等待。',
                 'blocked_reason': s['wait_reason']}
     if status != 'continue':
         result = {'action': status, 'reason': s.get('wait_reason')}
         if status in ('wait_user', 'wait_tool'):
             if s.get('independent_action'):
                 result['independent_action'] = s['independent_action']
-            checks = [op.get('reference') for op in s.get('operations', []) if isinstance(op, dict) and op.get('status') in ('running', 'unknown') and op.get('side_effect') is True and op.get('independent_of_wait') is True]
+            checks = [op.get('reference') for op in s.get('operations', []) if isinstance(op, dict) and op.get('status') in ('running', 'unknown') and op.get('independent_of_wait') is True]
             if checks:
                 result['independent_checks'] = checks
         return result
     if s.get('local_only') and s.get('local_done'):
         return {'action': 'local_complete'}
     for operation in s.get('operations', []):
-        if isinstance(operation, dict) and operation.get('blocks_next') is True and operation.get('side_effect') is True and operation.get('status') in ('unknown', 'running'):
+        if isinstance(operation, dict) and operation.get('blocks_next') is True and operation.get('status') in ('unknown', 'running'):
             return {'action': 'check_operation', 'reference': operation.get('reference')}
     if s.get('local_only'):
         return {'action': 'continue_local', 'next_action': s['next_action']}
-    if s['phase'] in ('discussion', 'planning'):
+    if s['phase'] in ('discussion', 'planning', 'goals'):
         if not s['coverage_checked']:
             action = pending_plan_request_action(s)
             if action:
@@ -425,6 +429,8 @@ def route(s):
             if action:
                 return {'action': action}
             return {'action': 'resolve_pending', 'next_action': s['next_action']}
+        if s['plan']['presented'] and (not isinstance(goals, dict) or goals.get('presented') is not True):
+            return {'action': 'present_plan'}
         if s.get('plan_required', True) and not s['plan']['presented']:
             return {'action': 'present_plan' if s['plan_requested'] else 'request_plan_transition'}
     return {'action': 'continue_current_phase', 'next_action': s['next_action']}

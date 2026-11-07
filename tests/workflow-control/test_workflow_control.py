@@ -116,6 +116,27 @@ class ControlTests(unittest.TestCase):
         s['gates']['plan'] = '用户确认计划'
         self.assertEqual([],controller.validate(s))
 
+    def test_entering_planning_after_a_request_to_skip_still_presents_both(self):
+        s = state(phase='planning', plan_requested=True, plan_request_source='用户要求跳过计划并执行',
+                  decisions=[], next_action='按主控展示计划和目标')
+        result = controller.route(s)
+        self.assertEqual('present_plan', result['action'])
+        self.assertIn('一起展示正式计划和目标', result.get('instruction', controller.GUIDANCE['present_plan']))
+
+    def test_explicit_skip_cannot_disable_plan_when_entering_planning(self):
+        s = state(phase='planning', plan_requested=False, plan_required=False,
+                  plan_waiver_source='用户要求跳过计划', decisions=[])
+        self.assertIn('plan cannot be waived in planning stage', controller.validate(s))
+
+    def test_old_plan_only_must_be_represented_with_goals(self):
+        s = state(phase='planning', decisions=[], plan={'presented':True, 'evidence':'旧计划'},
+                  next_action='展示目标')
+        self.assertEqual('present_plan', controller.route(s)['action'])
+        s['phase'] = 'discussion'
+        self.assertEqual('present_plan', controller.route(s)['action'])
+        s['decisions'] = [{'id':'d','subject':'目标范围','status':'pending'}]
+        self.assertEqual('resolve_pending', controller.route(s)['action'])
+
     def test_execution_requires_both_actual_presentations(self):
         s = state(phase='execution', decisions=[], plan={'presented': True, 'evidence': '同一条正文'},
                   gates={'plan': '用户确认计划', 'goals': '用户确认目标', 'execution': '用户授权执行'})
@@ -127,10 +148,10 @@ class ControlTests(unittest.TestCase):
         s.update(plan_required=False, plan_requested=False, plan_waiver_source='免展示计划', plan={'presented': False})
         self.assertIn('plan must be presented before execution', controller.validate(s))
 
-    def test_only_showing_goals_does_not_authorize_skipping_plan_later(self):
+    def test_goals_cannot_be_shown_without_the_plan(self):
         s = state(phase='goals', plan_required=False, plan_requested=False,
                   plan_waiver_source='用户本轮只看目标', decisions=[])
-        self.assertEqual([], controller.validate(s))
+        self.assertIn('plan must be presented before goals or execution', controller.validate(s))
         s.update(phase='execution', goals={'presented':True,'evidence':'已展示目标'},
                  gates={'plan':'用户确认计划','goals':'用户确认目标','execution':'用户授权执行'})
         self.assertIn('plan must be presented before execution', controller.validate(s))
@@ -158,7 +179,7 @@ class ControlTests(unittest.TestCase):
         self.assertIn('pending decisions prevent execution', controller.validate(s))
 
     def test_plan_exception_requires_evidence(self):
-        s = state(phase='goals', plan_required=False, plan_requested=False)
+        s = state(phase='analysis', plan_required=False, plan_requested=False)
         self.assertIn('plan waiver requires source', controller.validate(s))
         s['plan_waiver_source'] = '现有结果已经满足用户目标的证据'
         self.assertEqual([], controller.validate(s))
@@ -173,11 +194,6 @@ class ControlTests(unittest.TestCase):
         s = state(phase='execution', plan_required=False, plan_requested=False, plan_waiver_source='用户允许免展示',
                   gates={'plan': None, 'goals': '用户确认目标', 'execution': '用户授权执行'})
         self.assertIn('plan evidence required for execution or later', controller.validate(s))
-
-    def test_gate_strings_do_not_replace_plan_presentation(self):
-        s = state(phase='execution', decisions=[], plan={'presented': False},
-                  gates={'plan': '消息#3', 'goals': '消息#4', 'execution': '消息#5'})
-        self.assertIn('plan must be presented before goals or execution', controller.validate(s))
 
     def test_document_reference_alone_is_not_plan_presentation(self):
         s = state(phase='execution', decisions=[],
@@ -224,15 +240,15 @@ class ControlTests(unittest.TestCase):
         s = state(phase='planning', status='blocked', wait_reason='执行权限不足',
                   plan={'presented':True, 'evidence':'已展示计划'},
                   gates={'plan':'用户确认计划','goals':None,'execution':None},
-                  independent_action='展示目标')
+                  independent_action='一起展示计划和目标')
         result = controller.route(s)
-        self.assertEqual(('continue_local', '展示目标', '执行权限不足'),
+        self.assertEqual(('continue_local', '一起展示计划和目标', '执行权限不足'),
                          (result['action'], result['next_action'], result['blocked_reason']))
         self.assertEqual('blocked', s['status'])
         s.pop('independent_action')
         result = controller.route(s)
         self.assertEqual('continue_local', result['action'])
-        self.assertIn('允许时展示目标', result['next_action'])
+        self.assertIn('允许时一起展示计划和目标', result['next_action'])
         s['local_only'] = True
         self.assertEqual('blocked', controller.route(s)['action'])
 
@@ -472,6 +488,8 @@ class ControlTests(unittest.TestCase):
         s = state(decisions=[], phase='goals', plan={'presented':True,'evidence':'上轮正式计划',
                   'draft_delivery':{'status':'reported','evidence':'旧草案'}},
                   gates={'plan':'用户确认计划','goals':None,'execution':None})
+        self.assertEqual('present_plan', controller.route(s)['action'])
+        s['goals'] = {'presented':True, 'evidence':'合并展示目标'}
         self.assertEqual('continue_current_phase', controller.route(s)['action'])
 
     def test_new_plan_request_is_not_satisfied_by_old_draft(self):
@@ -533,6 +551,13 @@ class ControlTests(unittest.TestCase):
             self.assertIn('required plan must be presented before completion', controller.validate(s))
             self.assertEqual('repair_state', controller.route(s)['action'])
 
+        s = state(phase='planning', status='complete', decisions=[], completion_evidence='计划已交付',
+                  plan={'presented':True, 'evidence':'计划正文'})
+        self.assertIn('required goals must be presented before completion', controller.validate(s))
+        self.assertEqual('repair_state', controller.route(s)['action'])
+        s['goals'] = {'presented':True, 'evidence':'计划与目标正文'}
+        self.assertEqual('complete', controller.route(s)['action'])
+
     def test_cannot_complete_before_coverage_check(self):
         s = state(status='complete', decisions=[], coverage_checked=False,
                   plan={'presented':True, 'evidence':'正式计划已发出'}, completion_evidence='正文')
@@ -553,9 +578,28 @@ class ControlTests(unittest.TestCase):
         s=state(plan={'presented':True,'evidence':'之前已展示'}, decisions=[], operations=[op])
         self.assertEqual('check_operation', controller.route(s)['action'])
         s.update(status='complete',completion_evidence='正文已交付')
-        self.assertIn('unresolved side-effect operation prevents completion',controller.validate(s))
+        self.assertIn('unresolved operation prevents completion',controller.validate(s))
         s.update(status='paused',wait_reason='用户暂停')
         self.assertEqual('paused',controller.route(s)['action'])
+
+    def test_blocking_read_only_operation_must_be_observed_before_next_or_completion(self):
+        op = {'id':'search', 'reference':'原调查', 'status':'running', 'side_effect':False, 'blocks_next':True}
+        s = state(phase='execution', decisions=[], plan={'presented':True,'evidence':'计划正文'},
+                  goals={'presented':True,'evidence':'目标正文'},
+                  gates={'plan':'确认计划','goals':'确认目标','execution':'执行授权'}, operations=[op])
+        self.assertEqual('check_operation', controller.route(s)['action'])
+        op['status'] = 'unknown'
+        self.assertEqual('check_operation', controller.route(s)['action'])
+        s.update(status='complete', completion_evidence='已交付')
+        self.assertIn('unresolved operation prevents completion', controller.validate(s))
+        op.update(status='succeeded', evidence='实际结果')
+        self.assertNotIn('unresolved operation prevents completion', controller.validate(s))
+
+    def test_read_only_operation_can_be_checked_independently_while_waiting(self):
+        op = {'id':'search', 'reference':'原调查', 'status':'running', 'side_effect':False,
+              'blocks_next':False, 'independent_of_wait':True}
+        s = state(status='wait_user', wait_reason='等待决定', wait_evidence='已展示问题', operations=[op])
+        self.assertEqual(['原调查'], controller.route(s)['independent_checks'])
 
     def test_operation_fields_and_result_evidence_are_validated(self):
         op={'id':'job','reference':'原操作','status':'unkown','side_effect':True,'blocks_next':True}
