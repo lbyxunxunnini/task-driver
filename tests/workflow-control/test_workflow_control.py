@@ -1,3 +1,4 @@
+import copy
 import importlib.util
 import json
 import subprocess
@@ -21,9 +22,18 @@ def state(**updates):
     return value
 
 
+def interruption(**updates):
+    frame = {'id':'temp-1', 'request':'查找官网证据', 'source':'用户新请求',
+             'status':'continue', 'next_action':'查询官网'}
+    frame.update(updates)
+    return frame
+
+
 class ControlTests(unittest.TestCase):
     def test_execution_requires_all_three_evidence_references(self):
-        s = state(phase='execution', plan={'presented': True, 'evidence': '计划消息'}, gates={'plan': '用户第 2 轮', 'goals': '用户第 2 轮', 'execution': None})
+        s = state(phase='execution', decisions=[], plan={'presented': True, 'evidence': '计划消息'},
+                  goals={'presented': True, 'evidence': '目标消息'},
+                  gates={'plan': '用户第 2 轮', 'goals': '用户第 2 轮', 'execution': None})
         self.assertIn('execution evidence required for execution or later', controller.validate(s))
         s['gates']['execution'] = '用户第 2 轮'
         self.assertEqual([], controller.validate(s))
@@ -57,6 +67,22 @@ class ControlTests(unittest.TestCase):
         s.update(status='paused', wait_reason='用户暂停')
         self.assertEqual('paused', controller.route(s)['action'])
 
+    def test_discussion_after_an_answer_routes_to_next_question_or_closure(self):
+        answered = {'id': 'd1', 'subject': '当前选择', 'status': 'decided', 'value': '已选择', 'source': '用户回答'}
+        pending = {'id': 'd2', 'subject': '下一事项', 'status': 'pending'}
+        s = state(plan_requested=False, decisions=[answered, pending], next_action='讨论下一事项')
+        self.assertEqual('resolve_pending', controller.route(s)['action'])
+        s['decisions'] = [answered]
+        self.assertEqual('request_plan_transition', controller.route(s)['action'])
+        s.update(plan_requested=True, plan_request_source='用户要求计划')
+        self.assertEqual('present_plan', controller.route(s)['action'])
+        s.update(status='wait_user', wait_reason='等待用户决定', wait_evidence='已展示的问题')
+        self.assertEqual('wait_user', controller.route(s)['action'])
+
+    def test_unchecked_coverage_does_not_mean_discussion_is_done(self):
+        s = state(plan_requested=False, decisions=[], coverage_checked=False)
+        self.assertEqual('check_coverage', controller.route(s)['action'])
+
     def test_planning_cannot_stop_before_presenting_plan(self):
         s = state(phase='planning', decisions=[], plan_requested=False, next_action='暂时结束')
         self.assertEqual('request_plan_transition', controller.route(s)['action'])
@@ -84,14 +110,52 @@ class ControlTests(unittest.TestCase):
         self.assertEqual(0, p.returncode)
         self.assertEqual('paused', json.loads(p.stdout)['action'])
 
-    def test_goal_stage_needs_plan_confirmation_or_combined_view(self):
+    def test_goal_stage_may_be_shown_with_plan_before_confirmation(self):
         s = state(phase='goals', plan={'presented':True,'evidence':'已发送计划'})
-        self.assertIn('goals require confirmed plan or combined-view source',controller.validate(s))
-        s['combined_view_source'] = '用户明确要求同轮展示计划与目标'
         self.assertEqual([],controller.validate(s))
-        del s['combined_view_source']
         s['gates']['plan'] = '用户确认计划'
         self.assertEqual([],controller.validate(s))
+
+    def test_execution_requires_both_actual_presentations(self):
+        s = state(phase='execution', decisions=[], plan={'presented': True, 'evidence': '同一条正文'},
+                  gates={'plan': '用户确认计划', 'goals': '用户确认目标', 'execution': '用户授权执行'})
+        self.assertIn('goals must be presented before execution', controller.validate(s))
+        s['goals'] = {'presented': True}
+        self.assertIn('presented goals require evidence', controller.validate(s))
+        s['goals']['evidence'] = '同一条正文'
+        self.assertEqual([], controller.validate(s))
+        s.update(plan_required=False, plan_requested=False, plan_waiver_source='免展示计划', plan={'presented': False})
+        self.assertIn('plan must be presented before execution', controller.validate(s))
+
+    def test_only_showing_goals_does_not_authorize_skipping_plan_later(self):
+        s = state(phase='goals', plan_required=False, plan_requested=False,
+                  plan_waiver_source='用户本轮只看目标', decisions=[])
+        self.assertEqual([], controller.validate(s))
+        s.update(phase='execution', goals={'presented':True,'evidence':'已展示目标'},
+                 gates={'plan':'用户确认计划','goals':'用户确认目标','execution':'用户授权执行'})
+        self.assertIn('plan must be presented before execution', controller.validate(s))
+        s.update(plan_required=True, plan={'presented':True,'evidence':'后续展示计划'})
+        self.assertEqual([], controller.validate(s))
+
+    def test_execution_cannot_bypass_unchecked_coverage_or_pending_decisions(self):
+        s = state(phase='execution', plan={'presented':True,'evidence':'已展示计划'},
+                  goals={'presented':True,'evidence':'已展示目标'}, coverage_checked=False,
+                  gates={'plan':'用户确认','goals':'用户确认','execution':'用户授权'})
+        errors = controller.validate(s)
+        self.assertIn('discussion coverage must be checked before execution', errors)
+        self.assertIn('pending decisions prevent execution', errors)
+        s['coverage_checked'] = True
+        s['decisions'] = []
+        self.assertEqual([], controller.validate(s))
+
+    def test_unknown_operation_is_checked_even_when_a_decision_is_pending(self):
+        operation = {'id':'op','reference':'原操作','status':'unknown','side_effect':True,'blocks_next':True}
+        s = state(phase='execution', plan={'presented':True,'evidence':'已展示计划'},
+                  goals={'presented':True,'evidence':'已展示目标'}, operations=[operation],
+                  gates={'plan':'确认计划','goals':'确认目标','execution':'执行授权'})
+        self.assertEqual('check_operation', controller.route(s)['action'])
+        operation.update(status='succeeded', evidence='原操作回执')
+        self.assertIn('pending decisions prevent execution', controller.validate(s))
 
     def test_plan_exception_requires_evidence(self):
         s = state(phase='goals', plan_required=False, plan_requested=False)
@@ -155,6 +219,230 @@ class ControlTests(unittest.TestCase):
     def test_wait_does_not_hide_independent_work(self):
         s = state(status='wait_user', wait_reason='等待回答', wait_evidence='已发出问题', independent_action='检查已有资料')
         self.assertEqual('检查已有资料', controller.route(s)['independent_action'])
+
+    def test_execution_block_does_not_block_authorized_goal_display(self):
+        s = state(phase='planning', status='blocked', wait_reason='执行权限不足',
+                  plan={'presented':True, 'evidence':'已展示计划'},
+                  gates={'plan':'用户确认计划','goals':None,'execution':None},
+                  independent_action='展示目标')
+        result = controller.route(s)
+        self.assertEqual(('continue_local', '展示目标', '执行权限不足'),
+                         (result['action'], result['next_action'], result['blocked_reason']))
+        self.assertEqual('blocked', s['status'])
+        s.pop('independent_action')
+        result = controller.route(s)
+        self.assertEqual('continue_local', result['action'])
+        self.assertIn('允许时展示目标', result['next_action'])
+        s['local_only'] = True
+        self.assertEqual('blocked', controller.route(s)['action'])
+
+    def test_blocked_state_does_not_suggest_missing_goal_if_plan_is_absent_or_goal_displayed(self):
+        s = state(phase='planning', status='blocked', wait_reason='执行受阻', decisions=[])
+        self.assertEqual('blocked', controller.route(s)['action'])
+        s.update(plan={'presented':True,'evidence':'已展示计划'},
+                 goals={'presented':True,'evidence':'已展示目标'})
+        self.assertEqual('blocked', controller.route(s)['action'])
+
+    def test_blocked_temporary_request_waits_even_if_main_has_independent_action(self):
+        s = state(status='blocked', wait_reason='原任务受阻', independent_action='展示目标',
+                  interruptions=[interruption(status='blocked', wait_reason='临时权限待处理')])
+        result = controller.route(s)
+        self.assertEqual(('wait_interruption', 'blocked'), (result['action'], result['status']))
+
+    def test_interruption_runs_before_original_wait_and_preserves_state(self):
+        s = state(status='wait_user', wait_reason='原问题未答', wait_evidence='原问题已展示',
+                  next_action='等待原问题', local_only=True, local_done=False, interruptions=[interruption()])
+        original = copy.deepcopy(s)
+        result = controller.route(s)
+        self.assertEqual('handle_interruption', result['action'])
+        self.assertEqual('查询官网', result['next_action'])
+        self.assertEqual('wait_user', result['resume_point']['status'])
+        self.assertEqual(original, s)
+
+    def test_completed_interruption_requires_reconciliation_before_resuming(self):
+        original = state(status='wait_user', wait_reason='原问题未答', wait_evidence='原问题已展示',
+                         next_action='等待原问题', interruptions=[interruption()])
+        self.assertIn('cannot resume before interruption completes or is cancelled',
+                      controller.validate_transition(original, dict(original, interruptions=[])))
+        completed = copy.deepcopy(original)
+        completed['interruptions'][0].update(status='complete', result_evidence='官网结果已交付',
+                                             resume_point=controller.route(original)['resume_point'])
+        result = controller.route(completed)
+        self.assertEqual(('reconcile_interruption', 'task-a'), (result['action'], result['resume_to']))
+        resumed = dict(completed, interruptions=[])
+        self.assertEqual([], controller.validate_transition(completed, resumed))
+        self.assertEqual('wait_user', controller.route(resumed)['action'])
+
+    def test_new_evidence_can_make_original_fact_question_unnecessary(self):
+        completed = state(status='wait_user', wait_reason='等待事实', wait_evidence='原问题已展示',
+                          plan_requested=False, interruptions=[interruption()])
+        completed['interruptions'][0].update(status='complete', result_evidence='官网证据已交付',
+                                             resume_point=controller.route(completed)['resume_point'])
+        resumed = copy.deepcopy(completed)
+        resumed.update(status='continue', next_action='确认是否结束讨论', interruptions=[],
+                       interruption_resumed_id='temp-1', interruption_resume_source='已核对官网事实')
+        resumed['decisions'][0].update(status='excluded', source='官网证据使该事实问题不再需要用户回答')
+        self.assertEqual([], controller.validate_transition(completed, resumed))
+        self.assertEqual('request_plan_transition', controller.route(resumed)['action'])
+
+    def test_interruption_waits_for_its_own_answer_and_cannot_fake_completion(self):
+        s = state(interruptions=[interruption(status='wait_user', wait_reason='等待临时问题')])
+        self.assertEqual('repair_state', controller.route(s)['action'])
+        s['interruptions'][0]['wait_evidence'] = '临时问题已展示'
+        self.assertEqual('wait_interruption', controller.route(s)['action'])
+        s['interruptions'][0].update(status='complete')
+        self.assertEqual('repair_state', controller.route(s)['action'])
+
+    def test_original_pause_stays_after_an_explicit_temporary_request(self):
+        s = state(status='paused', wait_reason='用户暂停原任务', interruptions=[interruption()])
+        self.assertEqual('paused', controller.route(s)['action'])
+        s['interruptions'][0]['allow_while_paused'] = True
+        self.assertEqual('paused', controller.route(s)['action'])
+        self.assertIn('interruption while paused requires explicit request source', controller.route(s)['errors'])
+        s['interruptions'][0]['allow_while_paused_source'] = '用户另行要求查官网'
+        self.assertEqual('handle_interruption', controller.route(s)['action'])
+        s['interruptions'][0].update(status='complete', result_evidence='临时结果已交付',
+                                     resume_point=controller.route(s)['resume_point'])
+        self.assertEqual('reconcile_interruption', controller.route(s)['action'])
+        resumed = dict(s, interruptions=[], interruption_resumed_id='temp-1',
+                       interruption_resume_source='核对后继续保持用户暂停')
+        self.assertEqual([], controller.validate_transition(s, resumed))
+        self.assertEqual('paused', controller.route(resumed)['action'])
+
+    def test_nested_interruption_resumes_one_level_at_a_time(self):
+        first = interruption(id='first')
+        second = interruption(id='second', request='临时插问', source='用户后续消息')
+        s = state(interruptions=[first, second])
+        self.assertEqual('second', controller.route(s)['interruption_id'])
+        s['interruptions'][1].update(status='complete', result_evidence='插问已回答',
+                                     resume_point=controller.route(s)['resume_point'])
+        self.assertEqual('first', controller.route(s)['resume_to'])
+        self.assertIn('resume one interruption at a time',
+                      controller.validate_transition(s, dict(s, interruptions=[])))
+
+    def test_interruption_can_be_handled_without_hiding_invalid_original_state(self):
+        s = state(phase='execution', interruptions=[interruption()])
+        result = controller.route(s)
+        self.assertEqual('handle_interruption', result['action'])
+        self.assertIn('goals must be presented before execution', result['original_state_errors'])
+        s['interruptions'][0].update(status='complete', result_evidence='证据已交付',
+                                     resume_point=result['resume_point'])
+        resumed = dict(s, interruptions=[], interruption_resumed_id='temp-1',
+                       interruption_resume_source='核对原执行状态')
+        self.assertEqual('repair_state', controller.route(resumed)['action'])
+
+    def test_pause_is_preserved_and_transition_errors_remain_visible(self):
+        previous = state(status='paused', wait_reason='用户暂停', interruptions=[interruption()])
+        current = dict(previous, interruptions=[])
+        payload = {'previous':previous, 'state':current}
+        p = subprocess.run([sys.executable, str(SCRIPT), 'next', '--json', json.dumps(payload)],
+                           capture_output=True, text=True, check=True)
+        result = json.loads(p.stdout)
+        self.assertEqual('paused', result['action'])
+        self.assertIn('cannot resume before interruption completes or is cancelled', result['errors'])
+
+    def test_cancelled_interruption_is_not_mistaken_for_success(self):
+        s = state(interruptions=[interruption()])
+        s['interruptions'][0].update(status='cancelled', result_evidence='用户取消该请求',
+                                     resume_point=controller.route(s)['resume_point'])
+        result = controller.route(s)
+        self.assertEqual(('reconcile_interruption', 'cancelled'), (result['action'], result['outcome']))
+        changed = copy.deepcopy(s)
+        changed['interruptions'][0]['status'] = 'complete'
+        self.assertIn('completed interruption cannot change status', controller.validate_transition(s, changed))
+
+    def test_paused_interruption_requires_explicit_resume(self):
+        previous = state(interruptions=[interruption(status='paused', wait_reason='用户暂停临时请求')])
+        current = copy.deepcopy(previous)
+        current['interruptions'][0]['status'] = 'continue'
+        self.assertIn('resuming paused interruption requires source', controller.validate_transition(previous, current))
+        current['interruptions'][0]['resume_source'] = '用户要求继续临时请求'
+        self.assertEqual([], controller.validate_transition(previous, current))
+
+    def test_blocked_interruption_can_be_cancelled_or_continued_without_keywords(self):
+        s = state(status='wait_user', wait_reason='原问题未答', wait_evidence='原问题已展示',
+                  interruptions=[interruption()])
+        point = controller.route(s)['resume_point']
+        frame = s['interruptions'][0]
+        frame.update(status='blocked', wait_reason='等待权限', resume_point=point)
+        self.assertEqual('wait_interruption', controller.route(s)['action'])
+        cancelled = copy.deepcopy(s)
+        cancelled['interruptions'][0].update(status='cancelled', result_evidence='用户明确取消临时请求')
+        result = controller.route(cancelled)
+        self.assertEqual(('reconcile_interruption', 'cancelled', 'wait_user'),
+                         (result['action'], result['outcome'], result['resume_point']['status']))
+        frame['status'] = 'continue'
+        self.assertEqual('handle_interruption', controller.route(s)['action'])
+
+    def test_completed_interruption_without_saved_resume_point_must_be_recovered(self):
+        s = state(interruptions=[interruption(status='complete', result_evidence='文件已读取')])
+        result = controller.route(s)
+        self.assertEqual('repair_state', result['action'])
+        self.assertIn('interruption resume_point required before reconciliation', result['errors'])
+
+    def test_interruption_cli_lifecycle_reconciles_before_original_wait(self):
+        parent = state(status='wait_user', wait_reason='原问题未答', wait_evidence='原问题已展示',
+                       next_action='等待原问题')
+        active = dict(parent, interruptions=[interruption()])
+        completed = copy.deepcopy(active)
+        completed['interruptions'][0].update(status='complete', result_evidence='网站结果已交付',
+                                             resume_point=controller.route(active)['resume_point'])
+        resumed = dict(completed, interruptions=[], interruption_resumed_id='temp-1',
+                       interruption_resume_source='已核对原问题仍未回答')
+        for previous, current, expected in ((parent, active, 'handle_interruption'),
+                                            (active, completed, 'reconcile_interruption'),
+                                            (completed, resumed, 'wait_user')):
+            payload = {'previous':previous, 'state':current}
+            p = subprocess.run([sys.executable, str(SCRIPT), 'next', '--json', json.dumps(payload)],
+                               capture_output=True, text=True, check=True)
+            self.assertEqual(expected, json.loads(p.stdout)['action'])
+
+    def test_single_state_carries_resume_point_without_full_previous_snapshot(self):
+        s = state(status='wait_user', wait_reason='原问题未答', wait_evidence='原问题已展示',
+                  next_action='等待原问题', interruptions=[interruption()])
+        point = controller.route(s)['resume_point']
+        s['interruptions'][0].update(status='complete', result_evidence='结果已取得', resume_point=point)
+        p = subprocess.run([sys.executable, str(SCRIPT), 'next', '--json', json.dumps(s)],
+                           capture_output=True, text=True, check=True)
+        result = json.loads(p.stdout)
+        self.assertEqual('reconcile_interruption', result['action'])
+        self.assertEqual(point, result['resume_point'])
+        self.assertEqual('structure_only', result['scope'])
+
+    def test_saved_resume_point_survives_later_root_state_changes(self):
+        s = state(status='wait_user', wait_reason='原问题未答', wait_evidence='原问题已展示',
+                  next_action='等待原问题', interruptions=[interruption()])
+        point = controller.route(s)['resume_point']
+        s.update(status='continue', next_action='处理临时事项')
+        s['interruptions'][0].update(status='complete', result_evidence='结果已取得', resume_point=point)
+        result = controller.route(s)
+        self.assertEqual('wait_user', result['resume_point']['status'])
+        self.assertEqual('等待原问题', result['resume_point']['next_action'])
+
+    def test_saved_resume_point_cannot_be_rewritten_when_prior_state_is_available(self):
+        previous = state(status='wait_user', wait_reason='原问题未答', wait_evidence='原问题已展示',
+                         next_action='等待原问题', interruptions=[interruption()])
+        previous['interruptions'][0]['resume_point'] = controller.route(previous)['resume_point']
+        current = copy.deepcopy(previous)
+        current['interruptions'][0]['resume_point']['status'] = 'continue'
+        self.assertIn('saved interruption resume_point cannot change', controller.validate_transition(previous, current))
+
+    def test_resume_point_with_no_identifiable_parent_is_rejected(self):
+        s = state(interruptions=[interruption(status='complete', result_evidence='结果',
+                                             resume_point={'status':'continue','next_action':'继续'})])
+        self.assertIn('resume_point requires original phase or interruption id', controller.validate(s))
+
+    def test_temporary_request_can_report_parent_errors_without_declaring_check_passed(self):
+        s = state(phase='execution', interruptions=[interruption()])
+        p = subprocess.run([sys.executable, str(SCRIPT), 'next', '--json', json.dumps(s)],
+                           capture_output=True, text=True, check=True)
+        result = json.loads(p.stdout)
+        self.assertEqual('handle_interruption', result['action'])
+        self.assertTrue(result['original_state_errors'])
+        check = subprocess.run([sys.executable, str(SCRIPT), 'check', '--json', json.dumps(s)],
+                               capture_output=True, text=True)
+        self.assertNotEqual(0, check.returncode)
+        self.assertFalse(json.loads(check.stdout)['ok'])
 
     def test_draft_cannot_be_marked_presented_without_delivery_reference(self):
         s = state(plan={'presented': False, 'draft_presented': True})
@@ -283,6 +571,7 @@ class ControlTests(unittest.TestCase):
     def test_local_work_checks_blocking_unknown_side_effect_before_retry(self):
         op={'id':'a','reference':'原操作','status':'unknown','side_effect':True,'blocks_next':True}
         s=state(phase='execution', decisions=[], plan={'presented':True,'evidence':'已展示计划'},
+                goals={'presented':True,'evidence':'已展示目标'},
                 gates={'plan':'确认','goals':'确认','execution':'授权'},local_only=True,local_done=False,
                 next_action='重试原操作',operations=[op])
         self.assertEqual('check_operation',controller.route(s)['action'])
@@ -300,6 +589,7 @@ class ControlTests(unittest.TestCase):
 
     def test_one_message_can_confirm_plan_goals_and_execution(self):
         s=state(phase='execution',decisions=[],plan={'presented':True,'evidence':'已展示计划'},
+                goals={'presented':True,'evidence':'已展示目标'},
                 gates={'plan':'用户第 3 条','goals':'用户第 3 条','execution':'用户第 3 条'})
         self.assertEqual([],controller.validate(s))
 
@@ -368,6 +658,38 @@ class ControlTests(unittest.TestCase):
         self.assertIn('changed plan requires reviewing old execution authorization',errors)
         current['gates'].update(plan=None,execution=None)
         self.assertEqual([],controller.validate_transition(previous,current))
+
+    def test_changed_goals_reopen_only_the_affected_authorizations(self):
+        previous=state(goals={'presented':True,'evidence':'旧目标'},
+                       gates={'plan':'计划确认','goals':'目标确认','execution':'执行授权'})
+        current=dict(previous,goals={'presented':False},gates=dict(previous['gates']))
+        errors=controller.validate_transition(previous,current)
+        self.assertIn('changed goals require reviewing old goals authorization',errors)
+        self.assertIn('changed goals require reviewing old execution authorization',errors)
+        current['gates'].update(goals=None,execution=None)
+        self.assertEqual([],controller.validate_transition(previous,current))
+
+    def test_plan_delta_keeps_unaffected_goal_confirmation(self):
+        previous = state(plan={'presented':True, 'evidence':'原计划正文'},
+                         goals={'presented':True, 'evidence':'原目标正文'},
+                         gates={'plan':'原计划确认','goals':'原目标确认','execution':'原执行授权'})
+        current = copy.deepcopy(previous)
+        current['plan']['evidence'] = '原计划正文及第2项修改'
+        current['gates'].update(plan='第2项新确认', execution=None)
+        current['impact_review'] = {'reason':'目标及其确认不受第2项修改影响', 'retained':['goals']}
+        self.assertEqual([], controller.validate_transition(previous, current))
+        self.assertEqual('原目标确认', current['gates']['goals'])
+
+    def test_goal_delta_keeps_unaffected_plan_confirmation(self):
+        previous = state(plan={'presented':True, 'evidence':'原计划正文'},
+                         goals={'presented':True, 'evidence':'原目标正文'},
+                         gates={'plan':'原计划确认','goals':'原目标确认','execution':'原执行授权'})
+        current = copy.deepcopy(previous)
+        current['goals']['evidence'] = '原目标正文及新增目标'
+        current['gates'].update(goals=None, execution=None)
+        current['impact_review'] = {'reason':'已确认计划不受新增目标影响', 'retained':['plan']}
+        self.assertEqual([], controller.validate_transition(previous, current))
+        self.assertEqual('原计划确认', current['gates']['plan'])
 
     def test_cli_supports_optional_transition_comparison(self):
         previous=state(decisions=[]);current=dict(previous,plan_requested=False)
