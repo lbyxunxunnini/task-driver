@@ -9,6 +9,7 @@ sys.dont_write_bytecode = True
 
 import argparse
 import json
+import re
 
 PHASES = {'analysis', 'discussion', 'planning', 'goals', 'execution', 'verification', 'review'}
 STATUSES = {'continue', 'wait_user', 'wait_tool', 'blocked', 'paused', 'complete'}
@@ -18,15 +19,38 @@ GUIDANCE = {
     'present_incomplete_plan': '在正文交付标明缺口的讨论稿，不能称为正式计划或请求执行。',
     'verify_plan_request': '核对当前计划请求与已交付草案的实际对应关系，再更新状态；不要重复提问或编造交付。',
     'present_plan': '讨论闭合后在正文一起展示正式计划和目标；用户明确限制只展示其中一项时，说明严格流程并等待调整范围。展示不等于确认或执行授权，内容尚无有效确认时不提供执行选项；用户明确本轮不执行时不附执行选择。',
-    'request_plan_transition': '总结有效决定，请用户确认结束讨论并生成计划。',
-    'resolve_pending': '处理尚有影响的事项：能调查先调查，委托范围内自行决定，其余讨论；不要重问已决事项。',
+    'request_plan_transition': '总结有效决定，完成 semantic_review 后最后询问是否结束讨论并开始展示正式计划与目标；措辞可自然变化。',
+    'resolve_pending': '处理尚有影响的事项：能调查先调查，委托范围内自行决定，其余讨论。讨论阶段最终回复必须始终以一个问题结束，完成 semantic_review 后再收口，不得仅汇报分析；不要重问已决事项。',
     'check_coverage': '先核对目标、已有资料、决定和未决事项，再以新状态检查；不得编造问题。',
     'continue_local': '先完成已获授权的独立或局部动作，不扩大用户限定的范围；原等待或受阻状态保持不变。',
     'local_complete': '交付局部结果并保留原任务恢复点。',
     'check_operation': '仅在查询权限内只读核实原操作及回执；不授权新操作或重试，结果未知时不得重复执行副作用动作。',
+    'handle_operation_failure': '原操作已失败且阻塞下一步；先按审查模块分类，保留失败证据，不重复执行，不把局部任务标记完成。',
+    'scope_complete': '本轮只交付用户明确限定的内容；交付后停止，保留整体任务恢复点，不追加问题或推进下一阶段。',
     'handle_interruption': '先处理当前临时请求，核对用户与宿主授权；业务执行仍须满足原有执行门槛，不扩大原任务授权。',
     'reconcile_interruption': '核对临时结果、恢复点、最新用户要求和实际现场；正文先交付临时结果，再接回对应事项。用户明确暂停时保持暂停。',
 }
+
+SEMANTIC_REVIEWERS = {'main', 'independent'}
+DECISION_REVIEW_CHECKS = (
+    'target_is_current',
+    'not_already_decided',
+    'not_delegated',
+    'answerable_now',
+    'single_question',
+    'no_trailing_content',
+)
+TRANSITION_REVIEW_CHECKS = (
+    'transition_intent',
+    'no_blocking_pending_decisions',
+    'single_question',
+    'no_trailing_content',
+)
+WAIVER_REVIEW_CHECKS = (
+    'waiver_source_is_explicit',
+    'no_user_question',
+    'no_trailing_content',
+)
 
 
 def make_resume_point(parent):
@@ -132,6 +156,40 @@ def validate(s):
             errors.append('goals.presented must be true or false')
         elif goals['presented'] and (not isinstance(goals.get('evidence'), str) or not goals['evidence'].strip()):
             errors.append('presented goals require evidence')
+        if isinstance(goals, dict) and goals.get('presented') is True and plan.get('presented') is not True:
+            errors.append('goals cannot be presented without plan')
+        if (isinstance(goals, dict) and goals.get('presented') is True and
+                plan.get('presented') is True):
+            plan_id = plan.get('presentation_id')
+            goals_id = goals.get('presentation_id')
+            if (not isinstance(plan_id, str) or not plan_id.strip() or
+                    not isinstance(goals_id, str) or not goals_id.strip() or
+                    plan_id != goals_id):
+                errors.append('plan and goals require shared presentation_id')
+        if isinstance(goals, dict):
+            goal_status = goals.get('status')
+            if goal_status not in (None, 'active', 'superseded'):
+                errors.append('invalid goal status')
+            elif goal_status == 'superseded':
+                if (not isinstance(goals.get('source'), str) or not goals['source'].strip() or
+                        not isinstance(goals.get('superseded_by'), str) or not goals['superseded_by'].strip()):
+                    errors.append('superseded goals require source and superseded_by')
+    superseded_goals = s.get('superseded_goals', [])
+    if not isinstance(superseded_goals, list):
+        errors.append('superseded_goals must be a list')
+    else:
+        for item in superseded_goals:
+            if not isinstance(item, dict):
+                errors.append('superseded goal must be an object')
+                continue
+            for key in ('objective', 'host_id', 'source', 'superseded_by'):
+                if not isinstance(item.get(key), str) or not item[key].strip():
+                    errors.append('superseded goal ' + key + ' required')
+    host_goal_sync = s.get('host_goal_sync')
+    if host_goal_sync not in (None, 'synced', 'stale', 'unavailable'):
+        errors.append('invalid host goal sync status')
+    elif host_goal_sync in ('stale', 'unavailable') and not superseded_goals:
+        errors.append('stale or unavailable host goal requires superseded_goals')
     if 'draft_presented' in plan and not isinstance(plan['draft_presented'], bool):
         errors.append('plan.draft_presented must be true or false')
     elif plan.get('draft_presented') is True and (not isinstance(plan.get('draft_evidence'), str) or not plan['draft_evidence'].strip()):
@@ -182,6 +240,16 @@ def validate(s):
             errors.append('wait_reason required')
     if s.get('status') == 'wait_user' and (not isinstance(s.get('wait_evidence'), str) or not s['wait_evidence'].strip()):
         errors.append('wait_user requires reference to already presented question')
+    waiver = s.get('discussion_question_waiver_source')
+    if waiver is not None and (not isinstance(waiver, str) or not waiver.strip()):
+        errors.append('discussion question waiver requires source')
+    scope_limited = s.get('scope_limited')
+    if scope_limited is not None and not isinstance(scope_limited, bool):
+        errors.append('scope_limited must be boolean')
+    elif scope_limited is True:
+        source = s.get('scope_limited_source')
+        if not isinstance(source, str) or not source.strip():
+            errors.append('scope limited source required')
     operations = s.get('operations', [])
     if not isinstance(operations, list):
         errors.append('operations must be a list')
@@ -230,12 +298,16 @@ def validate(s):
         if any(isinstance(item, dict) and item.get('status') == 'pending' and item.get('blocks_plan', True) is not False for item in items):
             errors.append('pending decisions prevent execution')
     if s.get('status') == 'complete':
-        if any(isinstance(op, dict) and op.get('blocks_completion', True) is not False and op.get('status') in ('unknown', 'running') for op in operations):
+        if any(isinstance(op, dict) and op.get('blocks_completion', True) is not False and
+               op.get('status') in ('unknown', 'running', 'failed')
+               for op in operations):
             errors.append('unresolved operation prevents completion')
         if plan_required is not False and plan.get('presented') is not True:
             errors.append('required plan must be presented before completion')
         if plan_required is not False and (not isinstance(goals, dict) or goals.get('presented') is not True):
             errors.append('required goals must be presented before completion')
+        if isinstance(goals, dict) and goals.get('status') == 'superseded':
+            errors.append('superseded goals cannot be used for completion')
         if plan_required is not False and s.get('phase') in ('discussion', 'planning') and s.get('coverage_checked') is not True:
             errors.append('coverage check required before completion')
         if any(i.get('status') == 'pending' and i.get('blocks_completion', True) is not False for i in items if isinstance(i, dict)):
@@ -295,6 +367,20 @@ def validate_transition(previous, current):
         source = current.get('resume_source')
         if not isinstance(source, str) or not source.strip():
             errors.append('resuming paused task requires source')
+    old_waiver = previous.get('discussion_question_waiver_source')
+    new_waiver = current.get('discussion_question_waiver_source')
+    left_local_only = previous.get('local_only') is True and current.get('local_only') is not True
+    if (isinstance(old_waiver, str) and old_waiver.strip() and new_waiver == old_waiver and
+            (previous.get('status') == 'paused' and current.get('status') != 'paused' or left_local_only)):
+        errors.append('discussion question waiver cannot persist across resume')
+    scope_state_changed = any(
+        previous.get(key) != current.get(key)
+        for key in ('status', 'next_action', 'decisions', 'plan', 'goals', 'operations')
+    )
+    if (previous.get('scope_limited') is True and current.get('scope_limited') is True and
+            scope_state_changed and
+            current.get('scope_limited_source') == previous.get('scope_limited_source')):
+        errors.append('scope limited waiver cannot persist across resume')
     old_decisions = previous.get('decisions', [])
     new_decisions = current.get('decisions', [])
     if not isinstance(old_decisions, list) or not isinstance(new_decisions, list):
@@ -331,8 +417,24 @@ def validate_transition(previous, current):
     if isinstance(old_plan, dict) and isinstance(new_plan, dict) and old_plan.get('presented') is True and new_plan.get('presented') is True and old_plan.get('evidence') != new_plan.get('evidence'):
         changed = True
     old_goals, new_goals = previous.get('goals'), current.get('goals')
+    if (isinstance(old_plan, dict) and old_plan.get('presented') is True and
+            (not isinstance(old_goals, dict) or old_goals.get('presented') is not True) and
+            isinstance(new_goals, dict) and new_goals.get('presented') is True):
+        plan_id = new_plan.get('presentation_id') if isinstance(new_plan, dict) else None
+        goals_id = new_goals.get('presentation_id')
+        if (not isinstance(plan_id, str) or not plan_id.strip() or
+                not isinstance(goals_id, str) or not goals_id.strip() or
+                plan_id != goals_id):
+            errors.append('plan and goals must be presented with a shared presentation_id')
     if isinstance(old_goals, dict) and isinstance(new_goals, dict) and old_goals.get('presented') is True and new_goals.get('presented') is True and old_goals.get('evidence') != new_goals.get('evidence'):
         changed = True
+        old_gates, new_gates = previous.get('gates'), current.get('gates')
+        if (isinstance(old_gates, dict) and isinstance(new_gates, dict) and
+                (not new_gates.get('goals') or
+                 old_gates.get('goals') == new_gates.get('goals'))):
+            errors.append('changed goals require current goal confirmation source')
+        if not current.get('superseded_goals') and current.get('host_goal_sync') not in ('stale', 'unavailable'):
+            errors.append('changed goals require superseded_goals or stale host goal record')
     old_gates, new_gates = previous.get('gates'), current.get('gates')
     if changed and isinstance(old_gates, dict) and isinstance(new_gates, dict):
         retained = {name for name in GATES if old_gates.get(name) and old_gates.get(name) == new_gates.get(name)}
@@ -414,6 +516,12 @@ def route(s):
         return {'action': 'continue_local',
                 'next_action': '先核对计划确认、待决事项及当前展示范围；允许时一起展示计划和目标，否则处理缺口或等待。',
                 'blocked_reason': s['wait_reason']}
+    if status in ('wait_user', 'wait_tool'):
+        for operation in s.get('operations', []):
+            if (isinstance(operation, dict) and operation.get('blocks_next') is True and
+                    operation.get('status') == 'failed'):
+                return {'action': 'handle_operation_failure',
+                        'reference': operation.get('reference')}
     if status != 'continue':
         result = {'action': status, 'reason': s.get('wait_reason')}
         if status in ('wait_user', 'wait_tool'):
@@ -427,13 +535,24 @@ def route(s):
             if checks:
                 result['independent_checks'] = checks
         return result
-    if s.get('local_only') and s.get('local_done'):
-        return {'action': 'local_complete'}
     for operation in s.get('operations', []):
-        if isinstance(operation, dict) and operation.get('blocks_next') is True and operation.get('status') in ('unknown', 'running'):
+        if not isinstance(operation, dict) or operation.get('blocks_next') is not True:
+            continue
+        if operation.get('status') in ('unknown', 'running'):
             return {'action': 'check_operation', 'reference': operation.get('reference')}
+        if operation.get('status') == 'failed':
+            return {'action': 'handle_operation_failure', 'reference': operation.get('reference')}
+    if s.get('local_only') and s.get('local_done'):
+        if s.get('coverage_checked') is not True:
+            return {'action': 'check_coverage'}
+        return {'action': 'local_complete'}
     if s.get('local_only'):
         return {'action': 'continue_local', 'next_action': s['next_action']}
+    if (s.get('scope_limited') is True and s.get('coverage_checked') is True and
+            s.get('plan_requested') is not True and
+            not (s.get('plan', {}).get('presented') is True and
+                 (not isinstance(goals, dict) or goals.get('presented') is not True))):
+        return {'action': 'scope_complete'}
     if s['phase'] in ('discussion', 'planning', 'goals'):
         if not s['coverage_checked']:
             action = pending_plan_request_action(s)
@@ -452,30 +571,218 @@ def route(s):
     return {'action': 'continue_current_phase', 'next_action': s['next_action']}
 
 
+def discussion_final_line(reply):
+    lines = [line.strip() for line in reply.splitlines() if line.strip()]
+    return lines[-1] if lines else ''
+
+
+def validate_semantic_review(review, kind, decision_id=None, extra_checks=()):
+    """Validate the semantic review contract; the review itself stays human/model-owned."""
+    if not isinstance(review, dict):
+        return ['discussion semantic review required']
+    errors = []
+    if review.get('reviewer') not in SEMANTIC_REVIEWERS:
+        errors.append('discussion semantic review reviewer must be main or independent')
+    elif review.get('reviewer') == 'independent':
+        for key in ('review_id', 'authorization_source'):
+            value = review.get(key)
+            if not isinstance(value, str) or not value.strip():
+                errors.append('discussion semantic review independent ' + key + ' required')
+    if review.get('status') != 'pass':
+        errors.append('discussion semantic review did not pass')
+    source = review.get('source')
+    if not isinstance(source, str) or not source.strip():
+        errors.append('discussion semantic review requires source')
+    if review.get('target') != kind:
+        errors.append('discussion semantic review target must match handoff kind')
+    if kind == 'decision' and review.get('decision_id') != decision_id:
+        errors.append('discussion semantic review decision_id must match handoff')
+    checks = review.get('checks')
+    if not isinstance(checks, dict):
+        errors.append('discussion semantic review checks must be an object')
+        return errors
+    required = {
+        'decision': DECISION_REVIEW_CHECKS,
+        'plan_transition': TRANSITION_REVIEW_CHECKS,
+        'waived': WAIVER_REVIEW_CHECKS,
+    }.get(kind, ())
+    for name in tuple(required) + tuple(extra_checks):
+        if checks.get(name) is not True:
+            errors.append('discussion semantic review check failed: ' + name)
+    return errors
+
+
+def count_questions_outside_code(reply):
+    """Count visible question marks as a structural heuristic, not a semantic judgment."""
+    count = 0
+    in_fence = False
+    for line in reply.splitlines():
+        stripped = line.strip()
+        if stripped.startswith('```'):
+            in_fence = not in_fence
+            continue
+        if in_fence:
+            continue
+        if re.match(r'^\s*\[[^\]]+\]:\s+\S*\?\S*', line):
+            continue
+        visible = re.sub(r'`[^`]*`|https?://\S+', '', line)
+        visible = re.sub(r'\]\([^)]*\?[^)]*\)', ']', visible)
+        visible = re.sub(r'“[^”\n]*[?？][^”\n]*”|"[^"\n]*[?？][^"\n]*"|「[^」\n]*[?？][^」\n]*」|『[^』\n]*[?？][^』\n]*』|‘[^’\n]*[?？][^’\n]*’|\'[^\'\n]*[?？][^\'\n]*\'', '', visible)
+        visible = re.sub(r'(?<!\w)(?:https?://|www\.|/|\.\.?/)[^\s，。；！？]*\?[^\s，。；！？]*', '', visible)
+        visible = re.sub(r'(?<!\w)(?:www\.)?[A-Za-z0-9][A-Za-z0-9._~:/#\[\]@!$&()*+,;=%-]*\?[A-Za-z0-9][A-Za-z0-9._~:/#\[\]@!$&()*+,;=%-]*', '', visible)
+        count += visible.count('?') + visible.count('？')
+    return count
+
+
+def validate_discussion_final(s, reply, handoff):
+    """Require a discussion handoff to end with one actionable question."""
+    if not isinstance(s, dict) or s.get('phase') != 'discussion':
+        return []
+    if not isinstance(handoff, dict):
+        return ['discussion final requires discussion_handoff']
+    if not isinstance(reply, str) or not reply.strip():
+        return ['discussion final reply required']
+    blocking_operations = [
+        operation.get('reference', operation.get('id', 'unknown'))
+        for operation in s.get('operations', [])
+        if isinstance(operation, dict)
+        and operation.get('status') in ('running', 'unknown', 'failed')
+        and operation.get('blocks_next') is True
+    ]
+    if blocking_operations:
+        return ['discussion final blocked by unresolved operation: ' + ', '.join(blocking_operations)]
+    kind = handoff.get('kind')
+    if kind not in ('decision', 'plan_transition', 'waived'):
+        return ['discussion_handoff.kind must be decision, plan_transition, or waived']
+    question_count = count_questions_outside_code(reply)
+    waiver = s.get('discussion_question_waiver_source')
+    route_action = route(s).get('action')
+    extra_review_checks = (
+        ('incomplete_plan_delivered',)
+        if (kind == 'decision' and s.get('plan_requested') is True and
+            not (isinstance(s.get('plan'), dict) and s['plan'].get('presented') is True))
+        else ()
+    )
+    review_errors = validate_semantic_review(
+        handoff.get('semantic_review'), kind, handoff.get('decision_id'),
+        extra_checks=extra_review_checks,
+    )
+    if kind == 'waived':
+        if s.get('scope_limited') is True:
+            source = s.get('scope_limited_source')
+            if not isinstance(source, str) or not source.strip():
+                return ['scope limited source required']
+            if route_action not in ('scope_complete', 'local_complete', 'paused', 'complete'):
+                return ['discussion final cannot bypass active interruption or blocking state with scoped stop']
+            if question_count != 0:
+                review_errors.append('scope limited discussion final must not add a question')
+            return review_errors
+        if not isinstance(waiver, str) or not waiver.strip():
+            return ['discussion question waiver requires source']
+        expected_action = None
+        if s.get('status') == 'paused':
+            expected_action = 'paused'
+        elif s.get('status') == 'complete':
+            expected_action = 'complete'
+        elif s.get('local_only') is True and s.get('local_done') is True:
+            if s.get('coverage_checked') is not True:
+                return ['discussion final requires coverage_checked before handoff']
+            expected_action = 'local_complete'
+        if expected_action is None:
+            return ['discussion question waiver only applies to pause, completed local-only turn, or completed task']
+        if route_action != expected_action:
+            review_errors.append('discussion question waiver conflicts with next action: ' + str(route_action))
+        if question_count != 0:
+            review_errors.append('discussion waiver final must not add a question')
+        return review_errors
+    if s.get('status') in ('paused', 'complete') or isinstance(waiver, str) and waiver.strip():
+        return ['discussion final cannot bypass question while paused, complete, or waived; use handoff kind waived']
+
+    line = discussion_final_line(reply)
+    trimmed = line.rstrip('*_` \t')
+    errors = list(review_errors)
+    if count_questions_outside_code(reply) != 1 or not trimmed.endswith(('?', '？')):
+        errors.append('discussion final reply must end with exactly one question')
+    if s.get('coverage_checked') is not True:
+        errors.append('discussion final requires coverage_checked before handoff')
+    if route_action == 'present_incomplete_plan':
+        plan = s.get('plan')
+        if not isinstance(plan, dict) or plan.get('draft_presented') is not True:
+            errors.append('discussion final must deliver the incomplete plan draft')
+        elif plan.get('draft_for_request') != s.get('plan_request_source'):
+            errors.append('discussion final must tie the incomplete plan draft to the current request')
+
+    pending = [item for item in s.get('decisions', [])
+               if isinstance(item, dict) and item.get('status') == 'pending'
+               and item.get('blocks_plan', True) is not False]
+    if kind == 'decision':
+        if not pending:
+            errors.append('discussion decision handoff requires a blocking pending decision')
+        if route_action not in ('resolve_pending', 'present_incomplete_plan', 'wait_user', 'wait_tool', 'blocked'):
+            errors.append('discussion decision handoff conflicts with next action: ' + str(route_action))
+        decision_id = handoff.get('decision_id')
+        decision = next((item for item in pending if item.get('id') == decision_id), None)
+        if decision is None:
+            errors.append('discussion decision handoff requires a matching pending decision_id')
+        else:
+            expected_question = decision.get('question')
+            if not isinstance(expected_question, str) or not expected_question.strip():
+                errors.append('discussion decision handoff requires the pending decision question')
+    elif kind == 'plan_transition':
+        if pending:
+            errors.append('discussion plan transition cannot bypass pending decisions')
+        if route_action != 'request_plan_transition':
+            errors.append('discussion plan transition conflicts with next action: ' + str(route_action))
+        if isinstance(s.get('plan'), dict) and s['plan'].get('presented') is True:
+            errors.append('discussion plan transition cannot be used after the formal plan is already presented')
+    return errors
+
+
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('mode', choices=('check', 'next'))
+    parser.add_argument('mode', choices=('check', 'next', 'final'))
     source = parser.add_mutually_exclusive_group(required=True)
     source.add_argument('--state')
     source.add_argument('--json', dest='inline_json')
     args = parser.parse_args()
     try:
         if args.inline_json is not None:
-            state = json.loads(args.inline_json)
+            payload = json.loads(args.inline_json)
         elif args.state == '-':
-            state = json.load(sys.stdin)
+            payload = json.load(sys.stdin)
         else:
             with open(args.state, encoding='utf-8') as f:
-                state = json.load(f)
-        previous = state.get('previous') if isinstance(state, dict) and 'state' in state and 'previous' in state else None
+                payload = json.load(f)
+
+        if args.mode == 'final':
+            if not isinstance(payload, dict) or not isinstance(payload.get('state'), dict):
+                raise ValueError('final requires {"state":{...},"draft_reply":"..."}')
+            state = payload['state']
+            draft_reply = payload.get('draft_reply')
+            if not isinstance(draft_reply, str):
+                raise ValueError('final requires a string draft_reply')
+            discussion_handoff = payload.get('discussion_handoff')
+            previous = payload.get('previous')
+        else:
+            state = payload
+            draft_reply = None
+            discussion_handoff = None
+            previous = state.get('previous') if isinstance(state, dict) and 'state' in state and 'previous' in state else None
         if previous is not None:
-            state = state['state']
+            if args.mode != 'final':
+                state = state['state']
         errors = validate(state)
         transition_errors = []
         if previous is not None:
             transition_errors = validate_transition(previous, state)
             errors.extend(transition_errors)
-        result = route(state) if args.mode == 'next' else {'ok': not errors, 'errors': errors}
+        if args.mode == 'final':
+            errors.extend(validate_discussion_final(state, draft_reply, discussion_handoff))
+            result = {'ok': not errors, 'errors': errors}
+        elif args.mode == 'next':
+            result = route(state)
+        else:
+            result = {'ok': not errors, 'errors': errors}
         if previous is not None and transition_errors and isinstance(state, dict):
             is_paused = result.get('action') == 'paused' or (result.get('action') == 'wait_interruption' and result.get('status') == 'paused')
             if args.mode == 'next' and is_paused:
@@ -484,7 +791,10 @@ def main():
                 result = {'action': 'repair_state', 'errors': errors} if args.mode == 'next' else {'ok': False, 'errors': errors}
         if result.get('action') in GUIDANCE:
             result['instruction'] = GUIDANCE[result['action']]
-        result['scope'] = 'structure_and_changes' if previous is not None else 'structure_only'
+        if args.mode == 'final':
+            result['scope'] = 'structure_and_changes_and_reply' if previous is not None else 'structure_and_reply'
+        else:
+            result['scope'] = 'structure_and_changes' if previous is not None else 'structure_only'
         print(json.dumps(result, ensure_ascii=False))
         safe_actions = ('paused', 'handle_interruption', 'wait_interruption', 'reconcile_interruption')
         return bool(errors) and result.get('action') not in safe_actions
