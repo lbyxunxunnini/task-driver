@@ -8,8 +8,10 @@
 
 以下是结构示意，必须按实际对话填写，不把示例当作已有决定：
 
+`gates.execution` 记录执行范围的依据，`gates.subagents` 单独记录用户明确选择开启、不启用或限定用途的消息来源。旧状态缺少该字段时先从可用对话或记录补查，不从执行授权推定；仍无法确认时保持缺失，执行前按主控询问。只读核实运行中或结果未知的原操作不因缺少这两项依据受阻；脚本不能验证来源内容是否真实支持设置。
+
 ```json
-{"task_id":"当前任务","phase":"analysis","status":"continue","next_action":"分析当前请求","decisions":[],"plan":{"presented":false},"coverage_checked":false,"plan_requested":false,"gates":{"plan":null,"goals":null,"execution":null}}
+{"task_id":"当前任务","phase":"analysis","status":"continue","next_action":"分析当前请求","decisions":[],"plan":{"presented":false},"coverage_checked":false,"plan_requested":false,"gates":{"plan":null,"goals":null,"execution":null,"subagents":null}}
 ```
 
 插入请求使用 `interruptions` 数组，原阶段和状态留在原字段。处理前以原状态调用 `next`，临时事项填 `id`、`request`、用户消息 `source`、`status:continue` 和 `next_action`；等待脚本返回，将 `resume_point` 原样放回该项并保留后，再调用临时事项的工具，不得并行。它只包含原环节、状态、下一动作及等待依据，不复制完整计划和目标；原待答问题不能因插问被记成已答。嵌套插入按顺序追加，不能覆盖未完成事项。

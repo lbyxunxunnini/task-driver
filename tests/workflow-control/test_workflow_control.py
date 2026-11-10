@@ -16,9 +16,11 @@ spec.loader.exec_module(controller)
 def state(**updates):
     value = {'task_id': 'task-a', 'phase': 'discussion', 'status': 'continue',
              'next_action': '继续讨论未决事项', 'decisions': [{'id': 'd1', 'subject': '范围', 'status': 'pending'}],
-             'gates': {'plan': None, 'goals': None, 'execution': None},
+             'gates': {'plan': None, 'goals': None, 'execution': None, 'subagents': None},
              'plan': {'presented': False}, 'coverage_checked': True, 'plan_requested': True, 'plan_request_source': '用户明确要求计划'}
     value.update(updates)
+    if 'gates' in updates and 'subagents' not in value['gates']:
+        value['gates'] = dict(value['gates'], subagents='测试中的用户明确选择')
     return value
 
 
@@ -30,13 +32,48 @@ def interruption(**updates):
 
 
 class ControlTests(unittest.TestCase):
-    def test_execution_requires_all_three_evidence_references(self):
+    def test_execution_requires_scope_and_subagent_evidence(self):
         s = state(phase='execution', decisions=[], plan={'presented': True, 'evidence': '计划消息'},
                   goals={'presented': True, 'evidence': '目标消息'},
                   gates={'plan': '用户第 2 轮', 'goals': '用户第 2 轮', 'execution': None})
         self.assertIn('execution evidence required for execution or later', controller.validate(s))
         s['gates']['execution'] = '用户第 2 轮'
         self.assertEqual([], controller.validate(s))
+        s['gates'].pop('subagents')
+        self.assertIn('subagents evidence required for execution or later', controller.validate(s))
+        s['gates']['subagents'] = '用户选择不启用子代理'
+        self.assertEqual([], controller.validate(s))
+
+    def test_read_only_operation_check_does_not_require_subagent_setting(self):
+        s = state(phase='execution', decisions=[], plan={'presented': True, 'evidence': '计划消息'},
+                  goals={'presented': True, 'evidence': '目标消息'},
+                  gates={'plan': '计划确认', 'goals': '目标确认', 'execution': None, 'subagents': None},
+                  operations=[{'id': 'op1', 'reference': '原作业', 'status': 'unknown',
+                               'side_effect': True, 'blocks_next': True}])
+        self.assertEqual('check_operation', controller.route(s)['action'])
+
+    def test_waiting_read_only_check_does_not_release_unauthorized_independent_action(self):
+        s = state(phase='execution', status='wait_tool', wait_reason='等待原作业', decisions=[],
+                  plan={'presented': True, 'evidence': '计划消息'},
+                  goals={'presented': True, 'evidence': '目标消息'},
+                  gates={'plan': '计划确认', 'goals': '目标确认', 'execution': None, 'subagents': None},
+                  independent_action='修改业务文件',
+                  operations=[{'id': 'op1', 'reference': '原作业', 'status': 'unknown',
+                               'side_effect': True, 'blocks_next': False, 'independent_of_wait': True}])
+        result = controller.route(s)
+        self.assertEqual('wait_tool', result['action'])
+        self.assertEqual(['原作业'], result['independent_checks'])
+        self.assertNotIn('independent_action', result)
+        s['gates'].update(execution='用户授权范围', subagents='用户选择不开启')
+        self.assertEqual('修改业务文件', controller.route(s)['independent_action'])
+
+    def test_read_only_verification_keeps_independent_action_without_execution_gates(self):
+        s = state(phase='verification', status='wait_user', wait_reason='等待设备反馈',
+                  wait_evidence='已展示验收问题', execution_occurred=False, decisions=[],
+                  plan={'presented': True, 'evidence': '计划消息'},
+                  independent_action='只读核对现有材料',
+                  gates={'plan': None, 'goals': None, 'execution': None, 'subagents': None})
+        self.assertEqual('只读核对现有材料', controller.route(s)['independent_action'])
 
     def test_partial_and_duplicate_decisions(self):
         s = state(status='wait_user', wait_reason='等待验收决定', wait_evidence='上一条消息的验收问题', decisions=[{'id': '1', 'subject': '范围', 'status': 'decided', 'value': '用户选定范围', 'source': '用户第 2 轮'},
@@ -57,7 +94,7 @@ class ControlTests(unittest.TestCase):
         self.assertEqual('present_plan', controller.route(s)['action'])
         s.update(phase='execution', plan={'presented':True, 'evidence':'计划'},
                  goals={'presented':True, 'evidence':'目标'},
-                 gates={'plan':'委托方案', 'goals':'委托目标', 'execution':'执行授权'})
+                 gates={'plan':'委托方案', 'goals':'委托目标', 'execution':'执行授权', 'subagents':'用户选择不开启'})
         self.assertEqual('continue_current_phase', controller.route(s)['action'])
         s['decisions'][0].pop('value')
         self.assertEqual('repair_state', controller.route(s)['action'])
@@ -170,7 +207,7 @@ class ControlTests(unittest.TestCase):
                   plan_waiver_source='用户本轮只看目标', decisions=[])
         self.assertIn('plan must be presented before goals or execution', controller.validate(s))
         s.update(phase='execution', goals={'presented':True,'evidence':'已展示目标'},
-                 gates={'plan':'用户确认计划','goals':'用户确认目标','execution':'用户授权执行'})
+                 gates={'plan':'用户确认计划','goals':'用户确认目标','execution':'用户授权执行','subagents':'用户选择不开启'})
         self.assertIn('plan must be presented before execution', controller.validate(s))
         s.update(plan_required=True, plan={'presented':True,'evidence':'后续展示计划'})
         self.assertEqual([], controller.validate(s))
@@ -252,7 +289,10 @@ class ControlTests(unittest.TestCase):
                     self.assertEqual(['原作业'], result['independent_checks'])
                     self.assertIsNone(s['gates']['execution'])
                     s['independent_action'] = '继续实施其他修改'
-                    self.assertEqual('repair_state', controller.route(s)['action'])
+                    result = controller.route(s)
+                    self.assertEqual(waiting, result['action'])
+                    self.assertEqual(['原作业'], result['independent_checks'])
+                    self.assertNotIn('independent_action', result)
                     s.pop('independent_action')
                     s['operations'][0]['independent_of_wait'] = False
                     self.assertEqual('repair_state', controller.route(s)['action'])
@@ -759,7 +799,7 @@ class ControlTests(unittest.TestCase):
                   gates={'plan':'消息2','goals':'消息2','execution':'消息2'})
         new=dict(old,decisions=[{'id':'scope','subject':'范围','status':'decided','value':'写入','source':'消息3'}],gates=dict(old['gates']))
         self.assertIn('changed scope requires reviewing retained authorizations',controller.validate_transition(old,new))
-        new['impact_review']={'reason':'已有授权明确涵盖新范围','retained':['plan','goals','execution']}
+        new['impact_review']={'reason':'已有授权明确涵盖新范围','retained':['plan','goals','execution','subagents']}
         self.assertEqual([],controller.validate_transition(old,new))
         new.pop('impact_review');new['gates']={'plan':'消息3','goals':'消息3','execution':'消息3'}
         self.assertEqual([],controller.validate_transition(old,new))
@@ -835,7 +875,7 @@ class ControlTests(unittest.TestCase):
         current = copy.deepcopy(previous)
         current['plan']['evidence'] = '原计划正文及第2项修改'
         current['gates'].update(plan='第2项新确认', execution=None)
-        current['impact_review'] = {'reason':'目标及其确认不受第2项修改影响', 'retained':['goals']}
+        current['impact_review'] = {'reason':'目标及子代理选择不受第2项修改影响', 'retained':['goals','subagents']}
         self.assertEqual([], controller.validate_transition(previous, current))
         self.assertEqual('原目标确认', current['gates']['goals'])
 
@@ -846,7 +886,7 @@ class ControlTests(unittest.TestCase):
         current = copy.deepcopy(previous)
         current['goals']['evidence'] = '原目标正文及新增目标'
         current['gates'].update(goals=None, execution=None)
-        current['impact_review'] = {'reason':'已确认计划不受新增目标影响', 'retained':['plan']}
+        current['impact_review'] = {'reason':'已确认计划及子代理选择不受新增目标影响', 'retained':['plan','subagents']}
         self.assertEqual([], controller.validate_transition(previous, current))
         self.assertEqual('原计划确认', current['gates']['plan'])
 

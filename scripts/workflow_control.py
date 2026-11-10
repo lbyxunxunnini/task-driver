@@ -12,7 +12,7 @@ import json
 
 PHASES = {'analysis', 'discussion', 'planning', 'goals', 'execution', 'verification', 'review'}
 STATUSES = {'continue', 'wait_user', 'wait_tool', 'blocked', 'paused', 'complete'}
-GATES = ('plan', 'goals', 'execution')
+GATES = ('plan', 'goals', 'execution', 'subagents')
 INTERRUPTION_STATUSES = STATUSES | {'cancelled'}
 GUIDANCE = {
     'present_incomplete_plan': '在正文交付标明缺口的讨论稿，不能称为正式计划或请求执行。',
@@ -213,8 +213,7 @@ def validate(s):
     independent_checks = any(isinstance(op, dict) and op.get('status') in ('unknown', 'running') and
                              op.get('independent_of_wait') is True for op in operations)
     querying_operation = (((checking_operation and s.get('status') == 'continue') or
-                           (independent_checks and s.get('status') in ('wait_user', 'wait_tool') and
-                            not s.get('independent_action'))) and not s.get('interruptions') and
+                           (independent_checks and s.get('status') in ('wait_user', 'wait_tool'))) and not s.get('interruptions') and
                           not (s.get('local_only') is True and s.get('local_done') is True))
     needs_execution_gates = phase == 'execution' or (phase in ('verification', 'review') and s.get('execution_occurred') is not False)
     if needs_execution_gates:
@@ -223,7 +222,7 @@ def validate(s):
         if not isinstance(goals, dict) or goals.get('presented') is not True:
             errors.append('goals must be presented before execution')
         for name in GATES:
-            if not gates.get(name) and not (name == 'execution' and querying_operation):
+            if not gates.get(name) and not (name in ('execution', 'subagents') and querying_operation):
                 errors.append(name + ' evidence required for execution or later')
     if phase == 'execution' and s.get('status') == 'continue' and not checking_operation and not (s.get('local_only') is True and s.get('local_done') is True):
         if s.get('coverage_checked') is not True:
@@ -418,7 +417,11 @@ def route(s):
     if status != 'continue':
         result = {'action': status, 'reason': s.get('wait_reason')}
         if status in ('wait_user', 'wait_tool'):
-            if s.get('independent_action'):
+            gates = s.get('gates', {})
+            needs_execution_gates = (s['phase'] == 'execution' or
+                                     (s['phase'] in ('verification', 'review') and s.get('execution_occurred') is not False))
+            if s.get('independent_action') and (not needs_execution_gates or
+                                                  (gates.get('execution') and gates.get('subagents'))):
                 result['independent_action'] = s['independent_action']
             checks = [op.get('reference') for op in s.get('operations', []) if isinstance(op, dict) and op.get('status') in ('running', 'unknown') and op.get('independent_of_wait') is True]
             if checks:
