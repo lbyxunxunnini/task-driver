@@ -8,6 +8,7 @@ import sys
 sys.dont_write_bytecode = True
 
 import argparse
+import hashlib
 import json
 import re
 
@@ -17,6 +18,9 @@ GATES = ('plan', 'goals', 'execution', 'subagents')
 INTERRUPTION_STATUSES = STATUSES | {'cancelled'}
 GOAL_KINDS = {'changed', 'associated'}
 COMPLETION_BASES = {'evidence', 'user_requested'}
+GOAL_TRACKING_MODES = {'host', 'plan', 'conversation', 'unavailable'}
+GOAL_TRACKING_FALLBACK_MODES = {'plan', 'conversation'}
+STEP_STATUSES = {'pending', 'in_progress', 'done', 'blocked'}
 GUIDANCE = {
     'present_incomplete_plan': '在正文交付标明缺口的讨论稿，不能称为正式计划或请求执行。',
     'verify_plan_request': '核对当前计划请求与已交付草案的实际对应关系，再更新状态；不要重复提问或编造交付。',
@@ -33,6 +37,12 @@ GUIDANCE = {
     'repair_state': '修正状态结构；旧目标补录 included、excluded、evidence_map 和 goal_scope_baseline 后继续。若用户明确要求结束/完成但仍有未验证项，先设置 completion_basis:user_requested，记录用户来源、completion_report 和 unverified_goals，再重试；不要把用户结束要求当成验收或宣称已验证。',
     'handle_interruption': '先处理当前临时请求，核对用户与宿主授权；业务执行仍须满足原有执行门槛，不扩大原任务授权。',
     'reconcile_interruption': '核对临时结果、恢复点、最新用户要求和实际现场；正文先交付临时结果，再接回对应事项。用户明确暂停时保持暂停。',
+    'begin_execution': '执行入口尚未通过。先核对分析闭合、讨论闭合、编号步骤、计划与目标确认、执行授权、子代理设置和目标跟踪回执；运行 begin 并取得 execution_receipt 后才能开始业务动作。',
+    'start_step': '只开始当前编号步骤；取得实际结果和证据后再标记完成，不能提前勾选后续步骤。',
+    'continue_step': '继续当前进行中的编号步骤；完成并核对证据后才进入下一步。',
+    'step_blocked': '当前步骤受阻；先说明已完成部分、失败原因和是否影响后续步骤，不得跳过该步骤。',
+    'steps_complete': '所有编号步骤已完成；只能进入验证与审查，不得继续做未列入计划的新业务动作。',
+    'continue_analysis': '当前仍在分析阶段；只允许补事实、核范围和进入讨论，不得执行任何业务写入。',
 }
 USER_REQUESTED_COMPLETION_GUIDANCE = '用户明确要求完成：按要求将业务标记完成，但必须在 unverified_goals 和正文中逐项说明未验证目标、原因和影响，并记录 completion_request_source；不得写成所有目标已验证。'
 
@@ -249,6 +259,284 @@ def validate_completion_accounting(s, goals):
     return errors
 
 
+def validate_plan_steps(plan, require_steps=False, require_complete=False):
+    """Validate the numbered plan and its one-at-a-time progress order."""
+    errors = []
+    steps = plan.get('steps')
+    if steps is None:
+        if require_steps:
+            errors.append('presented plan requires numbered steps')
+        return errors
+    if not isinstance(steps, list):
+        return ['plan.steps must be a list']
+    if require_steps and not steps:
+        errors.append('presented plan requires at least one numbered step')
+
+    ids, first_unfinished = set(), None
+    in_progress_count = 0
+    for index, step in enumerate(steps):
+        label = 'plan.steps[' + str(index) + ']'
+        if not isinstance(step, dict):
+            errors.append(label + ' must be an object')
+            continue
+        ident = step.get('id')
+        if not isinstance(ident, str) or not ident.strip() or ident in ids:
+            errors.append(label + ' id missing or duplicated')
+        else:
+            ids.add(ident)
+        action = step.get('action')
+        if not isinstance(action, str) or not action.strip():
+            errors.append(label + ' action required')
+        status = step.get('status')
+        if status not in STEP_STATUSES:
+            errors.append(label + ' status must be pending, in_progress, done, or blocked')
+            continue
+        if status == 'in_progress':
+            in_progress_count += 1
+        if status == 'done':
+            evidence = step.get('evidence')
+            if isinstance(evidence, list):
+                valid_evidence = bool(evidence) and all(isinstance(item, str) and item.strip() for item in evidence)
+            else:
+                valid_evidence = isinstance(evidence, str) and bool(evidence.strip())
+            if not valid_evidence:
+                errors.append(label + ' done requires evidence')
+            if first_unfinished is not None:
+                errors.append(label + ' cannot be done after an unfinished step')
+        else:
+            if first_unfinished is None:
+                first_unfinished = ident or label
+            elif status in ('in_progress', 'blocked'):
+                errors.append(label + ' cannot start or block after an earlier unfinished step')
+            if status == 'blocked':
+                reason = step.get('reason')
+                if not isinstance(reason, str) or not reason.strip():
+                    errors.append(label + ' blocked requires reason')
+
+    if in_progress_count > 1:
+        errors.append('plan cannot have more than one in_progress step')
+    if require_complete and first_unfinished is not None:
+        errors.append('unfinished plan steps prevent completion: ' + str(first_unfinished))
+    return errors
+
+
+def validate_user_requested_steps(s, plan):
+    """User-requested close must enumerate every unfinished step."""
+    if s.get('completion_basis') != 'user_requested':
+        return []
+    steps = plan.get('steps') if isinstance(plan, dict) else []
+    if not isinstance(steps, list):
+        return []
+    unfinished = [
+        step for step in steps
+        if isinstance(step, dict) and step.get('status') != 'done'
+    ]
+    if not unfinished:
+        return []
+    records = s.get('unverified_plan_steps')
+    if not isinstance(records, list):
+        return ['user requested completion requires unverified_plan_steps']
+    errors, seen = [], set()
+    unfinished_ids = {
+        step.get('id') for step in unfinished if isinstance(step.get('id'), str)
+    }
+    unfinished_actions = {
+        step.get('id'): step.get('action') for step in unfinished
+        if isinstance(step.get('id'), str)
+    }
+    for index, item in enumerate(records):
+        label = 'unverified_plan_steps[' + str(index) + ']'
+        if not isinstance(item, dict):
+            errors.append(label + ' must be an object')
+            continue
+        ident = item.get('id')
+        if not isinstance(ident, str) or ident not in unfinished_ids or ident in seen:
+            errors.append(label + ' id must reference a unique unfinished step')
+        else:
+            seen.add(ident)
+        for key in ('reason', 'impact'):
+            value = item.get(key)
+            if not isinstance(value, str) or not value.strip():
+                errors.append(label + ' ' + key + ' required')
+        action = item.get('action')
+        if not isinstance(action, str) or not action.strip():
+            errors.append(label + ' action required')
+        elif ident in unfinished_actions and action != unfinished_actions[ident]:
+            errors.append(label + ' action must match the unfinished plan step')
+    missing = unfinished_ids - seen
+    if missing:
+        errors.append('user requested completion must record unfinished steps: ' + ', '.join(sorted(missing)))
+    return errors
+
+
+def validate_goal_tracking(s):
+    errors = []
+    mode = s.get('goal_tracking_mode')
+    source = s.get('goal_tracking_source')
+    confirmation = s.get('goal_tracking_confirmation_source')
+    if not isinstance(mode, str) or mode not in GOAL_TRACKING_MODES:
+        errors.append('goal_tracking_mode must be host, plan, conversation, or unavailable')
+    if not isinstance(source, str) or not source.strip():
+        errors.append('goal_tracking_source required')
+    if not isinstance(confirmation, str) or not confirmation.strip():
+        errors.append('goal_tracking_confirmation_source required')
+    if mode == 'host':
+        host_id = s.get('goal_tracking_host_id')
+        if not isinstance(host_id, str) or not host_id.strip():
+            errors.append('host goal tracking requires goal_tracking_host_id')
+        host_receipt = s.get('goal_tracking_host_receipt')
+        if not isinstance(host_receipt, str) or not host_receipt.strip():
+            errors.append('host goal tracking requires goal_tracking_host_receipt')
+    elif mode in GOAL_TRACKING_FALLBACK_MODES:
+        reason = s.get('goal_tracking_fallback_reason')
+        evidence = s.get('goal_tracking_fallback_evidence')
+        if not isinstance(reason, str) or not reason.strip():
+            errors.append('fallback goal tracking requires goal_tracking_fallback_reason')
+        if not isinstance(evidence, str) or not evidence.strip():
+            errors.append('fallback goal tracking requires goal_tracking_fallback_evidence')
+        goals = s.get('goals')
+        local_goal_id = goals.get('local_goal_id') if isinstance(goals, dict) else None
+        if not isinstance(local_goal_id, str) or not local_goal_id.strip():
+            errors.append('fallback goal tracking requires goals.local_goal_id')
+    elif mode == 'unavailable':
+        errors.append('unavailable goal tracking cannot enter execution')
+    return errors
+
+
+def validate_execution_entry(s):
+    """Require explicit closure and a bounded mutation scope before execution."""
+    errors = []
+    if s.get('analysis_complete') is not True:
+        errors.append('analysis_complete must be true before execution')
+    if not isinstance(s.get('analysis_evidence'), str) or not s['analysis_evidence'].strip():
+        errors.append('analysis_evidence required before execution')
+    if s.get('discussion_closed') is not True:
+        errors.append('discussion_closed must be true before execution')
+    if (not isinstance(s.get('discussion_closure_source'), str) or
+            not s['discussion_closure_source'].strip()):
+        errors.append('discussion_closure_source required before execution')
+
+    scope = s.get('execution_scope')
+    if not isinstance(scope, dict):
+        errors.append('execution_scope required before execution')
+    else:
+        allowed_paths = scope.get('allowed_paths')
+        allowed_actions = scope.get('allowed_actions')
+        if (not isinstance(allowed_paths, list) or not allowed_paths or
+                any(not isinstance(path, str) or not path.strip() for path in allowed_paths)):
+            errors.append('execution_scope.allowed_paths requires nonempty paths')
+        if (not isinstance(allowed_actions, list) or not allowed_actions or
+                any(not isinstance(action, str) or not action.strip() for action in allowed_actions)):
+            errors.append('execution_scope.allowed_actions requires nonempty actions')
+        else:
+            steps = s.get('plan', {}).get('steps', []) if isinstance(s.get('plan'), dict) else []
+            for index, step in enumerate(steps):
+                if (isinstance(step, dict) and isinstance(step.get('action'), str) and
+                        step['action'] not in allowed_actions):
+                    errors.append(
+                        'plan.steps[' + str(index) + '] action is not in execution_scope.allowed_actions'
+                    )
+        if (not isinstance(scope.get('source'), str) or
+                not scope['source'].strip()):
+            errors.append('execution_scope.source required')
+
+    if s.get('execution_begun') is True:
+        receipt = s.get('execution_receipt')
+        if not isinstance(receipt, str) or not receipt.strip():
+            errors.append('execution_begun requires execution_receipt')
+        elif not re.fullmatch(r'[0-9a-f]{64}', receipt):
+            errors.append('execution_receipt must be a sha256 value')
+        elif receipt != execution_receipt(s):
+            errors.append('execution_receipt does not match current authorization')
+    elif 'execution_begun' in s and not isinstance(s.get('execution_begun'), bool):
+        errors.append('execution_begun must be boolean')
+    return errors
+
+
+def execution_authorization_payload(s):
+    """Return the stable part of an execution grant used for its receipt."""
+    plan = s.get('plan') if isinstance(s.get('plan'), dict) else {}
+    goals = s.get('goals') if isinstance(s.get('goals'), dict) else {}
+    scope = s.get('execution_scope') if isinstance(s.get('execution_scope'), dict) else {}
+    steps = plan.get('steps') if isinstance(plan.get('steps'), list) else []
+    return {
+        'task_id': s.get('task_id'),
+        'analysis_evidence': s.get('analysis_evidence'),
+        'discussion_closure_source': s.get('discussion_closure_source'),
+        'plan': {
+            'evidence': plan.get('evidence'),
+            'presentation_id': plan.get('presentation_id'),
+            'steps': [
+                {'id': step.get('id'), 'action': step.get('action')}
+                for step in steps if isinstance(step, dict)
+            ],
+        },
+        'goals': {
+            'evidence': goals.get('evidence'),
+            'presentation_id': goals.get('presentation_id'),
+            'local_goal_id': goals.get('local_goal_id'),
+            'included': goals.get('included'),
+            'excluded': goals.get('excluded'),
+        },
+        'gates': s.get('gates'),
+        'goal_tracking': {
+            'mode': s.get('goal_tracking_mode'),
+            'source': s.get('goal_tracking_source'),
+            'confirmation_source': s.get('goal_tracking_confirmation_source'),
+            'host_id': s.get('goal_tracking_host_id'),
+            'host_receipt': s.get('goal_tracking_host_receipt'),
+            'fallback_reason': s.get('goal_tracking_fallback_reason'),
+            'fallback_evidence': s.get('goal_tracking_fallback_evidence'),
+        },
+        'execution_scope': scope,
+    }
+
+
+def execution_receipt(s):
+    payload = execution_authorization_payload(s)
+    encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(',', ':'))
+    return hashlib.sha256(encoded.encode('utf-8')).hexdigest()
+
+
+def independent_action_allowed(s):
+    """Permit wait-period work only when it is read-only or fully gated execution."""
+    if s.get('independent_action_read_only') is True:
+        scope = s.get('read_only_scope')
+        action = s.get('independent_action')
+        if not isinstance(scope, dict) or not isinstance(action, str):
+            return False
+        allowed_actions = scope.get('allowed_actions')
+        source = scope.get('source')
+        return (
+            isinstance(allowed_actions, list) and
+            isinstance(source, str) and bool(source.strip()) and
+            any(isinstance(item, str) and item.strip() == action.strip() for item in allowed_actions)
+        )
+    if not (
+        s.get('analysis_complete') is True and
+        isinstance(s.get('analysis_evidence'), str) and s['analysis_evidence'].strip() and
+        s.get('discussion_closed') is True and
+        isinstance(s.get('discussion_closure_source'), str) and s['discussion_closure_source'].strip() and
+        isinstance(s.get('plan'), dict) and s['plan'].get('presented') is True and
+        isinstance(s.get('goals'), dict) and s['goals'].get('presented') is True and
+        isinstance(s.get('execution_scope'), dict) and
+        s.get('execution_begun') is True and
+        isinstance(s.get('execution_receipt'), str) and
+        s['execution_receipt'] == execution_receipt(s)
+    ):
+        return False
+    gates = s.get('gates')
+    if not isinstance(gates, dict) or any(not gates.get(name) for name in GATES):
+        return False
+    if validate_execution_entry(s) or validate_goal_tracking(s):
+        return False
+    action = s.get('independent_action')
+    allowed_actions = s.get('execution_scope', {}).get('allowed_actions')
+    if not isinstance(allowed_actions, list) or not isinstance(action, str):
+        return False
+    return any(isinstance(item, str) and item.strip() == action.strip() for item in allowed_actions)
+
+
 def goal_scope_requires_previous(s):
     if not isinstance(s, dict):
         return False
@@ -305,6 +593,7 @@ def validate(s):
         plan = {}
     elif plan['presented'] and (not isinstance(plan.get('evidence'), str) or not plan['evidence'].strip()):
         errors.append('presented plan requires evidence')
+    errors.extend(validate_plan_steps(plan, require_steps=plan.get('presented') is True))
     goals = s.get('goals')
     completion_basis = s.get('completion_basis', 'evidence')
     if goals is not None:
@@ -411,6 +700,11 @@ def validate(s):
         errors.append('plan_required must be true or false')
     elif not plan_required and (not isinstance(s.get('plan_waiver_source'), str) or not s['plan_waiver_source'].strip()):
         errors.append('plan waiver requires source')
+    if (plan_required is False and
+            (s.get('phase') == 'execution' or
+             (s.get('phase') in ('verification', 'review') and
+              s.get('execution_occurred') is not False))):
+        errors.append('plan cannot be waived for execution or later')
     if s.get('phase') == 'planning' and plan_required is False and plan.get('presented') is not True:
         errors.append('plan cannot be waived in planning stage')
     if (s.get('phase') == 'goals' or (plan_required is not False and s.get('phase') in ('execution', 'verification', 'review'))) and plan.get('presented') is not True:
@@ -427,6 +721,38 @@ def validate(s):
     for key in ('local_only', 'local_done'):
         if key in s and not isinstance(s[key], bool):
             errors.append(key + ' must be true or false')
+    if s.get('local_only') is True and s.get('phase') == 'execution':
+        if (not isinstance(s.get('local_only_source'), str) or
+                not s['local_only_source'].strip()):
+            errors.append('local_only execution requires local_only_source')
+    if s.get('local_only') is True and s.get('phase') in ('analysis', 'discussion', 'planning', 'goals'):
+        if (not isinstance(s.get('local_only_source'), str) or
+                not s['local_only_source'].strip()):
+            errors.append('local_only before execution requires local_only_source')
+        if s.get('local_only_read_only') is not True:
+            errors.append('local_only before execution must be read-only')
+    if s.get('local_only') is True and s.get('local_done') is True:
+        steps = s.get('plan', {}).get('steps', []) if isinstance(s.get('plan'), dict) else []
+        if (isinstance(steps, list) and
+                any(isinstance(step, dict) and step.get('status') != 'done' for step in steps)):
+            errors.append('local_done cannot bypass unfinished plan steps')
+    if 'independent_action_read_only' in s and not isinstance(s.get('independent_action_read_only'), bool):
+        errors.append('independent_action_read_only must be boolean')
+    if (s.get('independent_action_read_only') is True and
+            isinstance(s.get('independent_action'), str) and s['independent_action'].strip()):
+        read_only_scope = s.get('read_only_scope')
+        if not isinstance(read_only_scope, dict):
+            errors.append('read-only independent action requires read_only_scope')
+        else:
+            allowed_actions = read_only_scope.get('allowed_actions')
+            action = s.get('independent_action')
+            if (not isinstance(allowed_actions, list) or not allowed_actions or
+                    any(not isinstance(item, str) or not item.strip() for item in allowed_actions)):
+                errors.append('read_only_scope.allowed_actions requires nonempty actions')
+            elif not isinstance(action, str) or action.strip() not in allowed_actions:
+                errors.append('independent_action must be listed in read_only_scope.allowed_actions')
+            if not isinstance(read_only_scope.get('source'), str) or not read_only_scope['source'].strip():
+                errors.append('read_only_scope.source required')
     gates = s.get('gates')
     if not isinstance(gates, dict):
         errors.append('gates must be an object')
@@ -438,6 +764,10 @@ def validate(s):
     phase = s.get('phase')
     if phase in ('verification', 'review') and not isinstance(s.get('execution_occurred'), bool):
         errors.append('execution_occurred must be explicitly true or false')
+    if phase in ('verification', 'review') and s.get('execution_occurred') is False and s.get('read_only') is not True:
+        errors.append('verification/review without execution requires read_only:true')
+    if 'read_only' in s and not isinstance(s.get('read_only'), bool):
+        errors.append('read_only must be boolean')
     if s.get('status') in ('wait_user', 'wait_tool', 'blocked', 'paused'):
         reason = s.get('wait_reason')
         if not isinstance(reason, str) or not reason.strip():
@@ -493,9 +823,25 @@ def validate(s):
             errors.append('plan must be presented before execution')
         if not isinstance(goals, dict) or goals.get('presented') is not True:
             errors.append('goals must be presented before execution')
+        if s.get('status') in ('continue', 'complete') and not querying_operation:
+            errors.extend(validate_goal_tracking(s))
+            errors.extend(validate_execution_entry(s))
+            errors.extend(validate_plan_steps(
+                plan,
+                require_steps=True,
+                require_complete=(
+                    s.get('status') == 'complete' and
+                    completion_basis != 'user_requested'
+                ),
+            ))
         for name in GATES:
             if not gates.get(name) and not (name in ('execution', 'subagents') and querying_operation):
                 errors.append(name + ' evidence required for execution or later')
+        if s.get('status') == 'complete':
+            if s.get('execution_begun') is not True:
+                errors.append('execution_begun must be true before completion')
+            if not isinstance(s.get('execution_receipt'), str) or not s['execution_receipt'].strip():
+                errors.append('completion requires execution_receipt')
     if phase == 'execution' and s.get('status') == 'continue' and not checking_operation and not (s.get('local_only') is True and s.get('local_done') is True):
         if s.get('coverage_checked') is not True:
             errors.append('discussion coverage must be checked before execution')
@@ -518,6 +864,12 @@ def validate(s):
             errors.append('pending decisions prevent completion')
         if not isinstance(s.get('completion_evidence'), str) or not s['completion_evidence'].strip():
             errors.append('completion evidence required')
+        if (s.get('phase') in ('execution', 'verification', 'review') and
+                s.get('execution_occurred') is not False and
+                completion_basis != 'user_requested'):
+            errors.extend(validate_plan_steps(plan, require_steps=True, require_complete=True))
+        if completion_basis == 'user_requested':
+            errors.extend(validate_user_requested_steps(s, plan))
     return errors
 
 
@@ -631,6 +983,109 @@ def validate_transition(previous, current):
     old_plan, new_plan = previous.get('plan'), current.get('plan')
     if isinstance(old_plan, dict) and isinstance(new_plan, dict) and old_plan.get('presented') is True and new_plan.get('presented') is True and old_plan.get('evidence') != new_plan.get('evidence'):
         changed = True
+        if (not isinstance(current.get('plan_revision_source'), str) or
+                not current['plan_revision_source'].strip()):
+            errors.append('changed plan evidence requires plan_revision_source')
+        elif current.get('plan_revision_source') == previous.get('plan_revision_source'):
+            errors.append('changed plan evidence requires a new plan_revision_source')
+    old_execution_begun = previous.get('execution_begun') is True
+    new_execution_begun = current.get('execution_begun') is True
+    if old_execution_begun and not new_execution_begun:
+        if (not isinstance(current.get('execution_reset_source'), str) or
+                not current['execution_reset_source'].strip()):
+            errors.append('stopping begun execution requires execution_reset_source')
+    old_scope = previous.get('execution_scope')
+    new_scope = current.get('execution_scope')
+    if old_scope != new_scope:
+        if old_execution_begun and not new_execution_begun and not current.get('execution_reset_source'):
+            errors.append('changed execution_scope requires execution_reset_source')
+        if old_execution_begun and new_execution_begun:
+            errors.append('changed execution_scope requires stopping and a new begin')
+        if (isinstance(old_scope, dict) and isinstance(new_scope, dict) and
+                old_scope.get('source') == new_scope.get('source')):
+            errors.append('changed execution_scope requires a new source')
+        if old_execution_begun and current.get('execution_receipt') == previous.get('execution_receipt'):
+            errors.append('changed execution_scope requires a new execution_receipt')
+    old_tracking = (
+        previous.get('goals', {}).get('local_goal_id') if isinstance(previous.get('goals'), dict) else None,
+        previous.get('goal_tracking_mode'),
+        previous.get('goal_tracking_source'),
+        previous.get('goal_tracking_confirmation_source'),
+        previous.get('goal_tracking_host_id'),
+        previous.get('goal_tracking_host_receipt'),
+        previous.get('goal_tracking_fallback_reason'),
+        previous.get('goal_tracking_fallback_evidence'),
+    )
+    new_tracking = (
+        current.get('goals', {}).get('local_goal_id') if isinstance(current.get('goals'), dict) else None,
+        current.get('goal_tracking_mode'),
+        current.get('goal_tracking_source'),
+        current.get('goal_tracking_confirmation_source'),
+        current.get('goal_tracking_host_id'),
+        current.get('goal_tracking_host_receipt'),
+        current.get('goal_tracking_fallback_reason'),
+        current.get('goal_tracking_fallback_evidence'),
+    )
+    if old_tracking != new_tracking:
+        if old_execution_begun and not new_execution_begun and not current.get('execution_reset_source'):
+            errors.append('changed goal tracking requires execution_reset_source')
+        if old_execution_begun and new_execution_begun:
+            errors.append('changed goal tracking requires stopping and a new begin')
+        if (previous.get('goal_tracking_confirmation_source') ==
+                current.get('goal_tracking_confirmation_source')):
+            errors.append('changed goal tracking requires a new confirmation source')
+        if old_execution_begun and current.get('execution_receipt') == previous.get('execution_receipt'):
+            errors.append('changed goal tracking requires a new execution_receipt')
+    old_steps = old_plan.get('steps') if isinstance(old_plan, dict) and isinstance(old_plan.get('steps'), list) else []
+    new_steps = new_plan.get('steps') if isinstance(new_plan, dict) and isinstance(new_plan.get('steps'), list) else []
+    old_steps_by_id = {
+        step.get('id'): step for step in old_steps
+        if isinstance(step, dict) and isinstance(step.get('id'), str)
+    }
+    new_steps_by_id = {
+        step.get('id'): step for step in new_steps
+        if isinstance(step, dict) and isinstance(step.get('id'), str)
+    }
+    old_step_order = [step.get('id') for step in old_steps if isinstance(step, dict)]
+    new_step_order = [step.get('id') for step in new_steps if isinstance(step, dict)]
+    same_plan_identity = (
+        isinstance(old_plan, dict) and isinstance(new_plan, dict) and
+        old_plan.get('evidence') == new_plan.get('evidence') and
+        previous.get('phase') == current.get('phase') and
+        current.get('phase') in ('execution', 'verification', 'review')
+    )
+    if same_plan_identity and (old_steps_by_id or new_steps_by_id):
+        if set(old_steps_by_id) != set(new_steps_by_id):
+            errors.append('plan step ids cannot change without a new plan')
+        if old_step_order != new_step_order:
+            errors.append('plan step order cannot change')
+        for ident in set(old_steps_by_id) & set(new_steps_by_id):
+            old_step, new_step = old_steps_by_id[ident], new_steps_by_id[ident]
+            if old_step.get('action') != new_step.get('action'):
+                errors.append('plan step action cannot change without a new plan')
+            old_status, new_status = old_step.get('status'), new_step.get('status')
+            if old_status == new_status:
+                continue
+            if old_status == 'done' and new_status != 'done':
+                errors.append('completed plan step cannot change status')
+            elif new_status == 'done' and old_status != 'in_progress':
+                errors.append('plan step can become done only from in_progress')
+            elif new_status == 'in_progress' and old_status not in ('pending', 'blocked'):
+                errors.append('plan step can start only from pending or blocked')
+        if (set(old_steps_by_id) != set(new_steps_by_id) or
+                any(old_steps_by_id.get(ident, {}).get('action') != new_steps_by_id.get(ident, {}).get('action')
+                    for ident in set(old_steps_by_id) & set(new_steps_by_id))):
+            if (not isinstance(current.get('plan_revision_source'), str) or
+                    not current['plan_revision_source'].strip()):
+                errors.append('changed plan steps require plan_revision_source')
+    if (not same_plan_identity and isinstance(old_plan, dict) and old_plan.get('presented') is True and
+            (old_steps_by_id or new_steps_by_id) and
+            (old_step_order != new_step_order or
+             any(old_steps_by_id.get(ident, {}).get('action') != new_steps_by_id.get(ident, {}).get('action')
+                 for ident in set(old_steps_by_id) | set(new_steps_by_id)))):
+        if (not isinstance(current.get('plan_revision_source'), str) or
+                not current['plan_revision_source'].strip()):
+            errors.append('changed plan steps require plan_revision_source')
     old_goals, new_goals = previous.get('goals'), current.get('goals')
     if (isinstance(old_plan, dict) and old_plan.get('presented') is True and
             (not isinstance(old_goals, dict) or old_goals.get('presented') is not True) and
@@ -756,7 +1211,8 @@ def route(s):
         return {'action': 'repair_state', 'errors': errors}
     status = s['status']
     independent = s.get('independent_action')
-    if status == 'blocked' and isinstance(independent, str) and independent.strip():
+    if (status == 'blocked' and isinstance(independent, str) and independent.strip() and
+            independent_action_allowed(s)):
         return {'action': 'continue_local', 'next_action': independent, 'blocked_reason': s['wait_reason']}
     goals = s.get('goals')
     if (status == 'blocked' and s['phase'] in ('planning', 'goals') and
@@ -778,13 +1234,20 @@ def route(s):
             gates = s.get('gates', {})
             needs_execution_gates = (s['phase'] == 'execution' or
                                      (s['phase'] in ('verification', 'review') and s.get('execution_occurred') is not False))
-            if s.get('independent_action') and (not needs_execution_gates or
-                                                  (gates.get('execution') and gates.get('subagents'))):
+            if (s.get('independent_action') and
+                    (not needs_execution_gates or
+                     (gates.get('execution') and gates.get('subagents'))) and
+                    independent_action_allowed(s)):
                 result['independent_action'] = s['independent_action']
             checks = [op.get('reference') for op in s.get('operations', []) if isinstance(op, dict) and op.get('status') in ('running', 'unknown') and op.get('independent_of_wait') is True]
             if checks:
                 result['independent_checks'] = checks
         return result
+    checking_operation = any(
+        isinstance(operation, dict) and operation.get('blocks_next') is True and
+        operation.get('status') in ('unknown', 'running')
+        for operation in s.get('operations', [])
+    )
     for operation in s.get('operations', []):
         if not isinstance(operation, dict) or operation.get('blocks_next') is not True:
             continue
@@ -792,11 +1255,36 @@ def route(s):
             return {'action': 'check_operation', 'reference': operation.get('reference')}
         if operation.get('status') == 'failed':
             return {'action': 'handle_operation_failure', 'reference': operation.get('reference')}
+    if (s['phase'] == 'execution' and s.get('status') == 'continue' and
+            not checking_operation and s.get('execution_begun') is not True):
+        return {'action': 'begin_execution', 'next_action': '取得执行入口回执后继续'}
+    if (s['phase'] == 'execution' and s.get('status') == 'continue' and
+            not s.get('local_only')):
+        steps = s.get('plan', {}).get('steps', [])
+        if isinstance(steps, list):
+            current = next((step for step in steps if isinstance(step, dict) and step.get('status') == 'in_progress'), None)
+            if current is not None:
+                return {'action': 'continue_step', 'step_id': current.get('id'),
+                        'next_action': current.get('action')}
+            blocked = next((step for step in steps if isinstance(step, dict) and step.get('status') == 'blocked'), None)
+            if blocked is not None:
+                return {'action': 'step_blocked', 'step_id': blocked.get('id'),
+                        'reason': blocked.get('reason')}
+            pending = next((step for step in steps if isinstance(step, dict) and step.get('status') == 'pending'), None)
+            if pending is not None:
+                return {'action': 'start_step', 'step_id': pending.get('id'),
+                        'next_action': pending.get('action')}
+            if (not s.get('local_only') and steps and
+                    all(isinstance(step, dict) and step.get('status') == 'done' for step in steps)):
+                return {'action': 'steps_complete', 'next_action': '进入验证与审查'}
     if s.get('local_only') and s.get('local_done'):
         if s.get('coverage_checked') is not True:
             return {'action': 'check_coverage'}
         return {'action': 'local_complete'}
     if s.get('local_only'):
+        steps = s.get('plan', {}).get('steps', [])
+        if (steps and all(isinstance(step, dict) and step.get('status') == 'done' for step in steps)):
+            return {'action': 'steps_complete', 'next_action': '进入验证与审查'}
         return {'action': 'continue_local', 'next_action': s['next_action']}
     if (s.get('scope_limited') is True and s.get('coverage_checked') is True and
             s.get('plan_requested') is not True and
@@ -818,7 +1306,45 @@ def route(s):
             return {'action': 'present_plan'}
         if s.get('plan_required', True) and not s['plan']['presented']:
             return {'action': 'present_plan' if s['plan_requested'] else 'request_plan_transition'}
+    if s['phase'] == 'analysis':
+        return {'action': 'continue_analysis', 'next_action': '完成分析后进入讨论'}
     return {'action': 'continue_current_phase', 'next_action': s['next_action']}
+
+
+def begin_execution(s, previous=None):
+    """Return the one-time execution receipt only after the full entry gate passes."""
+    if not isinstance(s, dict):
+        return {'ok': False, 'errors': ['checkpoint must be an object']}
+    errors = validate(s)
+    if previous is None and goal_scope_requires_previous(s):
+        errors.append('previous state required for execution begin')
+    if previous is not None:
+        errors.extend(validate_transition(previous, s))
+    if s.get('phase') != 'execution':
+        errors.append('begin requires phase execution')
+    if s.get('status') != 'continue':
+        errors.append('begin requires status continue')
+    if s.get('execution_begun') is True:
+        errors.append('execution already begun; reuse the existing receipt or start a new task')
+    steps = s.get('plan', {}).get('steps', [])
+    if any(isinstance(step, dict) and step.get('status') in ('done', 'in_progress') for step in steps):
+        errors.append('begin requires all steps to be pending or blocked before execution starts')
+    if not errors:
+        routed = route(s)
+        if routed.get('action') != 'begin_execution':
+            errors.append('begin blocked by next action: ' + str(routed.get('action')))
+    if errors:
+        return {'ok': False, 'action': 'repair_state', 'errors': errors}
+    return {
+        'ok': True,
+        'action': 'begin_execution',
+        'execution_receipt': execution_receipt(s),
+        'step_ids': [
+            step.get('id') for step in s.get('plan', {}).get('steps', [])
+            if isinstance(step, dict)
+        ],
+        'scope': 'structure_only',
+    }
 
 
 def discussion_final_line(reply):
@@ -990,7 +1516,7 @@ def validate_discussion_final(s, reply, handoff):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('mode', choices=('check', 'next', 'final'))
+    parser.add_argument('mode', choices=('check', 'next', 'begin', 'final'))
     source = parser.add_mutually_exclusive_group(required=True)
     source.add_argument('--state')
     source.add_argument('--json', dest='inline_json')
@@ -1018,6 +1544,10 @@ def main():
             state = payload.get('state') if isinstance(payload, dict) and 'state' in payload else payload
             draft_reply = None
             discussion_handoff = None
+        if args.mode == 'begin':
+            result = begin_execution(state, previous)
+            print(json.dumps(result, ensure_ascii=False))
+            return 0 if result.get('ok') else 1
         previous_required = (
             previous is None and
             goal_scope_requires_previous(state)

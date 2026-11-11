@@ -43,6 +43,14 @@ def state(**updates):
         if isinstance(shared, str) and shared.strip():
             value['plan'] = dict(value['plan'], presentation_id=shared)
             value['goals'] = dict(value['goals'], presentation_id=shared)
+    if isinstance(value.get('plan'), dict) and value['plan'].get('presented') is True:
+        value['plan'] = dict(value['plan'])
+        value['plan'].setdefault('steps', [{
+            'id': 'S1',
+            'action': '测试计划步骤',
+            'status': 'done' if value.get('phase') in ('execution', 'verification', 'review') else 'pending',
+            'evidence': '测试步骤结果' if value.get('phase') in ('execution', 'verification', 'review') else None,
+        }])
     if (value.get('status') == 'complete' and isinstance(value.get('goals'), dict) and
             value['goals'].get('presented') is True):
         included = value['goals'].get('included', [])
@@ -60,7 +68,58 @@ def state(**updates):
             'verified_goal_ids': [ident for ident in included_ids if evidence_map.get(ident) and ident not in unverified_ids],
             'unverified_goal_ids': [ident for ident in included_ids if ident in unverified_ids],
         })
+    if value.get('phase') in ('execution', 'verification', 'review'):
+        value.setdefault('analysis_complete', True)
+        value.setdefault('analysis_evidence', '测试分析结果')
+        value.setdefault('discussion_closed', True)
+        value.setdefault('discussion_closure_source', '测试讨论闭合')
+        value.setdefault('execution_scope', {
+            'allowed_paths': ['test'],
+            'allowed_actions': ['测试计划步骤'],
+            'source': '测试执行授权',
+        })
+        value.setdefault('execution_begun', True)
+        value.setdefault('execution_receipt', 'test-execution-receipt')
+        value.setdefault('goal_tracking_mode', 'plan')
+        value.setdefault('goal_tracking_source', '测试计划工具条目')
+        value.setdefault('goal_tracking_confirmation_source', '测试用户确认跟踪方式')
+        value.setdefault('goal_tracking_fallback_reason', '测试宿主无 Goal 工具')
+        value.setdefault('goal_tracking_fallback_evidence', '测试工具能力证据')
+        if isinstance(value.get('goals'), dict):
+            value['goals'].setdefault('local_goal_id', 'local:test')
+    if value.get('phase') in ('verification', 'review') and value.get('execution_occurred') is False:
+        value.setdefault('read_only', True)
+    if value.get('local_only') is True:
+        value.setdefault('local_only_source', '用户明确要求本轮局部任务')
+        if value.get('phase') != 'execution':
+            value.setdefault('local_only_read_only', True)
+    if value.get('execution_begun') is True and value.get('execution_receipt') in (None, 'test-execution-receipt'):
+        value['execution_receipt'] = controller.execution_receipt(value)
+    if (value.get('status') == 'complete' and
+            value.get('completion_basis') == 'user_requested' and
+            isinstance(value.get('plan'), dict)):
+        steps = value['plan'].get('steps')
+        if isinstance(steps, list):
+            unfinished = [step for step in steps if isinstance(step, dict) and step.get('status') != 'done']
+            if unfinished:
+                value.setdefault('unverified_plan_steps', [{
+                    'id': step.get('id'),
+                    'action': step.get('action'),
+                    'reason': '测试未完成',
+                    'impact': '测试范围未覆盖',
+                } for step in unfinished])
     return value
+
+
+def refresh_execution(s):
+    """Recompute the receipt after a test changes an authorization field."""
+    if s.get('phase') in ('execution', 'verification', 'review'):
+        if isinstance(s.get('goals'), dict):
+            if s.get('goal_tracking_mode') in ('plan', 'conversation'):
+                s['goals'].setdefault('local_goal_id', 'local:test')
+        if s.get('execution_begun') is True:
+            s['execution_receipt'] = controller.execution_receipt(s)
+    return s
 
 
 def semantic_review(kind, decision_id=None, reviewer='main', status='pass', checks=None):
@@ -123,10 +182,12 @@ class ControlTests(unittest.TestCase):
                   gates={'plan': '用户第 2 轮', 'goals': '用户第 2 轮', 'execution': None})
         self.assertIn('execution evidence required for execution or later', controller.validate(s))
         s['gates']['execution'] = '用户第 2 轮'
+        refresh_execution(s)
         self.assertEqual([], controller.validate(s))
         s['gates'].pop('subagents')
         self.assertIn('subagents evidence required for execution or later', controller.validate(s))
         s['gates']['subagents'] = '用户选择不启用子代理'
+        refresh_execution(s)
         self.assertEqual([], controller.validate(s))
 
     def test_read_only_operation_check_does_not_require_subagent_setting(self):
@@ -150,6 +211,9 @@ class ControlTests(unittest.TestCase):
         self.assertEqual(['原作业'], result['independent_checks'])
         self.assertNotIn('independent_action', result)
         s['gates'].update(execution='用户授权范围', subagents='用户选择不开启')
+        s['plan']['steps'][0]['action'] = '修改业务文件'
+        s['execution_scope']['allowed_actions'] = ['修改业务文件']
+        refresh_execution(s)
         self.assertEqual('修改业务文件', controller.route(s)['independent_action'])
 
     def test_read_only_verification_keeps_independent_action_without_execution_gates(self):
@@ -157,6 +221,8 @@ class ControlTests(unittest.TestCase):
                   wait_evidence='已展示验收问题', execution_occurred=False, decisions=[],
                   plan={'presented': True, 'evidence': '计划消息'},
                   independent_action='只读核对现有材料',
+                  independent_action_read_only=True,
+                  read_only_scope={'allowed_actions': ['只读核对现有材料'], 'source': '用户只读要求'},
                   gates={'plan': None, 'goals': None, 'execution': None, 'subagents': None})
         self.assertEqual('只读核对现有材料', controller.route(s)['independent_action'])
 
@@ -184,7 +250,17 @@ class ControlTests(unittest.TestCase):
                  goal_scope_baseline={'included':[{'id':'G1','kind':'changed','criterion':'委托目标','source':'用户委托'}],
                                       'excluded':[]},
                  gates={'plan':'委托方案', 'goals':'委托目标', 'execution':'执行授权', 'subagents':'用户选择不开启'})
-        self.assertEqual('continue_current_phase', controller.route(s)['action'])
+        s['plan']['steps'] = [{'id':'S1','action':'完成委托步骤','status':'done','evidence':'委托结果'}]
+        s.update(analysis_complete=True, analysis_evidence='委托分析',
+                 discussion_closed=True, discussion_closure_source='委托讨论闭合',
+                 execution_scope={'allowed_paths':['test'],'allowed_actions':['完成委托步骤'],'source':'委托执行范围'},
+                 execution_begun=True, execution_receipt='委托执行回执',
+                 goal_tracking_mode='plan', goal_tracking_source='委托计划条目',
+                 goal_tracking_confirmation_source='用户委托跟踪方式',
+                 goal_tracking_fallback_reason='宿主无 Goal 工具',
+                 goal_tracking_fallback_evidence='委托工具能力证据')
+        refresh_execution(s)
+        self.assertEqual('steps_complete', controller.route(s)['action'])
         s['decisions'][0].pop('value')
         self.assertEqual('repair_state', controller.route(s)['action'])
 
@@ -952,8 +1028,9 @@ class ControlTests(unittest.TestCase):
             'excluded': [],
         }
         self.assertIn('presented goals require evidence', controller.validate(s))
-        s['goals'].update(evidence='同一条正文', presentation_id='计划展示')
+        s['goals'].update(evidence='同一条正文', presentation_id='计划展示', local_goal_id='local:test')
         s['plan']['presentation_id'] = '计划展示'
+        refresh_execution(s)
         self.assertEqual([], controller.validate(s))
         s.update(plan_required=False, plan_requested=False, plan_waiver_source='免展示计划', plan={'presented': False})
         self.assertIn('plan must be presented before execution', controller.validate(s))
@@ -976,6 +1053,17 @@ class ControlTests(unittest.TestCase):
                  gates={'plan':'用户确认计划','goals':'用户确认目标','execution':'用户授权执行','subagents':'用户选择不开启'})
         self.assertIn('plan must be presented before execution', controller.validate(s))
         s.update(plan_required=True, plan={'presented':True,'evidence':'后续展示计划','presentation_id':'目标展示'})
+        s['plan']['steps'] = [{'id':'S1','action':'执行目标','status':'pending'}]
+        s.update(analysis_complete=True, analysis_evidence='目标分析',
+                 discussion_closed=True, discussion_closure_source='目标讨论闭合',
+                 execution_scope={'allowed_paths':['test'],'allowed_actions':['执行目标'],'source':'目标执行范围'},
+                 execution_begun=True, execution_receipt='目标执行回执',
+                 goal_tracking_mode='plan', goal_tracking_source='目标计划条目',
+                 goal_tracking_confirmation_source='用户确认跟踪方式',
+                 goal_tracking_fallback_reason='宿主无 Goal 工具',
+                 goal_tracking_fallback_evidence='工具能力证据')
+        s['goals']['local_goal_id'] = 'local:test'
+        refresh_execution(s)
         self.assertEqual([], controller.validate(s))
 
     def test_plan_and_goals_require_shared_presentation_id(self):
@@ -1373,6 +1461,7 @@ class ControlTests(unittest.TestCase):
         s['phase'] = 'verification'
         self.assertIn('execution_occurred must be explicitly true or false', controller.validate(s))
         s['execution_occurred'] = False
+        s['read_only'] = True
         self.assertEqual([], controller.validate(s))
         s['execution_occurred'] = True
         self.assertIn('execution evidence required for execution or later', controller.validate(s))
@@ -1414,7 +1503,8 @@ class ControlTests(unittest.TestCase):
         self.assertEqual('present_incomplete_plan', controller.route(s)['action'])
         s['plan'].update(draft_presented=True, draft_evidence='上一轮已发送草案', draft_for_request=s['plan_request_source'])
         self.assertEqual('check_coverage', controller.route(s)['action'])
-        s.update(local_only=True, local_done=False)
+        s.update(local_only=True, local_done=False, local_only_source='用户明确要求本轮只做局部任务',
+                 local_only_read_only=True)
         self.assertEqual('continue_local', controller.route(s)['action'])
         s['local_done'] = True
         self.assertEqual('check_coverage', controller.route(s)['action'])
@@ -1422,14 +1512,17 @@ class ControlTests(unittest.TestCase):
         self.assertEqual('local_complete', controller.route(s)['action'])
 
     def test_wait_does_not_hide_independent_work(self):
-        s = state(status='wait_user', wait_reason='等待回答', wait_evidence='已发出问题', independent_action='检查已有资料')
+        s = state(status='wait_user', wait_reason='等待回答', wait_evidence='已发出问题',
+                  independent_action='检查已有资料', independent_action_read_only=True,
+                  read_only_scope={'allowed_actions': ['检查已有资料'], 'source': '用户只读要求'})
         self.assertEqual('检查已有资料', controller.route(s)['independent_action'])
 
     def test_execution_block_does_not_block_authorized_goal_display(self):
         s = state(phase='planning', status='blocked', wait_reason='执行权限不足',
                   plan={'presented':True, 'evidence':'已展示计划'},
                   gates={'plan':'用户确认计划','goals':None,'execution':None},
-                  independent_action='一起展示计划和目标')
+                  independent_action='一起展示计划和目标', independent_action_read_only=True,
+                  read_only_scope={'allowed_actions': ['一起展示计划和目标'], 'source': '本轮只读展示'})
         result = controller.route(s)
         self.assertEqual(('continue_local', '一起展示计划和目标', '执行权限不足'),
                          (result['action'], result['next_action'], result['blocked_reason']))
@@ -1439,6 +1532,8 @@ class ControlTests(unittest.TestCase):
         self.assertEqual('continue_local', result['action'])
         self.assertIn('允许时一起展示计划和目标', result['next_action'])
         s['local_only'] = True
+        s['local_only_source'] = '用户要求只展示'
+        s['local_only_read_only'] = True
         self.assertEqual('blocked', controller.route(s)['action'])
 
     def test_blocked_state_does_not_suggest_missing_goal_if_plan_is_absent_or_goal_displayed(self):
@@ -1450,10 +1545,13 @@ class ControlTests(unittest.TestCase):
                         'excluded':[], 'evidence_map':{'G1':['测试证据']}},
                  goal_scope_baseline={'included':[{'id':'G1','kind':'changed','criterion':'目标','source':'测试需求'}],
                                       'excluded':[]})
+        s['plan']['steps'] = [{'id':'S1','action':'后续计划步骤','status':'pending'}]
         self.assertEqual('blocked', controller.route(s)['action'])
 
     def test_blocked_temporary_request_waits_even_if_main_has_independent_action(self):
         s = state(status='blocked', wait_reason='原任务受阻', independent_action='展示目标',
+                  independent_action_read_only=True,
+                  read_only_scope={'allowed_actions': ['展示目标'], 'source': '用户只读要求'},
                   interruptions=[interruption(status='blocked', wait_reason='临时权限待处理')])
         result = controller.route(s)
         self.assertEqual(('wait_interruption', 'blocked'), (result['action'], result['status']))
@@ -1833,14 +1931,19 @@ class ControlTests(unittest.TestCase):
                 goals={'presented':True,'evidence':'已展示目标'},
                 gates={'plan':'确认','goals':'确认','execution':'授权'},local_only=True,local_done=False,
                 next_action='重试原操作',operations=[op])
+        s['plan']['steps'] = [{'id':'S1','action':'重试原操作','status':'pending'}]
+        s['execution_scope']['allowed_actions'] = ['重试原操作']
+        refresh_execution(s)
         self.assertEqual('check_operation',controller.route(s)['action'])
         op['blocks_next']=False
         self.assertEqual('continue_local',controller.route(s)['action'])
-        op['blocks_next']=True;s['local_done']=True
+        op['blocks_next']=True
         self.assertEqual('check_operation',controller.route(s)['action'])
         op.update(status='running')
         self.assertEqual('check_operation',controller.route(s)['action'])
         op.update(status='succeeded',evidence='命令已完成')
+        s['plan']['steps'][0].update(status='done', evidence='原操作完成')
+        s['local_done']=True
         self.assertEqual('local_complete',controller.route(s)['action'])
         op.update(status='failed',evidence='命令失败')
         self.assertEqual('handle_operation_failure',controller.route(s)['action'])
@@ -2027,6 +2130,7 @@ class ControlTests(unittest.TestCase):
         current=dict(previous,plan_requested=False)
         self.assertIn('withdrawing plan request requires source',controller.validate_transition(previous,current))
         current['plan']={'presented':True,'evidence':'新计划'}
+        current['plan_revision_source']='用户要求新计划'
         self.assertEqual([],controller.validate_transition(previous,current))
 
     def test_previously_delivered_request_can_be_cleared_with_delivery_reference(self):
@@ -2111,6 +2215,7 @@ class ControlTests(unittest.TestCase):
         self.assertIn('changed plan requires reviewing old plan authorization',errors)
         self.assertIn('changed plan requires reviewing old execution authorization',errors)
         current['gates'].update(plan=None,execution=None)
+        current['plan_revision_source']='用户要求撤下旧计划'
         self.assertEqual([],controller.validate_transition(previous,current))
 
     def test_changed_goals_reopen_only_the_affected_authorizations(self):
@@ -2136,6 +2241,7 @@ class ControlTests(unittest.TestCase):
                          gates={'plan':'原计划确认','goals':'原目标确认','execution':'原执行授权'})
         current = copy.deepcopy(previous)
         current['plan']['evidence'] = '原计划正文及第2项修改'
+        current['plan_revision_source'] = '用户确认第2项计划修改'
         current['gates'].update(plan='第2项新确认', execution=None)
         current['impact_review'] = {'reason':'目标及子代理选择不受第2项修改影响', 'retained':['goals','subagents']}
         self.assertEqual([], controller.validate_transition(previous, current))
@@ -2196,6 +2302,438 @@ class ControlTests(unittest.TestCase):
             p = subprocess.run([sys.executable, str(SCRIPT), 'check', '--state', str(path)], capture_output=True, text=True)
             self.assertNotEqual(0, p.returncode)
             self.assertFalse(json.loads(p.stdout)['ok'])
+
+    def test_presented_plan_requires_numbered_steps(self):
+        s = state(plan={'presented': True, 'evidence': '计划消息'})
+        s['plan'].pop('steps')
+        self.assertIn('presented plan requires numbered steps', controller.validate(s))
+
+    def test_goal_tracking_requires_host_receipt_or_confirmed_fallback(self):
+        s = state(
+            phase='execution',
+            decisions=[],
+            plan={'presented': True, 'evidence': '计划消息'},
+            goals={'presented': True, 'evidence': '目标消息'},
+            gates={
+                'plan': '用户确认计划',
+                'goals': '用户确认目标',
+                'execution': '用户授权执行',
+                'subagents': '用户选择不开启',
+            },
+        )
+        s['goal_tracking_mode'] = 'host'
+        s.pop('goal_tracking_host_id', None)
+        s.pop('goal_tracking_host_receipt', None)
+        self.assertIn(
+            'host goal tracking requires goal_tracking_host_id',
+            controller.validate(s),
+        )
+        self.assertIn(
+            'host goal tracking requires goal_tracking_host_receipt',
+            controller.validate(s),
+        )
+        s['goal_tracking_mode'] = 'plan'
+        s.pop('goal_tracking_fallback_evidence')
+        s['goals'].pop('local_goal_id', None)
+        self.assertIn(
+            'fallback goal tracking requires goal_tracking_fallback_evidence',
+            controller.validate(s),
+        )
+        self.assertIn(
+            'fallback goal tracking requires goals.local_goal_id',
+            controller.validate(s),
+        )
+        s['goal_tracking_fallback_evidence'] = '实际工具能力证据'
+        s['goals']['local_goal_id'] = 'local:test'
+        refresh_execution(s)
+        self.assertEqual([], controller.validate(s))
+
+    def test_begin_execution_blocks_without_receipt_and_returns_one(self):
+        s = state(
+            phase='execution',
+            decisions=[],
+            plan={'presented': True, 'evidence': '计划消息'},
+            goals={'presented': True, 'evidence': '目标消息'},
+            gates={
+                'plan': '用户确认计划',
+                'goals': '用户确认目标',
+                'execution': '用户授权执行',
+                'subagents': '用户选择不开启',
+            },
+        )
+        s['plan']['steps'] = [{'id': 'S1', 'action': '第一步', 'status': 'pending'}]
+        s['execution_scope']['allowed_actions'] = ['第一步']
+        s.pop('execution_begun')
+        s.pop('execution_receipt')
+        self.assertEqual('begin_execution', controller.route(s)['action'])
+        result = controller.begin_execution(s, copy.deepcopy(s))
+        self.assertTrue(result['ok'])
+        self.assertTrue(result['execution_receipt'])
+        self.assertEqual(['S1'], result['step_ids'])
+
+    def test_execution_steps_must_run_in_order(self):
+        s = state(
+            phase='execution',
+            decisions=[],
+            plan={'presented': True, 'evidence': '计划消息'},
+            goals={'presented': True, 'evidence': '目标消息'},
+            gates={
+                'plan': '用户确认计划',
+                'goals': '用户确认目标',
+                'execution': '用户授权执行',
+                'subagents': '用户选择不开启',
+            },
+        )
+        s['plan']['steps'] = [
+            {'id': 'S1', 'action': '第一步', 'status': 'in_progress'},
+            {'id': 'S2', 'action': '第二步', 'status': 'pending'},
+        ]
+        s['execution_scope']['allowed_actions'] = ['第一步', '第二步']
+        refresh_execution(s)
+        self.assertEqual('continue_step', controller.route(s)['action'])
+        self.assertEqual('S1', controller.route(s)['step_id'])
+        s['plan']['steps'] = [
+            {'id': 'S1', 'action': '第一步', 'status': 'pending'},
+            {'id': 'S2', 'action': '第二步', 'status': 'done', 'evidence': '错误地提前完成'},
+        ]
+        refresh_execution(s)
+        self.assertIn(
+            'plan.steps[1] cannot be done after an unfinished step',
+            controller.validate(s),
+        )
+
+    def test_begin_execution_requires_analysis_discussion_and_scope(self):
+        s = state(
+            phase='execution',
+            decisions=[],
+            plan={'presented': True, 'evidence': '计划消息'},
+            goals={'presented': True, 'evidence': '目标消息'},
+            gates={
+                'plan': '用户确认计划',
+                'goals': '用户确认目标',
+                'execution': '用户授权执行',
+                'subagents': '用户选择不开启',
+            },
+        )
+        s.pop('execution_begun')
+        s.pop('execution_receipt')
+        s['analysis_complete'] = False
+        s.pop('execution_scope')
+        errors = controller.validate(s)
+        self.assertIn('analysis_complete must be true before execution', errors)
+        self.assertIn('execution_scope required before execution', errors)
+
+    def test_completed_step_requires_prior_in_progress_transition(self):
+        old = state(
+            phase='execution',
+            decisions=[],
+            plan={'presented': True, 'evidence': '计划消息'},
+            goals={'presented': True, 'evidence': '目标消息'},
+            gates={
+                'plan': '用户确认计划',
+                'goals': '用户确认目标',
+                'execution': '用户授权执行',
+                'subagents': '用户选择不开启',
+            },
+        )
+        old['plan']['steps'] = [{'id': 'S1', 'action': '第一步', 'status': 'pending'}]
+        refresh_execution(old)
+        jumped = copy.deepcopy(old)
+        jumped['plan']['steps'][0].update(status='done', evidence='声称完成')
+        self.assertIn(
+            'plan step can become done only from in_progress',
+            controller.validate_transition(old, jumped),
+        )
+        old['plan']['steps'][0]['status'] = 'in_progress'
+        completed = copy.deepcopy(old)
+        completed['plan']['steps'][0].update(status='done', evidence='实际完成证据')
+        self.assertEqual([], controller.validate_transition(old, completed))
+
+    def test_completion_requires_execution_begin_receipt(self):
+        s = state(
+            phase='execution',
+            status='complete',
+            decisions=[],
+            plan={'presented': True, 'evidence': '计划消息'},
+            goals={'presented': True, 'evidence': '目标消息'},
+            gates={
+                'plan': '用户确认计划',
+                'goals': '用户确认目标',
+                'execution': '用户授权执行',
+                'subagents': '用户选择不开启',
+            },
+            completion_evidence='结果已交付',
+        )
+        s['execution_begun'] = False
+        s.pop('execution_receipt', None)
+        errors = controller.validate(s)
+        self.assertIn('execution_begun must be true before completion', errors)
+        self.assertIn('completion requires execution_receipt', errors)
+
+    def test_begin_cli_returns_a_receipt(self):
+        s = state(
+            phase='execution',
+            decisions=[],
+            plan={'presented': True, 'evidence': '计划消息'},
+            goals={'presented': True, 'evidence': '目标消息'},
+            gates={
+                'plan': '用户确认计划',
+                'goals': '用户确认目标',
+                'execution': '用户授权执行',
+                'subagents': '用户选择不开启',
+            },
+        )
+        s['plan']['steps'] = [{'id': 'S1', 'action': '第一步', 'status': 'pending'}]
+        s['execution_scope']['allowed_actions'] = ['第一步']
+        s.pop('execution_begun')
+        s.pop('execution_receipt')
+        p = subprocess.run(
+            [sys.executable, '-B', str(SCRIPT), 'begin', '--json',
+             json.dumps({'previous': s, 'state': s})],
+            capture_output=True, text=True,
+        )
+        self.assertEqual(0, p.returncode, p.stdout)
+        result = json.loads(p.stdout)
+        self.assertTrue(result['ok'])
+        self.assertRegex(result['execution_receipt'], r'^[0-9a-f]{64}$')
+
+    def test_execution_receipt_must_match_current_authorization(self):
+        s = state(
+            phase='execution',
+            decisions=[],
+            plan={'presented': True, 'evidence': '计划消息'},
+            goals={'presented': True, 'evidence': '目标消息'},
+            gates={
+                'plan': '用户确认计划',
+                'goals': '用户确认目标',
+                'execution': '用户授权执行',
+                'subagents': '用户选择不开启',
+            },
+        )
+        s['execution_receipt'] = '0' * 64
+        self.assertIn(
+            'execution_receipt does not match current authorization',
+            controller.validate(s),
+        )
+
+    def test_begin_rejects_active_operation_and_requires_previous(self):
+        s = state(
+            phase='execution',
+            decisions=[],
+            plan={'presented': True, 'evidence': '计划消息'},
+            goals={'presented': True, 'evidence': '目标消息'},
+            gates={
+                'plan': '用户确认计划',
+                'goals': '用户确认目标',
+                'execution': '用户授权执行',
+                'subagents': '用户选择不开启',
+            },
+            operations=[{
+                'id': 'op1', 'reference': '运行中作业', 'status': 'running',
+                'side_effect': True, 'blocks_next': True,
+            }],
+        )
+        s['plan']['steps'] = [{'id': 'S1', 'action': '第一步', 'status': 'pending'}]
+        s.pop('execution_begun')
+        s.pop('execution_receipt')
+        result = controller.begin_execution(s, copy.deepcopy(s))
+        self.assertFalse(result['ok'])
+        self.assertIn('begin blocked by next action: check_operation', result['errors'])
+
+    def test_plan_rejects_later_in_progress_and_reordering(self):
+        s = state(
+            phase='execution',
+            decisions=[],
+            plan={'presented': True, 'evidence': '计划消息'},
+            goals={'presented': True, 'evidence': '目标消息'},
+            gates={
+                'plan': '用户确认计划',
+                'goals': '用户确认目标',
+                'execution': '用户授权执行',
+                'subagents': '用户选择不开启',
+            },
+        )
+        s['plan']['steps'] = [
+            {'id': 'S1', 'action': '第一步', 'status': 'pending'},
+            {'id': 'S2', 'action': '第二步', 'status': 'in_progress'},
+        ]
+        refresh_execution(s)
+        self.assertIn(
+            'plan.steps[1] cannot start or block after an earlier unfinished step',
+            controller.validate(s),
+        )
+        previous = copy.deepcopy(s)
+        previous['plan']['steps'] = [
+            {'id': 'S1', 'action': '第一步', 'status': 'pending'},
+            {'id': 'S2', 'action': '第二步', 'status': 'pending'},
+        ]
+        current = copy.deepcopy(previous)
+        current['plan']['steps'] = list(reversed(current['plan']['steps']))
+        self.assertIn('plan step order cannot change', controller.validate_transition(previous, current))
+
+    def test_user_requested_completion_requires_unfinished_step_records(self):
+        s = state(
+            phase='execution',
+            status='complete',
+            decisions=[],
+            plan={'presented': True, 'evidence': '计划消息'},
+            goals={'presented': True, 'evidence': '目标消息'},
+            gates={
+                'plan': '用户确认计划',
+                'goals': '用户确认目标',
+                'execution': '用户授权执行',
+                'subagents': '用户选择不开启',
+            },
+            completion_basis='user_requested',
+            completion_request_source='用户明确要求结束',
+            completion_evidence='已报告未完成步骤',
+        )
+        s['plan']['steps'] = [{'id': 'S1', 'action': '第一步', 'status': 'pending'}]
+        s['unverified_goals'] = []
+        s['completion_report'] = {'verified_goal_ids': [], 'unverified_goal_ids': []}
+        refresh_execution(s)
+        s.pop('unverified_plan_steps', None)
+        self.assertIn(
+            'user requested completion requires unverified_plan_steps',
+            controller.validate(s),
+        )
+        s['unverified_plan_steps'] = [{
+            'id': 'S1', 'action': '错误动作', 'reason': '未完成',
+            'impact': '无法确认',
+        }]
+        self.assertIn(
+            'unverified_plan_steps[0] action must match the unfinished plan step',
+            controller.validate(s),
+        )
+
+    def test_begun_execution_cannot_be_reset_without_source(self):
+        previous = state(
+            phase='execution',
+            decisions=[],
+            plan={'presented': True, 'evidence': '计划消息'},
+            goals={'presented': True, 'evidence': '目标消息'},
+            gates={
+                'plan': '用户确认计划',
+                'goals': '用户确认目标',
+                'execution': '用户授权执行',
+                'subagents': '用户选择不开启',
+            },
+        )
+        current = copy.deepcopy(previous)
+        current['execution_begun'] = False
+        self.assertIn(
+            'stopping begun execution requires execution_reset_source',
+            controller.validate_transition(previous, current),
+        )
+
+    def test_scope_change_requires_new_source_and_begin(self):
+        previous = state(
+            phase='execution',
+            decisions=[],
+            plan={'presented': True, 'evidence': '计划消息'},
+            goals={'presented': True, 'evidence': '目标消息'},
+            gates={
+                'plan': '用户确认计划',
+                'goals': '用户确认目标',
+                'execution': '用户授权执行',
+                'subagents': '用户选择不开启',
+            },
+        )
+        current = copy.deepcopy(previous)
+        current['execution_scope']['allowed_paths'] = ['other']
+        errors = controller.validate_transition(previous, current)
+        self.assertIn('changed execution_scope requires a new source', errors)
+        self.assertIn('changed execution_scope requires a new execution_receipt', errors)
+        self.assertIn('changed execution_scope requires stopping and a new begin', errors)
+
+    def test_blocked_business_action_is_not_released_by_fake_scope(self):
+        s = state(
+            phase='planning',
+            status='blocked',
+            wait_reason='等待用户决定',
+            independent_action='修改业务文件',
+            execution_begun=True,
+            execution_scope={'allowed_paths': ['lib'], 'allowed_actions': ['修改业务文件'], 'source': '伪造'},
+        )
+        self.assertEqual('blocked', controller.route(s)['action'])
+
+    def test_read_only_business_action_is_not_released_by_declaration(self):
+        s = state(
+            phase='planning',
+            status='blocked',
+            wait_reason='等待用户决定',
+            independent_action='修改业务文件',
+            independent_action_read_only=True,
+            read_only_scope={'allowed_actions': ['查看资料'], 'source': '用户只读要求'},
+        )
+        self.assertEqual('repair_state', controller.route(s)['action'])
+
+    def test_execution_actions_must_cover_plan_steps(self):
+        s = state(
+            phase='execution',
+            decisions=[],
+            plan={'presented': True, 'evidence': '计划消息'},
+            goals={'presented': True, 'evidence': '目标消息'},
+            gates={
+                'plan': '用户确认计划',
+                'goals': '用户确认目标',
+                'execution': '用户授权执行',
+                'subagents': '用户选择不开启',
+            },
+        )
+        s['plan']['steps'] = [{'id': 'S1', 'action': '修改业务文件', 'status': 'pending'}]
+        s['execution_scope']['allowed_actions'] = ['查看资料']
+        refresh_execution(s)
+        self.assertIn(
+            'plan.steps[0] action is not in execution_scope.allowed_actions',
+            controller.validate(s),
+        )
+
+    def test_local_only_cannot_bypass_completed_steps(self):
+        s = state(
+            phase='execution',
+            decisions=[],
+            plan={'presented': True, 'evidence': '计划消息'},
+            goals={'presented': True, 'evidence': '目标消息'},
+            gates={
+                'plan': '用户确认计划',
+                'goals': '用户确认目标',
+                'execution': '用户授权执行',
+                'subagents': '用户选择不开启',
+            },
+            local_only=True,
+            local_done=False,
+            next_action='继续写业务文件',
+        )
+        self.assertEqual('steps_complete', controller.route(s)['action'])
+
+    def test_analysis_phase_cannot_return_business_action(self):
+        s = state(phase='analysis', decisions=[], plan_requested=False,
+                  plan={'presented': False}, next_action='修改业务文件')
+        result = controller.route(s)
+        self.assertEqual('continue_analysis', result['action'])
+        self.assertNotEqual('修改业务文件', result.get('next_action'))
+
+    def test_local_done_cannot_bypass_pending_steps(self):
+        s = state(
+            phase='execution',
+            decisions=[],
+            plan={'presented': True, 'evidence': '计划消息'},
+            goals={'presented': True, 'evidence': '目标消息'},
+            gates={
+                'plan': '用户确认计划',
+                'goals': '用户确认目标',
+                'execution': '用户授权执行',
+                'subagents': '用户选择不开启',
+            },
+            local_only=True,
+            local_done=True,
+            next_action='继续写业务文件',
+        )
+        s['plan']['steps'] = [{'id': 'S1', 'action': '继续写业务文件', 'status': 'pending'}]
+        s['execution_scope']['allowed_actions'] = ['继续写业务文件']
+        refresh_execution(s)
+        self.assertIn('local_done cannot bypass unfinished plan steps', controller.validate(s))
 
 
 if __name__ == '__main__':

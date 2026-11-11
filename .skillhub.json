@@ -1,5 +1,5 @@
 {
   "name": "task-driver",
   "description": "面向复杂任务，仅由用户显式调用；用户消息以 tdr-、task-driver 或 /task-driver 开头时，立即调用任务驱动，不主动介入其他任务。",
-  "version": "v1.2.11"
+  "version": "v1.3.0"
 }

@@ -18,6 +18,8 @@
 
 没有 Goal 模式时，当前目标使用稳定的 `local_goal_id`；`superseded_goals` 允许 `host_id` 为空或 `null`，但必须保留同一 `local_goal_id`，不得伪造宿主目标 ID 或声称宿主目标已完成。
 
+目标展示和宿主目标创建是两件事。宿主 Goal 可用时必须记录实际 `goal_tracking_host_id` 和 `goal_tracking_host_receipt`；只有实际工具或宿主限制证明不可用时才允许使用 `plan` 或 `conversation` 跟踪，并必须保存稳定的 `goals.local_goal_id`、`goal_tracking_fallback_reason`、`goal_tracking_fallback_evidence` 和用户确认来源。展示、确认或局部编号步骤都不能冒充宿主目标创建。
+
 ### 最小必要目标
 
 每个候选目标必须做删除判断：删去后仍能认定对应问题完全解决的，删除或降为内部检查。
@@ -39,6 +41,8 @@
 用户改变 included、excluded 或验收范围时，按新要求形成新目标；旧目标保留到 `superseded_goals`，新目标记录实际确认来源，不能把排除项继续留在 included。单纯补充 evidence_map 属于验证进展，不重开目标确认。
 
 完成分为两种口径：默认 `completion_basis:evidence`，要求所有 included 都已有 evidence_map 证据；用户明确要求结束时可用 `completion_basis:user_requested`，记录 `completion_request_source` 和 `completion_report`（`verified_goal_ids` 与 `unverified_goal_ids` 必须分别对应 evidence_map 和 unverified_goals），并在 `unverified_goals` 中逐项写明仍未验证的 included 目标 `id`、`item`、未验证原因 `reason` 和实际影响 `impact`。用户要求完成不等于声称这些目标已验证；用户要求改变目标时必须先调整 included/excluded、补充新目标来源并保留 superseded，不能沿用旧目标直接标记完成。
+
+`goals` 只描述验收结果，不描述施工进度。1、2、3……的逐项执行由 `plan.steps` 维护；目标完成不能因为步骤全部打勾而自动成立，步骤也不能因为目标已确认而自动完成。
 
 
 ## 目标与验证约定
