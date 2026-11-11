@@ -21,6 +21,20 @@ def state(**updates):
     value.update(updates)
     if 'gates' in updates and 'subagents' not in value['gates']:
         value['gates'] = dict(value['gates'], subagents='测试中的用户明确选择')
+    if isinstance(value.get('goals'), dict) and value['goals'].get('presented') is True:
+        value['goals'] = dict(value['goals'])
+        value['goals'].setdefault('included', [{
+            'id': 'G1',
+            'kind': 'changed',
+            'criterion': '测试约定的目标',
+            'source': '测试需求',
+        }])
+        value['goals'].setdefault('excluded', [])
+        value['goals'].setdefault('evidence_map', {'G1': ['测试证据']})
+        value.setdefault('goal_scope_baseline', {
+            'included': copy.deepcopy(value['goals']['included']),
+            'excluded': copy.deepcopy(value['goals']['excluded']),
+        })
     if (isinstance(value.get('plan'), dict) and isinstance(value.get('goals'), dict) and
             value['plan'].get('presented') is True and value['goals'].get('presented') is True):
         shared = (value['plan'].get('presentation_id') or
@@ -29,6 +43,23 @@ def state(**updates):
         if isinstance(shared, str) and shared.strip():
             value['plan'] = dict(value['plan'], presentation_id=shared)
             value['goals'] = dict(value['goals'], presentation_id=shared)
+    if (value.get('status') == 'complete' and isinstance(value.get('goals'), dict) and
+            value['goals'].get('presented') is True):
+        included = value['goals'].get('included', [])
+        included_ids = [
+            item.get('id') for item in included
+            if isinstance(item, dict) and isinstance(item.get('id'), str)
+        ] if isinstance(included, list) else []
+        evidence_map = value['goals'].get('evidence_map')
+        evidence_map = evidence_map if isinstance(evidence_map, dict) else {}
+        unverified_ids = {
+            item.get('id') for item in value.get('unverified_goals', [])
+            if isinstance(item, dict) and isinstance(item.get('id'), str)
+        }
+        value.setdefault('completion_report', {
+            'verified_goal_ids': [ident for ident in included_ids if evidence_map.get(ident) and ident not in unverified_ids],
+            'unverified_goal_ids': [ident for ident in included_ids if ident in unverified_ids],
+        })
     return value
 
 
@@ -147,7 +178,11 @@ class ControlTests(unittest.TestCase):
         s['plan_requested'] = True
         self.assertEqual('present_plan', controller.route(s)['action'])
         s.update(phase='execution', plan={'presented':True, 'evidence':'计划', 'presentation_id':'委托展示'},
-                 goals={'presented':True, 'evidence':'目标', 'presentation_id':'委托展示'},
+                 goals={'presented':True, 'evidence':'目标', 'presentation_id':'委托展示',
+                        'included':[{'id':'G1','kind':'changed','criterion':'委托目标','source':'用户委托'}],
+                        'excluded':[], 'evidence_map':{'G1':['委托验证']}},
+                 goal_scope_baseline={'included':[{'id':'G1','kind':'changed','criterion':'委托目标','source':'用户委托'}],
+                                      'excluded':[]},
                  gates={'plan':'委托方案', 'goals':'委托目标', 'execution':'执行授权', 'subagents':'用户选择不开启'})
         self.assertEqual('continue_current_phase', controller.route(s)['action'])
         s['decisions'][0].pop('value')
@@ -160,7 +195,12 @@ class ControlTests(unittest.TestCase):
 
     def test_wait_for_authorization_and_deferred_item(self):
         self.assertEqual([], controller.validate(state(status='wait_user', wait_reason='等待执行许可', wait_evidence='上一条消息的执行许可问题', decisions=[])))
-        s = state(status='complete', completion_evidence='交付回执', plan_required=False, plan_requested=False, plan_waiver_source='已有成果满足用户目标', decisions=[{'id':'later','subject':'后续事项','status':'pending','blocks_completion':False,'nonblocking_reason':'用户同意延期且不影响本次目标'}])
+        s = state(status='complete', completion_evidence='交付回执', plan_required=False, plan_requested=False,
+                  plan_waiver_source='已有成果满足用户目标',
+                  goals={'presented': True, 'evidence': '已完成结果',
+                         'included': [{'id':'G1','kind':'changed','criterion':'结果已交付','source':'用户目标'}],
+                         'excluded': [], 'evidence_map': {'G1':['交付回执']}},
+                  decisions=[{'id':'later','subject':'后续事项','status':'pending','blocks_completion':False,'nonblocking_reason':'用户同意延期且不影响本次目标'}])
         self.assertEqual([], controller.validate(s))
 
     def test_unpresented_plan_advances_only_after_discussion_is_ready(self):
@@ -901,7 +941,16 @@ class ControlTests(unittest.TestCase):
         s = state(phase='execution', decisions=[], plan={'presented': True, 'evidence': '同一条正文'},
                   gates={'plan': '用户确认计划', 'goals': '用户确认目标', 'execution': '用户授权执行'})
         self.assertIn('goals must be presented before execution', controller.validate(s))
-        s['goals'] = {'presented': True}
+        s['goals'] = {
+            'presented': True,
+            'included': [{'id':'G1','kind':'changed','criterion':'执行目标','source':'测试需求'}],
+            'excluded': [],
+            'evidence_map': {'G1':['测试证据']},
+        }
+        s['goal_scope_baseline'] = {
+            'included': s['goals']['included'],
+            'excluded': [],
+        }
         self.assertIn('presented goals require evidence', controller.validate(s))
         s['goals'].update(evidence='同一条正文', presentation_id='计划展示')
         s['plan']['presentation_id'] = '计划展示'
@@ -913,9 +962,17 @@ class ControlTests(unittest.TestCase):
         s = state(phase='goals', plan_required=False, plan_requested=False,
                   plan_waiver_source='用户本轮只看目标', decisions=[])
         self.assertIn('plan must be presented before goals or execution', controller.validate(s))
-        s['goals'] = {'presented': True, 'evidence': '已展示目标'}
-        self.assertIn('goals cannot be presented without plan', controller.validate(s))
-        s.update(phase='execution', goals={'presented':True,'evidence':'已展示目标','presentation_id':'目标展示'},
+        s['goals'] = {
+            'presented': True, 'evidence': '已展示目标',
+            'included': [{'id':'G1','kind':'changed','criterion':'目标','source':'测试需求'}],
+            'excluded': [], 'evidence_map': {'G1':['测试证据']},
+        }
+        s['goal_scope_baseline'] = {'included':s['goals']['included'], 'excluded':[]}
+        s.update(phase='execution', goals={'presented':True,'evidence':'已展示目标','presentation_id':'目标展示',
+                                          'included':[{'id':'G1','kind':'changed','criterion':'执行目标','source':'测试需求'}],
+                                          'excluded':[], 'evidence_map':{'G1':['测试证据']}},
+                 goal_scope_baseline={'included':[{'id':'G1','kind':'changed','criterion':'执行目标','source':'测试需求'}],
+                                      'excluded':[]},
                  gates={'plan':'用户确认计划','goals':'用户确认目标','execution':'用户授权执行','subagents':'用户选择不开启'})
         self.assertIn('plan must be presented before execution', controller.validate(s))
         s.update(plan_required=True, plan={'presented':True,'evidence':'后续展示计划','presentation_id':'目标展示'})
@@ -945,6 +1002,283 @@ class ControlTests(unittest.TestCase):
             'plan and goals must be presented with a shared presentation_id',
             controller.validate_transition(previous, current),
         )
+
+    def test_goal_scope_requires_bounded_items_sources_and_unique_ids(self):
+        s = state(
+            decisions=[],
+            plan={'presented': True, 'evidence': '计划'},
+            goals={
+                'presented': True,
+                'evidence': '目标',
+                'included': [
+                    {'id': 'G1', 'kind': 'changed', 'criterion': '页面行为', 'source': '用户要求'},
+                    {'id': 'G1', 'kind': 'other', 'criterion': '', 'source': ''},
+                ],
+                'excluded': [{'id': 'G1', 'item': '服务端能力'}],
+                'evidence_map': {'G1': ['模拟器']},
+            },
+        )
+        errors = controller.validate(s)
+        self.assertIn('goals.included[1] id missing or duplicated', errors)
+        self.assertIn('goals.included[1] kind must be changed or associated', errors)
+        self.assertIn('goals.included[1] criterion required', errors)
+        self.assertIn('goals.excluded[0] id missing or duplicated', errors)
+        self.assertIn('goals.excluded[0] source required', errors)
+
+    def test_completion_requires_evidence_for_every_included_goal(self):
+        s = state(
+            phase='execution', status='complete', decisions=[],
+            plan={'presented': True, 'evidence': '计划'},
+            goals={
+                'presented': True,
+                'evidence': '目标',
+                'included': [
+                    {'id': 'G1', 'kind': 'changed', 'criterion': '改动项', 'source': '用户要求'},
+                    {'id': 'G2', 'kind': 'associated', 'criterion': '关联项', 'source': '计划关联'},
+                ],
+                'excluded': [{'id': 'E1', 'item': '服务端能力', 'source': '用户明确排除'}],
+                'evidence_map': {'G1': ['模拟器截图']},
+            },
+            gates={'plan': '确认', 'goals': '确认', 'execution': '授权',
+                   'subagents': '用户选择不开启'},
+            completion_evidence='结果已交付',
+        )
+        self.assertIn('goal evidence missing: G2', controller.validate(s))
+        self.assertEqual('repair_state', controller.route(s)['action'])
+        s['goals']['evidence_map']['G2'] = ['组件测试']
+        self.assertEqual('complete', controller.route(s)['action'])
+
+    def test_user_requested_completion_records_unverified_goals(self):
+        s = state(
+            phase='execution', status='complete', decisions=[],
+            plan={'presented': True, 'evidence': '计划'},
+            goals={
+                'presented': True, 'evidence': '目标',
+                'included': [
+                    {'id': 'G1', 'kind': 'changed', 'criterion': '改动项', 'source': '用户要求'},
+                    {'id': 'G2', 'kind': 'associated', 'criterion': '关联项', 'source': '计划关联'},
+                ],
+                'excluded': [],
+                'evidence_map': {'G1': ['模拟器截图']},
+            },
+            completion_basis='user_requested',
+            completion_request_source='用户明确要求结束任务',
+            unverified_goals=[{'id': 'G2', 'item': '关联项', 'reason': '未执行真实关联链路',
+                               'impact': '无法确认真实关联链路'}],
+            gates={'plan': '确认', 'goals': '确认', 'execution': '授权',
+                   'subagents': '用户选择不开启'},
+            completion_evidence='用户要求结束，已报告未验证项',
+        )
+        self.assertEqual([], controller.validate(s))
+        self.assertEqual('complete', controller.route(s)['action'])
+        s['completion_report']['unverified_goal_ids'] = []
+        self.assertIn('completion_report.unverified_goal_ids must match unverified_goals',
+                      controller.validate(s))
+        s['completion_report']['unverified_goal_ids'] = ['G2']
+        s['unverified_goals'] = []
+        self.assertIn('user requested completion must record unverified goals: G2',
+                      controller.validate(s))
+        s['unverified_goals'] = [{'id': 'G2', 'item': '关联项', 'reason': '未验证',
+                                   'impact': '无法确认关联结果'}]
+        s.pop('completion_request_source')
+        self.assertIn('user requested completion requires source', controller.validate(s))
+        s['completion_request_source'] = '用户明确要求结束任务'
+        p = subprocess.run(
+            [sys.executable, str(SCRIPT), 'next', '--json',
+             json.dumps({'previous': s, 'state': s})],
+            capture_output=True, text=True,
+        )
+        self.assertEqual(0, p.returncode, p.stdout)
+        result = json.loads(p.stdout)
+        self.assertEqual('complete', result['action'])
+        self.assertIn('unverified_goals', result['instruction'])
+
+    def test_user_requested_completion_allows_all_items_excluded(self):
+        s = state(
+            status='complete', decisions=[], completion_evidence='用户取消本次范围',
+            plan_required=False, plan_requested=False,
+            plan_waiver_source='没有剩余交付，计划无需展示',
+            goals={
+                'presented': True, 'evidence': '范围收口',
+                'included': [],
+                'excluded': [{'id': 'E1', 'item': '全部原计划内容', 'source': '用户要求取消'}],
+                'evidence_map': {},
+            },
+            completion_basis='user_requested',
+            completion_request_source='用户要求结束并取消本次范围',
+            unverified_goals=[],
+        )
+        self.assertEqual([], controller.validate(s))
+        self.assertEqual('complete', controller.route(s)['action'])
+
+    def test_evidence_completion_cannot_carry_unverified_goals(self):
+        s = state(
+            phase='execution', status='complete', decisions=[],
+            plan={'presented': True, 'evidence': '计划'},
+            goals={
+                'presented': True, 'evidence': '目标',
+                'included': [{'id': 'G1', 'kind': 'changed', 'criterion': '改动项', 'source': '用户要求'}],
+                'excluded': [], 'evidence_map': {'G1': ['证据']},
+            },
+            unverified_goals=[{'id': 'G1', 'item': '改动项', 'reason': '仍缺证据',
+                               'impact': '无法确认改动结果'}],
+            gates={'plan': '确认', 'goals': '确认', 'execution': '授权',
+                   'subagents': '用户选择不开启'},
+            completion_evidence='已完成',
+        )
+        self.assertIn('unverified goals require user_requested completion', controller.validate(s))
+
+    def test_legacy_goal_state_requires_scope_migration(self):
+        s = state(
+            decisions=[],
+            plan={'presented': True, 'evidence': '计划'},
+            goals={'presented': True, 'evidence': '旧目标'},
+        )
+        s['goals'].pop('included')
+        s['goals'].pop('excluded')
+        s['goals'].pop('evidence_map')
+        errors = controller.validate(s)
+        self.assertIn('goals.included must be a list', errors)
+        self.assertIn('goals.excluded must be a list', errors)
+        self.assertIn('goals.evidence_map must be an object', errors)
+        s['goals'].update(
+            included=[{'id': 'G1', 'kind': 'changed', 'criterion': '目标', 'source': '旧决定'}],
+            excluded=[], evidence_map={'G1': ['已有关键证据']},
+        )
+        s.pop('goal_scope_baseline', None)
+        self.assertIn('goal_scope_baseline required for a presented or hidden goal',
+                      controller.validate(s))
+        hidden = state(
+            decisions=[],
+            plan={'presented': True, 'evidence': '计划'},
+            goals={'presented': False,
+                   'included': [{'id':'G1','kind':'changed','criterion':'旧目标','source':'旧决定'}],
+                   'excluded': [], 'evidence_map': {}},
+        )
+        self.assertIn('goal_scope_baseline required for a presented or hidden goal',
+                      controller.validate(hidden))
+        current = state(
+            decisions=[],
+            plan={'presented': True, 'evidence': '计划'},
+            goals={
+                'presented': True, 'evidence': '新目标',
+                'included': [{'id':'G1','kind':'changed','criterion':'新目标','source':'用户新要求'}],
+                'excluded': [], 'evidence_map': {},
+            },
+        )
+        self.assertIn('goal_scope_baseline required for previous goal state',
+                      controller.validate_transition(hidden, current))
+
+    def test_evidence_map_cannot_include_unknown_or_excluded_goal(self):
+        s = state(
+            decisions=[],
+            plan={'presented': True, 'evidence': '计划'},
+            goals={
+                'presented': True,
+                'evidence': '目标',
+                'included': [
+                    {'id': 'G1', 'kind': 'changed', 'criterion': '改动项', 'source': '用户要求'},
+                ],
+                'excluded': [{'id': 'E1', 'item': '服务端能力', 'source': '用户明确排除'}],
+                'evidence_map': {'E1': ['不应计入']},
+            },
+        )
+        self.assertIn('goals.evidence_map contains unknown goal id', controller.validate(s))
+
+    def test_goal_scope_change_requires_new_goal_and_superseded_record(self):
+        previous = state(
+            decisions=[],
+            plan={'presented': True, 'evidence': '计划'},
+            goals={
+                'presented': True, 'evidence': '旧目标',
+                'included': [
+                    {'id': 'G1', 'kind': 'changed', 'criterion': '改动项', 'source': '用户要求'},
+                    {'id': 'G2', 'kind': 'associated', 'criterion': '关联项', 'source': '计划关联'},
+                ],
+                'excluded': [], 'evidence_map': {'G1': ['证据1'], 'G2': ['证据2']},
+            },
+            gates={'plan': '计划确认', 'goals': '目标确认', 'execution': '执行授权',
+                   'subagents': '用户选择不开启'},
+        )
+        current = copy.deepcopy(previous)
+        current['goals'].update(
+            evidence='收窄目标',
+            included=[{'id': 'G1', 'kind': 'changed', 'criterion': '改动项', 'source': '用户要求'}],
+            excluded=[{'id': 'G2', 'item': '关联项', 'source': '用户明确排除'}],
+            evidence_map={'G1': ['证据1']},
+        )
+        errors = controller.validate_transition(previous, current)
+        self.assertIn('changed goals require current goal confirmation source', errors)
+        self.assertIn('changed goals require superseded_goals or stale host goal record', errors)
+
+    def test_post_goal_check_requires_previous_state(self):
+        s = state(
+            phase='execution', status='complete', decisions=[],
+            plan={'presented': True, 'evidence': '计划'},
+            goals={
+                'presented': True, 'evidence': '目标',
+                'included': [{'id': 'G1', 'kind': 'changed', 'criterion': '改动', 'source': '用户'}],
+                'excluded': [], 'evidence_map': {'G1': ['证据']},
+            },
+            gates={'plan': '确认', 'goals': '确认', 'execution': '授权',
+                   'subagents': '用户选择不开启'},
+            completion_evidence='交付',
+        )
+        p = subprocess.run([sys.executable, str(SCRIPT), 'next', '--json', json.dumps(s)],
+                           capture_output=True, text=True)
+        self.assertNotEqual(0, p.returncode)
+        result = json.loads(p.stdout)
+        self.assertEqual('repair_state', result['action'])
+        self.assertIn('previous state required for goal scope validation', result['errors'])
+
+    def test_same_goal_scope_can_hide_without_triggering_scope_change(self):
+        previous = state(
+            decisions=[],
+            plan={'presented': True, 'evidence': '计划'},
+            goals={
+                'presented': True, 'evidence': '目标',
+                'included': [{'id': 'G1', 'kind': 'changed', 'criterion': '改动', 'source': '用户'}],
+                'excluded': [], 'evidence_map': {'G1': ['证据']},
+            },
+        )
+        current = copy.deepcopy(previous)
+        current['goals']['presented'] = False
+        self.assertEqual([], controller.validate_transition(previous, current))
+
+    def test_two_step_goal_scope_change_cannot_bypass_superseded_record(self):
+        previous = state(
+            decisions=[],
+            plan={'presented': True, 'evidence': '计划'},
+            goals={
+                'presented': True, 'evidence': '旧目标',
+                'included': [
+                    {'id': 'G1', 'kind': 'changed', 'criterion': '改动项', 'source': '用户要求'},
+                    {'id': 'G2', 'kind': 'associated', 'criterion': '关联项', 'source': '计划关联'},
+                ],
+                'excluded': [], 'evidence_map': {'G1': ['证据1'], 'G2': ['证据2']},
+            },
+            gates={'plan': '计划确认', 'goals': '目标确认', 'execution': '执行授权',
+                   'subagents': '用户选择不开启'},
+        )
+        intermediate = copy.deepcopy(previous)
+        intermediate['goals'].update(
+            presented=False,
+            included=[{'id': 'G1', 'kind': 'changed', 'criterion': '改动项', 'source': '用户要求'}],
+            excluded=[{'id': 'G2', 'item': '关联项', 'source': '用户明确排除'}],
+            evidence_map={'G1': ['证据1']},
+        )
+        errors = controller.validate_transition(previous, intermediate)
+        self.assertIn('changed goals require current goal confirmation source', errors)
+        self.assertIn('changed goals require superseded_goals or stale host goal record', errors)
+        final = copy.deepcopy(intermediate)
+        final['goals']['presented'] = True
+        final['goal_scope_baseline'] = {
+            'included': copy.deepcopy(final['goals']['included']),
+            'excluded': copy.deepcopy(final['goals']['excluded']),
+        }
+        errors = controller.validate_transition(intermediate, final)
+        self.assertIn('changed goals require current goal confirmation source', errors)
+        self.assertIn('changed goals require superseded_goals or stale host goal record', errors)
 
     def test_execution_cannot_bypass_unchecked_coverage_or_pending_decisions(self):
         s = state(phase='execution', plan={'presented':True,'evidence':'已展示计划'},
@@ -1111,7 +1445,11 @@ class ControlTests(unittest.TestCase):
         s = state(phase='planning', status='blocked', wait_reason='执行受阻', decisions=[])
         self.assertEqual('blocked', controller.route(s)['action'])
         s.update(plan={'presented':True,'evidence':'已展示计划','presentation_id':'同轮展示'},
-                 goals={'presented':True,'evidence':'已展示目标','presentation_id':'同轮展示'})
+                 goals={'presented':True,'evidence':'已展示目标','presentation_id':'同轮展示',
+                        'included':[{'id':'G1','kind':'changed','criterion':'目标','source':'测试需求'}],
+                        'excluded':[], 'evidence_map':{'G1':['测试证据']}},
+                 goal_scope_baseline={'included':[{'id':'G1','kind':'changed','criterion':'目标','source':'测试需求'}],
+                                      'excluded':[]})
         self.assertEqual('blocked', controller.route(s)['action'])
 
     def test_blocked_temporary_request_waits_even_if_main_has_independent_action(self):
@@ -1345,7 +1683,10 @@ class ControlTests(unittest.TestCase):
                   'draft_delivery':{'status':'reported','evidence':'旧草案'}},
                   gates={'plan':'用户确认计划','goals':None,'execution':None})
         self.assertEqual('present_plan', controller.route(s)['action'])
-        s['goals'] = {'presented':True, 'evidence':'合并展示目标', 'presentation_id':'上轮正式计划'}
+        s['goals'] = {'presented':True, 'evidence':'合并展示目标', 'presentation_id':'上轮正式计划',
+                      'included':[{'id':'G1','kind':'changed','criterion':'合并目标','source':'测试需求'}],
+                      'excluded':[], 'evidence_map':{'G1':['合并验证']}}
+        s['goal_scope_baseline'] = {'included':s['goals']['included'], 'excluded':[]}
         self.assertEqual('continue_current_phase', controller.route(s)['action'])
 
     def test_new_plan_request_is_not_satisfied_by_old_draft(self):
@@ -1411,7 +1752,10 @@ class ControlTests(unittest.TestCase):
                   plan={'presented':True, 'evidence':'计划正文', 'presentation_id':'计划正文'})
         self.assertIn('required goals must be presented before completion', controller.validate(s))
         self.assertEqual('repair_state', controller.route(s)['action'])
-        s['goals'] = {'presented':True, 'evidence':'计划与目标正文', 'presentation_id':'计划正文'}
+        s['goals'] = {'presented':True, 'evidence':'计划与目标正文', 'presentation_id':'计划正文',
+                      'included':[{'id':'G1','kind':'changed','criterion':'目标','source':'测试需求'}],
+                      'excluded':[], 'evidence_map':{'G1':['计划与目标正文']}}
+        s['goal_scope_baseline'] = {'included':s['goals']['included'], 'excluded':[]}
         self.assertEqual('complete', controller.route(s)['action'])
 
     def test_cannot_complete_before_coverage_check(self):
@@ -1428,6 +1772,21 @@ class ControlTests(unittest.TestCase):
         for field in ('phase', 'status'):
             s = state(**{field: []})
             self.assertTrue(controller.validate(s))
+
+    def test_malformed_goal_scope_types_do_not_crash(self):
+        s = state(
+            decisions=[],
+            plan={'presented': True, 'evidence': '计划'},
+            goals={'presented': True, 'evidence': '目标',
+                   'included': [{'id':'G1','kind':[],'criterion':'目标','source':'用户'}],
+                   'excluded': [], 'evidence_map': 'oops'},
+            completion_basis=[],
+            completion_request_source='用户要求完成',
+        )
+        errors = controller.validate(s)
+        self.assertIn('goals.included[0] kind must be changed or associated', errors)
+        self.assertIn('goals.evidence_map must be an object', errors)
+        self.assertIn('invalid completion_basis', errors)
 
     def test_unknown_side_effect_prevents_completion_but_pause_is_respected(self):
         op={'id':'job','reference':'原操作','status':'unknown','side_effect':True,'blocks_next':True}
@@ -1540,6 +1899,57 @@ class ControlTests(unittest.TestCase):
             completion_evidence='已交付',
         )
         self.assertIn('superseded goals cannot be used for completion', controller.validate(s))
+
+    def test_superseded_goals_support_local_goal_id_without_host(self):
+        s = state(
+            decisions=[],
+            plan={'presented': True, 'evidence': '计划'},
+            goals={
+                'presented': True, 'evidence': '新范围目标',
+                'local_goal_id': 'local:G1',
+                'included': [{'id':'G1','kind':'changed','criterion':'新目标','source':'用户新要求'}],
+                'excluded': [], 'evidence_map': {},
+            },
+            superseded_goals=[{
+                'objective': '旧范围目标',
+                'host_id': None,
+                'local_goal_id': 'local:G1',
+                'source': '用户改变目标',
+                'superseded_by': '新范围目标',
+            }],
+            host_goal_sync='unavailable',
+        )
+        self.assertEqual([], controller.validate(s))
+        s['superseded_goals'][0].pop('local_goal_id')
+        self.assertIn('superseded goal requires host_id or local_goal_id', controller.validate(s))
+        s['superseded_goals'][0]['host_id'] = 'host-1'
+        self.assertEqual([], controller.validate(s))
+        s['host_goal_sync'] = 'synced'
+        s['superseded_goals'][0]['host_id'] = None
+        self.assertIn('host goal sync requires a nonempty host_id', controller.validate(s))
+
+    def test_local_goal_id_change_requires_new_goal_source(self):
+        previous = state(
+            decisions=[],
+            plan={'presented': True, 'evidence': '计划'},
+            goals={
+                'presented': True, 'evidence': '目标',
+                'local_goal_id': 'local:old',
+                'included': [{'id':'G1','kind':'changed','criterion':'改动','source':'用户要求'}],
+                'excluded': [], 'evidence_map': {'G1':['证据']},
+            },
+            gates={'plan': '确认', 'goals': '确认', 'execution': '授权',
+                   'subagents': '用户选择不开启'},
+        )
+        current = copy.deepcopy(previous)
+        current['goals']['local_goal_id'] = 'local:new'
+        errors = controller.validate_transition(previous, current)
+        self.assertIn('changed goals require current goal confirmation source', errors)
+        self.assertIn('changed goals require superseded_goals or stale host goal record', errors)
+        current['goals'].pop('local_goal_id')
+        errors = controller.validate_transition(previous, current)
+        self.assertIn('changed goals require current goal confirmation source', errors)
+        self.assertIn('changed goals require superseded_goals or stale host goal record', errors)
 
     def test_business_completion_can_report_stale_host_goal(self):
         s = state(
@@ -1710,7 +2120,14 @@ class ControlTests(unittest.TestCase):
         errors=controller.validate_transition(previous,current)
         self.assertIn('changed goals require reviewing old goals authorization',errors)
         self.assertIn('changed goals require reviewing old execution authorization',errors)
-        current['gates'].update(goals=None,execution=None)
+        current['superseded_goals']=[{
+            'objective':'旧目标',
+            'host_id':'host-1',
+            'source':'用户要求变更目标',
+            'superseded_by':'新目标',
+        }]
+        current['gates'].update(goals='用户确认新目标', execution=None)
+        current['impact_review']={'reason':'计划确认和子代理设置不受新目标影响', 'retained':['plan','subagents']}
         self.assertEqual([],controller.validate_transition(previous,current))
 
     def test_plan_delta_keeps_unaffected_goal_confirmation(self):

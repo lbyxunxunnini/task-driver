@@ -15,6 +15,8 @@ PHASES = {'analysis', 'discussion', 'planning', 'goals', 'execution', 'verificat
 STATUSES = {'continue', 'wait_user', 'wait_tool', 'blocked', 'paused', 'complete'}
 GATES = ('plan', 'goals', 'execution', 'subagents')
 INTERRUPTION_STATUSES = STATUSES | {'cancelled'}
+GOAL_KINDS = {'changed', 'associated'}
+COMPLETION_BASES = {'evidence', 'user_requested'}
 GUIDANCE = {
     'present_incomplete_plan': '在正文交付标明缺口的讨论稿，不能称为正式计划或请求执行。',
     'verify_plan_request': '核对当前计划请求与已交付草案的实际对应关系，再更新状态；不要重复提问或编造交付。',
@@ -27,9 +29,12 @@ GUIDANCE = {
     'check_operation': '仅在查询权限内只读核实原操作及回执；不授权新操作或重试，结果未知时不得重复执行副作用动作。',
     'handle_operation_failure': '原操作已失败且阻塞下一步；先按审查模块分类，保留失败证据，不重复执行，不把局部任务标记完成。',
     'scope_complete': '本轮只交付用户明确限定的内容；交付后停止，保留整体任务恢复点，不追加问题或推进下一阶段。',
+    'complete': '完成前逐项核对 goals.included：每项都必须在 evidence_map 中有非空证据，excluded 不得计入完成；证据不足时保持未完成。',
+    'repair_state': '修正状态结构；旧目标补录 included、excluded、evidence_map 和 goal_scope_baseline 后继续。若用户明确要求结束/完成但仍有未验证项，先设置 completion_basis:user_requested，记录用户来源、completion_report 和 unverified_goals，再重试；不要把用户结束要求当成验收或宣称已验证。',
     'handle_interruption': '先处理当前临时请求，核对用户与宿主授权；业务执行仍须满足原有执行门槛，不扩大原任务授权。',
     'reconcile_interruption': '核对临时结果、恢复点、最新用户要求和实际现场；正文先交付临时结果，再接回对应事项。用户明确暂停时保持暂停。',
 }
+USER_REQUESTED_COMPLETION_GUIDANCE = '用户明确要求完成：按要求将业务标记完成，但必须在 unverified_goals 和正文中逐项说明未验证目标、原因和影响，并记录 completion_request_source；不得写成所有目标已验证。'
 
 SEMANTIC_REVIEWERS = {'main', 'independent'}
 DECISION_REVIEW_CHECKS = (
@@ -105,6 +110,156 @@ def validate_interruptions(s):
     return errors
 
 
+def validate_goal_scope(goals, require_completion_evidence=False, allow_empty_included=False):
+    """Validate the goal scope and verify every included goal has evidence before completion."""
+    errors = []
+    included = goals.get('included')
+    excluded = goals.get('excluded')
+    evidence_map = goals.get('evidence_map')
+    if not isinstance(included, list):
+        errors.append('goals.included must be a list')
+        included = []
+    elif not included and not allow_empty_included:
+        errors.append('goals.included must contain at least one item')
+    if not isinstance(excluded, list):
+        errors.append('goals.excluded must be a list')
+        excluded = []
+    if not isinstance(evidence_map, dict):
+        errors.append('goals.evidence_map must be an object')
+        evidence_map = {}
+
+    included_ids, all_ids = set(), set()
+    for index, item in enumerate(included):
+        label = 'goals.included[' + str(index) + ']'
+        if not isinstance(item, dict):
+            errors.append(label + ' must be an object')
+            continue
+        ident = item.get('id')
+        if not isinstance(ident, str) or not ident.strip() or ident in all_ids:
+            errors.append(label + ' id missing or duplicated')
+        else:
+            included_ids.add(ident)
+            all_ids.add(ident)
+        if not isinstance(item.get('kind'), str) or item.get('kind') not in GOAL_KINDS:
+            errors.append(label + ' kind must be changed or associated')
+        for key in ('criterion', 'source'):
+            value = item.get(key)
+            if not isinstance(value, str) or not value.strip():
+                errors.append(label + ' ' + key + ' required')
+
+    for index, item in enumerate(excluded):
+        label = 'goals.excluded[' + str(index) + ']'
+        if not isinstance(item, dict):
+            errors.append(label + ' must be an object')
+            continue
+        ident = item.get('id')
+        if not isinstance(ident, str) or not ident.strip() or ident in all_ids:
+            errors.append(label + ' id missing or duplicated')
+        else:
+            all_ids.add(ident)
+        for key in ('item', 'source'):
+            value = item.get(key)
+            if not isinstance(value, str) or not value.strip():
+                errors.append(label + ' ' + key + ' required')
+
+    for ident, references in evidence_map.items():
+        if not isinstance(ident, str) or ident not in included_ids:
+            errors.append('goals.evidence_map contains unknown goal id')
+            continue
+        if not isinstance(references, list):
+            errors.append('goals.evidence_map.' + ident + ' must be a list')
+        elif not references or any(not isinstance(ref, str) or not ref.strip() for ref in references):
+            errors.append('goals.evidence_map.' + ident + ' requires nonempty evidence references')
+
+    if require_completion_evidence:
+        for ident in sorted(included_ids):
+            if not evidence_map.get(ident):
+                errors.append('goal evidence missing: ' + ident)
+    return errors
+
+
+def validate_completion_accounting(s, goals):
+    """Validate evidence-based completion versus an explicit user-requested close."""
+    errors = []
+    if not isinstance(goals, dict):
+        goals = {}
+    basis = s.get('completion_basis', 'evidence')
+    if not isinstance(basis, str) or basis not in COMPLETION_BASES:
+        errors.append('invalid completion_basis')
+    unverified = s.get('unverified_goals', [])
+    if not isinstance(unverified, list):
+        errors.append('unverified_goals must be a list')
+        unverified = []
+    included_items = goals.get('included', [])
+    if not isinstance(included_items, list):
+        included_items = []
+    included_ids = {
+        item.get('id') for item in included_items
+        if isinstance(item, dict) and isinstance(item.get('id'), str)
+    }
+    seen = set()
+    for index, item in enumerate(unverified):
+        label = 'unverified_goals[' + str(index) + ']'
+        if not isinstance(item, dict):
+            errors.append(label + ' must be an object')
+            continue
+        ident = item.get('id')
+        if not isinstance(ident, str) or ident not in included_ids or ident in seen:
+            errors.append(label + ' id must reference a unique included goal')
+        else:
+            seen.add(ident)
+        for key in ('item', 'reason', 'impact'):
+            value = item.get(key)
+            if not isinstance(value, str) or not value.strip():
+                errors.append(label + ' ' + key + ' required')
+    if basis == 'user_requested':
+        source = s.get('completion_request_source')
+        if not isinstance(source, str) or not source.strip():
+            errors.append('user requested completion requires source')
+        evidence_map = goals.get('evidence_map')
+        if not isinstance(evidence_map, dict):
+            evidence_map = {}
+        missing = [ident for ident in sorted(included_ids) if not evidence_map.get(ident)]
+        missing_unverified = set(missing) - seen
+        if missing_unverified:
+            errors.append(
+                'user requested completion must record unverified goals: ' +
+                ', '.join(sorted(missing_unverified))
+            )
+        report = s.get('completion_report')
+        if not isinstance(report, dict):
+            errors.append('user requested completion requires completion_report')
+        else:
+            verified_ids = report.get('verified_goal_ids')
+            unverified_ids = report.get('unverified_goal_ids')
+            expected_unverified = set(seen)
+            expected_verified = included_ids - expected_unverified
+            if not isinstance(verified_ids, list) or any(
+                    not isinstance(item, str) or not item for item in verified_ids):
+                errors.append('completion_report.verified_goal_ids must be a nonempty string list')
+            elif set(verified_ids) != expected_verified:
+                errors.append('completion_report.verified_goal_ids must match evidenced included goals')
+            if not isinstance(unverified_ids, list) or any(
+                    not isinstance(item, str) or not item for item in unverified_ids):
+                errors.append('completion_report.unverified_goal_ids must be a nonempty string list')
+            elif set(unverified_ids) != expected_unverified:
+                errors.append('completion_report.unverified_goal_ids must match unverified_goals')
+    elif unverified:
+        errors.append('unverified goals require user_requested completion')
+    return errors
+
+
+def goal_scope_requires_previous(s):
+    if not isinstance(s, dict):
+        return False
+    goals = s.get('goals')
+    if not isinstance(goals, dict) or goals.get('presented') is not True:
+        return False
+    if not isinstance(goals.get('included'), list) and not isinstance(goals.get('excluded'), list):
+        return False
+    return s.get('status') == 'complete' or s.get('phase') in ('execution', 'verification', 'review')
+
+
 
 def validate(s):
     errors = []
@@ -151,12 +306,14 @@ def validate(s):
     elif plan['presented'] and (not isinstance(plan.get('evidence'), str) or not plan['evidence'].strip()):
         errors.append('presented plan requires evidence')
     goals = s.get('goals')
+    completion_basis = s.get('completion_basis', 'evidence')
     if goals is not None:
         if not isinstance(goals, dict) or not isinstance(goals.get('presented'), bool):
             errors.append('goals.presented must be true or false')
         elif goals['presented'] and (not isinstance(goals.get('evidence'), str) or not goals['evidence'].strip()):
             errors.append('presented goals require evidence')
-        if isinstance(goals, dict) and goals.get('presented') is True and plan.get('presented') is not True:
+        if (isinstance(goals, dict) and goals.get('presented') is True and
+                plan.get('presented') is not True and s.get('plan_required', True) is not False):
             errors.append('goals cannot be presented without plan')
         if (isinstance(goals, dict) and goals.get('presented') is True and
                 plan.get('presented') is True):
@@ -174,6 +331,37 @@ def validate(s):
                 if (not isinstance(goals.get('source'), str) or not goals['source'].strip() or
                         not isinstance(goals.get('superseded_by'), str) or not goals['superseded_by'].strip()):
                     errors.append('superseded goals require source and superseded_by')
+            if isinstance(goals.get('local_goal_id'), str) and not goals['local_goal_id'].strip():
+                errors.append('goals.local_goal_id cannot be empty')
+            elif 'local_goal_id' in goals and not isinstance(goals.get('local_goal_id'), str):
+                errors.append('goals.local_goal_id must be a string')
+            if (goals.get('presented') is True or
+                    any(key in goals for key in (
+                        'included', 'excluded', 'evidence_map', 'evidence', 'presentation_id'))):
+                errors.extend(validate_goal_scope(
+                    goals,
+                    require_completion_evidence=(
+                        s.get('status') == 'complete' and
+                        completion_basis != 'user_requested'
+                    ),
+                    allow_empty_included=(
+                        s.get('status') == 'complete' and
+                        completion_basis == 'user_requested'
+                    ),
+                ))
+                scope_was_presented = (
+                    goals.get('presented') is True or
+                    any(key in goals for key in (
+                        'included', 'excluded', 'evidence_map', 'evidence', 'presentation_id'))
+                )
+                if scope_was_presented:
+                    baseline = s.get('goal_scope_baseline')
+                    if not isinstance(baseline, dict):
+                        errors.append('goal_scope_baseline required for a presented or hidden goal')
+                    elif (baseline.get('included'), baseline.get('excluded')) != (
+                            goals.get('included'), goals.get('excluded')):
+                        errors.append('goal_scope_baseline must match current included/excluded')
+            errors.extend(validate_completion_accounting(s, goals))
     superseded_goals = s.get('superseded_goals', [])
     if not isinstance(superseded_goals, list):
         errors.append('superseded_goals must be a list')
@@ -182,14 +370,30 @@ def validate(s):
             if not isinstance(item, dict):
                 errors.append('superseded goal must be an object')
                 continue
-            for key in ('objective', 'host_id', 'source', 'superseded_by'):
+            for key in ('objective', 'source', 'superseded_by'):
                 if not isinstance(item.get(key), str) or not item[key].strip():
                     errors.append('superseded goal ' + key + ' required')
+            host_id = item.get('host_id')
+            local_goal_id = item.get('local_goal_id')
+            if host_id is not None and not isinstance(host_id, str):
+                errors.append('superseded goal host_id must be a string or null')
+            if local_goal_id is not None and not isinstance(local_goal_id, str):
+                errors.append('superseded goal local_goal_id must be a string or null')
+            if not ((isinstance(host_id, str) and host_id.strip()) or
+                    (isinstance(local_goal_id, str) and local_goal_id.strip())):
+                errors.append('superseded goal requires host_id or local_goal_id')
     host_goal_sync = s.get('host_goal_sync')
     if host_goal_sync not in (None, 'synced', 'stale', 'unavailable'):
         errors.append('invalid host goal sync status')
     elif host_goal_sync in ('stale', 'unavailable') and not superseded_goals:
         errors.append('stale or unavailable host goal requires superseded_goals')
+    if host_goal_sync in ('synced', 'stale'):
+        has_host_id = any(
+            isinstance(item, dict) and isinstance(item.get('host_id'), str) and item['host_id'].strip()
+            for item in superseded_goals
+        )
+        if not has_host_id:
+            errors.append('host goal sync requires a nonempty host_id')
     if 'draft_presented' in plan and not isinstance(plan['draft_presented'], bool):
         errors.append('plan.draft_presented must be true or false')
     elif plan.get('draft_presented') is True and (not isinstance(plan.get('draft_evidence'), str) or not plan['draft_evidence'].strip()):
@@ -304,7 +508,7 @@ def validate(s):
             errors.append('unresolved operation prevents completion')
         if plan_required is not False and plan.get('presented') is not True:
             errors.append('required plan must be presented before completion')
-        if plan_required is not False and (not isinstance(goals, dict) or goals.get('presented') is not True):
+        if not isinstance(goals, dict) or goals.get('presented') is not True:
             errors.append('required goals must be presented before completion')
         if isinstance(goals, dict) and goals.get('status') == 'superseded':
             errors.append('superseded goals cannot be used for completion')
@@ -324,6 +528,17 @@ def validate_transition(previous, current):
     errors = []
     if previous.get('task_id') != current.get('task_id'):
         errors.append('task id changed')
+    previous_goals = previous.get('goals')
+    if isinstance(previous_goals, dict) and (
+            previous_goals.get('presented') is True or
+            any(key in previous_goals for key in (
+                'included', 'excluded', 'evidence_map', 'evidence', 'presentation_id'))):
+        previous_baseline = previous.get('goal_scope_baseline')
+        if not isinstance(previous_baseline, dict):
+            errors.append('goal_scope_baseline required for previous goal state')
+        elif (previous_baseline.get('included'), previous_baseline.get('excluded')) != (
+                previous_goals.get('included'), previous_goals.get('excluded')):
+            errors.append('previous goal_scope_baseline must match previous included/excluded')
     old_frames, new_frames = previous.get('interruptions', []), current.get('interruptions', [])
     if not isinstance(old_frames, list) or not isinstance(new_frames, list):
         errors.append('interruptions must be lists for comparison')
@@ -426,7 +641,42 @@ def validate_transition(previous, current):
                 not isinstance(goals_id, str) or not goals_id.strip() or
                 plan_id != goals_id):
             errors.append('plan and goals must be presented with a shared presentation_id')
-    if isinstance(old_goals, dict) and isinstance(new_goals, dict) and old_goals.get('presented') is True and new_goals.get('presented') is True and old_goals.get('evidence') != new_goals.get('evidence'):
+    old_scope = None
+    new_scope = None
+    old_baseline_scope = None
+    new_baseline_scope = None
+    if isinstance(old_goals, dict):
+        old_scope = (old_goals.get('included'), old_goals.get('excluded'))
+    if isinstance(new_goals, dict):
+        new_scope = (new_goals.get('included'), new_goals.get('excluded'))
+    old_baseline = previous.get('goal_scope_baseline')
+    new_baseline = current.get('goal_scope_baseline')
+    if isinstance(old_baseline, dict):
+        old_baseline_scope = (old_baseline.get('included'), old_baseline.get('excluded'))
+    if isinstance(new_baseline, dict):
+        new_baseline_scope = (new_baseline.get('included'), new_baseline.get('excluded'))
+    baseline_changed = (
+        isinstance(old_baseline, dict) and
+        old_baseline_scope != new_baseline_scope
+    )
+    goal_scope_changed = (
+        (isinstance(old_goals, dict) and old_goals.get('presented') is True and
+         (not isinstance(new_goals, dict) or old_scope != new_scope)) or
+        baseline_changed
+    )
+    goal_evidence_changed = (
+        isinstance(old_goals, dict) and isinstance(new_goals, dict) and
+        old_goals.get('presented') is True and new_goals.get('presented') is True and
+        old_goals.get('evidence') != new_goals.get('evidence')
+    )
+    old_local_goal_id = old_goals.get('local_goal_id') if isinstance(old_goals, dict) else None
+    new_local_goal_id = new_goals.get('local_goal_id') if isinstance(new_goals, dict) else None
+    goal_identity_changed = (
+        isinstance(old_local_goal_id, str) and old_local_goal_id.strip() and
+        (not isinstance(new_local_goal_id, str) or not new_local_goal_id.strip() or
+         old_local_goal_id != new_local_goal_id)
+    )
+    if goal_scope_changed or goal_evidence_changed or goal_identity_changed:
         changed = True
         old_gates, new_gates = previous.get('gates'), current.get('gates')
         if (isinstance(old_gates, dict) and isinstance(new_gates, dict) and
@@ -448,7 +698,7 @@ def validate_transition(previous, current):
             for name in ('plan', 'execution'):
                 if old_gates.get(name) and old_gates.get(name) == new_gates.get(name):
                     errors.append('changed plan requires reviewing old ' + name + ' authorization')
-    if isinstance(old_goals, dict) and old_goals.get('presented') is True and (not isinstance(new_goals, dict) or new_goals.get('presented') is not True):
+    if goal_scope_changed or goal_evidence_changed:
         if isinstance(old_gates, dict) and isinstance(new_gates, dict):
             for name in ('goals', 'execution'):
                 if old_gates.get(name) and old_gates.get(name) == new_gates.get(name):
@@ -764,14 +1014,17 @@ def main():
             discussion_handoff = payload.get('discussion_handoff')
             previous = payload.get('previous')
         else:
-            state = payload
+            previous = payload.get('previous') if isinstance(payload, dict) else None
+            state = payload.get('state') if isinstance(payload, dict) and 'state' in payload else payload
             draft_reply = None
             discussion_handoff = None
-            previous = state.get('previous') if isinstance(state, dict) and 'state' in state and 'previous' in state else None
-        if previous is not None:
-            if args.mode != 'final':
-                state = state['state']
+        previous_required = (
+            previous is None and
+            goal_scope_requires_previous(state)
+        )
         errors = validate(state)
+        if previous_required:
+            errors.append('previous state required for goal scope validation')
         transition_errors = []
         if previous is not None:
             transition_errors = validate_transition(previous, state)
@@ -781,6 +1034,8 @@ def main():
             result = {'ok': not errors, 'errors': errors}
         elif args.mode == 'next':
             result = route(state)
+            if previous_required:
+                result = {'action': 'repair_state', 'errors': errors}
         else:
             result = {'ok': not errors, 'errors': errors}
         if previous is not None and transition_errors and isinstance(state, dict):
@@ -789,7 +1044,11 @@ def main():
                 result['errors'] = errors
             else:
                 result = {'action': 'repair_state', 'errors': errors} if args.mode == 'next' else {'ok': False, 'errors': errors}
-        if result.get('action') in GUIDANCE:
+        if (result.get('action') == 'complete' and
+                isinstance(state, dict) and
+                state.get('completion_basis') == 'user_requested'):
+            result['instruction'] = USER_REQUESTED_COMPLETION_GUIDANCE
+        elif result.get('action') in GUIDANCE:
             result['instruction'] = GUIDANCE[result['action']]
         if args.mode == 'final':
             result['scope'] = 'structure_and_changes_and_reply' if previous is not None else 'structure_and_reply'

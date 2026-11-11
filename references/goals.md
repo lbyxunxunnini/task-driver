@@ -16,11 +16,29 @@
 
 目标展示或宿主目标创建后，用户明确变更范围、排除外部依赖或接受部分结果时，以最新用户要求形成新的业务验收口径；旧目标保留原文、宿主 ID、来源和替代关系，记录在 `superseded_goals`，不再作为完成判定的依据。`goals` 只保留当前有效目标；能更新宿主目标就更新并记 `synced`，不能更新但能删除/替换时让用户决定替换，完全不能维护时记 `stale` 或 `unavailable`，如实区分“业务已验收”和“宿主旧目标未同步”，不伪造旧目标完成。
 
+没有 Goal 模式时，当前目标使用稳定的 `local_goal_id`；`superseded_goals` 允许 `host_id` 为空或 `null`，但必须保留同一 `local_goal_id`，不得伪造宿主目标 ID 或声称宿主目标已完成。
+
 ### 最小必要目标
 
 每个候选目标必须做删除判断：删去后仍能认定对应问题完全解决的，删除或降为内部检查。
 
 目标必须对应用户可见或可复查的最终状态，能判断达成、未达成或受阻，必要时包含失败或降级结果。不得用“完善、优化、支持好”等模糊词隐藏范围、产物或技术决定；测试、脚本、文档、版本仅在用户明确要求为最终交付时成为目标，否则仅作内部证据。
+
+### 目标拆分与证据映射
+
+验收目标必须在 `goals` 中拆成三个明确部分：
+
+- `included`：本次纳入验收的目标项。每项记录稳定 `id`、`kind`、`criterion` 和 `source`；`kind` 只能是 `changed`（实际改动直接产生的结果）或 `associated`（由改动直接影响的关联结果）。不得加入无关能力、完整产品链路或仅属计划的施工步骤。
+- `excluded`：用户明确排除的验收项。每项记录稳定 `id`、`item` 和用户来源；排除项不属于失败，也不能再进入完成判据。
+- `evidence_map`：按 included 的 `id` 记录实际验证证据。每项是非空证据引用列表；完成时每个 included 都必须至少有 1 条证据，excluded 不得出现在 evidence_map。
+
+`goals.presented` 为真时必须同时存在 `included`、`excluded` 和 `evidence_map`。初次展示可以暂时使用空 `evidence_map`；进入完成前必须补齐覆盖。证据应说明验证方式与实际观察结果，不能只写“已测试”或复用无关目标的证据。
+
+状态另存 `goal_scope_baseline`，保存最后一次已确认目标的 included/excluded 快照。目标初次展示时它与当前范围一致；中途隐藏目标时保留旧快照；范围变化并取得来源后更新到新范围。脚本用它识别“旧目标 A → 隐藏 → 新目标 B”的跨轮变更，不能因为 `presented:false` 丢掉旧范围。
+
+用户改变 included、excluded 或验收范围时，按新要求形成新目标；旧目标保留到 `superseded_goals`，新目标记录实际确认来源，不能把排除项继续留在 included。单纯补充 evidence_map 属于验证进展，不重开目标确认。
+
+完成分为两种口径：默认 `completion_basis:evidence`，要求所有 included 都已有 evidence_map 证据；用户明确要求结束时可用 `completion_basis:user_requested`，记录 `completion_request_source` 和 `completion_report`（`verified_goal_ids` 与 `unverified_goal_ids` 必须分别对应 evidence_map 和 unverified_goals），并在 `unverified_goals` 中逐项写明仍未验证的 included 目标 `id`、`item`、未验证原因 `reason` 和实际影响 `impact`。用户要求完成不等于声称这些目标已验证；用户要求改变目标时必须先调整 included/excluded、补充新目标来源并保留 superseded，不能沿用旧目标直接标记完成。
 
 
 ## 目标与验证约定

@@ -1,5 +1,15 @@
 # Changelog
 
+## v1.2.11 (2026-11-11)
+
+### 目标范围、证据映射与无 Goal 兼容
+
+- 目标拆成 `included`、`excluded` 和 `evidence_map`，included 仅接受 changed/associated 结果并保留来源。
+- 新增 `goal_scope_baseline`、完成方式、完成报告和 `unverified_goals`，完成前逐项核验，用户要求完成时仍如实报告未验证项。
+- 无 Goal 模式支持稳定 `local_goal_id`；`superseded_goals` 的 `host_id` 可为空，但宿主同步为 synced/stale 时仍要求真实 host_id。
+- 用户改变目标范围时要求新目标来源和 superseded 记录，不能沿用旧目标完成。
+- 137 项状态控制测试、197 个本地链接、完整发布包检查、独立审查及无 Goal 模式行为回归通过。
+
 ## v1.2.10 (2026-11-11)
 
 ### 讨论收口语义与结构分层
