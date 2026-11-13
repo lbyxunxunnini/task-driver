@@ -2,7 +2,7 @@
 slug: task-driver-user-88546431
 displayName: Task Driver
 version: 1.3.2
-summary: 负责逐项讨论需求、输出含实施方案的计划、共同形成最终验收目标并创建目标执行；适配 deferred 目标工具并同步任务状态，异常先分类，只有可修复问题进入最多三次的修复循环。
+summary: 负责逐项讨论需求、输出含实施方案的计划、共同形成最终验收目标并创建目标执行；适配 deferred 目标工具并同步任务状态，异常先分类，只有可修复问题进入默认最多八次的修复循环。
 tags: [agent, workflow, task-management]
 license: MIT
 name: task-driver
@@ -158,7 +158,7 @@ description: >-
 
 计划展示必须包含按顺序编号的 `plan.steps`；每一步记录预期动作和待执行状态。目标展示必须包含 `goals.included`、`goals.excluded` 和 `goals.evidence_map`。计划和目标是两种不同对象：步骤完成只证明执行进度，不能自动证明目标达成。
 
-宿主 Goal 的创建/复用单独记录：宿主可用时必须有实际 `goal_tracking_mode=host`、`goal_tracking_host_id` 和 `goal_tracking_host_receipt`；只有实际工具或宿主证明不可用时才可使用 `plan` 或 `conversation`，并必须记录稳定的 `goals.local_goal_id`、降级原因、能力证据和用户确认来源。不能把“没有明确创建请求”“模型不确定”或“脚本失败”写成不可用。
+宿主 Goal 的创建/复用单独记录：宿主可用时必须有实际 `goal_tracking_mode=host`、`goal_tracking_host_id` 和 `goal_tracking_host_receipt`，按[宿主目标工具协议](references/execution.md#宿主目标工具协议)将已确认的逐项通过条件写入并核对实际读回正文；只有实际工具或宿主证明不可用时才可使用 `plan` 或 `conversation`，并必须记录稳定的 `goals.local_goal_id`、降级原因、能力证据和用户确认来源。不能把“没有明确创建请求”“模型不确定”或“脚本失败”写成不可用。
 
 需要用户验收时，使用当前宿主可用且允许调用的原生选择器，提供两项：**符合预期，确认完成**；**不符合预期，继续讨论**。不可用时按[原生适配](references/faq.md#原生选择器怎样使用)直接降级为正文选项，不能仅写文字选项代替可用工具。用户选择“确认完成”后按完成门槛收口；选择“继续讨论”后保留原任务，询问“哪一点与你的预期不一致？”。用户已说明差异时，直接分析并继续推进，不重复询问。
 

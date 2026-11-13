@@ -369,7 +369,66 @@ def validate_user_requested_steps(s, plan):
     return errors
 
 
-def validate_goal_tracking(s):
+def host_objectives_match(s, host_id, allow_superseded=False):
+    """Compare readback, not requested text. A superseded mapping is for acceptance only."""
+    goals = s.get('goals')
+    items = goals.get('included') if isinstance(goals, dict) else None
+    mode = s.get('goal_tracking_host_kind')
+    rows = s.get('goal_tracking_host_readback')
+    if mode not in ('aggregate', 'task_list') or not isinstance(items, list):
+        return False
+    blocks = {}
+    for item in items:
+        if not isinstance(item, dict) or not all(isinstance(item.get(k), str) and item[k].strip()
+                                                for k in ('id', 'criterion')):
+            return False
+        blocks[item['id']] = item['id'] + '：' + item['criterion'].replace('\r\n', '\n').strip()
+    stale = {}
+    old = s.get('superseded_goals')
+    if allow_superseded and s.get('host_goal_sync') in ('stale', 'unavailable') and isinstance(old, list):
+        stale = {g['host_id']: g for g in old if isinstance(g, dict) and isinstance(g.get('host_id'), str)}
+    if not isinstance(host_id, str):
+        return False
+    if mode == 'aggregate' and host_id in stale:
+        return True  # Entire aggregate was superseded; never used to authorize new work.
+    if not isinstance(rows, list) or not rows:
+        return False
+    texts = {}
+    for row in rows:
+        if not isinstance(row, dict):
+            return False
+        ident, objective = row.get('host_id'), row.get('objective')
+        if not isinstance(ident, str) or not ident.strip() or ident in texts or not isinstance(objective, str):
+            return False
+        texts[ident] = objective.replace('\r\n', '\n').strip()
+    if host_id not in texts or not blocks:
+        return False
+    if mode == 'aggregate':
+        return len(texts) == 1 and texts[host_id] == '\n'.join(blocks.values())
+    expected = {v: k for k, v in blocks.items()}
+    unresolved = set(blocks)
+    pending = []
+    for ident, text in texts.items():
+        key = expected.get(text)
+        if key in unresolved:
+            unresolved.remove(key)
+        else:
+            pending.append((ident, text))
+    for ident, text in pending:
+        old_goal = stale.get(ident)
+        if not old_goal or not isinstance(old_goal.get('objective'), str) or text != old_goal['objective'].strip():
+            return False
+        targets = old_goal.get('replacement_goal_ids')
+        if not isinstance(targets, list):
+            return False
+        for key in targets:
+            if not isinstance(key, str) or key not in unresolved:
+                return False
+            unresolved.remove(key)
+    return not unresolved
+
+
+def validate_goal_tracking(s, allow_superseded=False):
     errors = []
     mode = s.get('goal_tracking_mode')
     source = s.get('goal_tracking_source')
@@ -387,6 +446,9 @@ def validate_goal_tracking(s):
         host_receipt = s.get('goal_tracking_host_receipt')
         if not isinstance(host_receipt, str) or not host_receipt.strip():
             errors.append('host goal tracking requires goal_tracking_host_receipt')
+        if not host_objectives_match(s, host_id, allow_superseded):
+            errors.append('host goal readback must match confirmed goal IDs and criteria; read the actual host objective')
+
     elif mode in GOAL_TRACKING_FALLBACK_MODES:
         reason = s.get('goal_tracking_fallback_reason')
         evidence = s.get('goal_tracking_fallback_evidence')
@@ -401,6 +463,17 @@ def validate_goal_tracking(s):
     elif mode == 'unavailable':
         errors.append('unavailable goal tracking cannot enter execution')
     return errors
+
+
+def accepting_superseded(s):
+    """Never offer an execution, repair, local action or new grant under an old scope."""
+    return (s.get('goal_tracking_mode') == 'host' and s.get('host_goal_sync') in ('stale', 'unavailable')
+            and s.get('execution_begun') is True and not s.get('interruptions')
+            and not s.get('independent_action')
+            and (not s.get('local_only') or (s.get('local_only_read_only') is True
+                 and isinstance(s.get('local_only_source'), str) and s['local_only_source'].strip()))
+            and (s.get('status') == 'complete' or
+                 (s.get('phase') in ('verification', 'review') and s.get('read_only') is True)))
 
 
 def validate_execution_entry(s):
@@ -447,7 +520,11 @@ def validate_execution_entry(s):
         elif not re.fullmatch(r'[0-9a-f]{64}', receipt):
             errors.append('execution_receipt must be a sha256 value')
         elif receipt != execution_receipt(s):
-            errors.append('execution_receipt does not match current authorization')
+            prior = s.get('prior_execution_authorization')
+            if not (accepting_superseded(s) and isinstance(prior, dict)
+                    and prior.get('task_id') == s.get('task_id')
+                    and receipt == authorization_hash(prior)):
+                errors.append('execution_receipt does not match current authorization')
     elif 'execution_begun' in s and not isinstance(s.get('execution_begun'), bool):
         errors.append('execution_begun must be boolean')
     return errors
@@ -493,7 +570,10 @@ def execution_authorization_payload(s):
 
 
 def execution_receipt(s):
-    payload = execution_authorization_payload(s)
+    return authorization_hash(execution_authorization_payload(s))
+
+
+def authorization_hash(payload):
     encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(',', ':'))
     return hashlib.sha256(encoded.encode('utf-8')).hexdigest()
 
@@ -824,7 +904,7 @@ def validate(s):
         if not isinstance(goals, dict) or goals.get('presented') is not True:
             errors.append('goals must be presented before execution')
         if s.get('status') in ('continue', 'complete') and not querying_operation:
-            errors.extend(validate_goal_tracking(s))
+            errors.extend(validate_goal_tracking(s, allow_superseded=accepting_superseded(s)))
             errors.extend(validate_execution_entry(s))
             errors.extend(validate_plan_steps(
                 plan,
@@ -1255,6 +1335,11 @@ def route(s):
             return {'action': 'check_operation', 'reference': operation.get('reference')}
         if operation.get('status') == 'failed':
             return {'action': 'handle_operation_failure', 'reference': operation.get('reference')}
+    if accepting_superseded(s):
+        if s.get('local_only') and s.get('local_done'):
+            return {'action': 'local_complete' if s.get('coverage_checked') else 'check_coverage'}
+        return {'action': 'continue_local' if s.get('local_only') else 'continue_current_phase',
+                'next_action': '仅在本轮范围内只读核对既有证据；新业务动作另取有效入口'}
     if (s['phase'] == 'execution' and s.get('status') == 'continue' and
             not checking_operation and s.get('execution_begun') is not True):
         return {'action': 'begin_execution', 'next_action': '取得执行入口回执后继续'}

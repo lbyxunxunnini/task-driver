@@ -97,10 +97,10 @@ check_patterns references/verification.md '静态检查可以直接证明文本�
   'goals.included' 'goals.evidence_map' 'goals.excluded' 'completion_basis:user_requested' 'unverified_goals'
 check_patterns references/review.md '无论是否开启子代理' '主模型审查实际交付' \
   '不得新增标准或超出检查范围' '需要用户验收' '需要用户授权或决定' \
-  '同一最终目标最多修复 3 次' '最后一次允许的修复后仍必须完成复验' \
+  '同一最终目标最多修复 8 次' '最后一次允许的修复后仍必须完成复验' \
   '用户明确指定本任务循环上限' '首审和复审均使用独立上下文' '预审通过不等于整项目标达成' \
   '禁止执行者自评和前次审查结论' '无法判断：审查输入不合规' \
-  '不得删改原审查报告' '独立审查最多 3 次' '未受影响的有效证据可复用' \
+  '不得删改原审查报告' '独立审查最多 8 次' '未受影响的有效证据可复用' \
   '当前有效目标' '用户明确委托模型决定子代理设置'
 check_patterns references/state-recovery.md '同一任务仅一份' '10 次用户回答' \
   '先保存并核对成功' '保存后再提问' '长计划开始执行前' \

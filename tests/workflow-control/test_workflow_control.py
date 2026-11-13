@@ -2348,6 +2348,113 @@ class ControlTests(unittest.TestCase):
         refresh_execution(s)
         self.assertEqual([], controller.validate(s))
 
+    def test_host_readback_at_execution_entry(self):
+        terms = ['改词后保留同一字已调好的音高', '单次保存后出现模拟结果页']
+        items = [dict(id='G'+str(n), kind='changed', criterion=v, source='确认消息')
+                 for n, v in enumerate(terms, 1)]
+        s = state(phase='execution', decisions=[], goal_tracking_mode='host',
+                  goal_tracking_host_id='h1', goal_tracking_host_receipt='创建事件',
+                  plan={'presented': True, 'evidence': '计划'},
+                  goals={'presented': True, 'evidence': '目标', 'included': items},
+                  gates={'plan':'确认','goals':'确认','execution':'授权','subagents':'未启用'})
+        s.pop('execution_begun')
+        s.pop('execution_receipt')
+        s['plan']['steps'][0].update(status='pending', evidence=None)
+        blocks = ['G1：'+terms[0], 'G2：'+terms[1]]
+        row = lambda ident, text: {'host_id':ident, 'objective':text}
+        for name, returned, accepted in [
+                ('aggregate', [row('h1', '\n'.join(blocks))], True),
+                ('list packed into one', [row('h1', '\n'.join(blocks))], False),
+                ('task list', [row('h2', blocks[1]),row('h1', blocks[0])], True),
+                ('legacy ID only', [], False),
+                ('summary', [row('h1','实现演示并验证')], False),
+                ('lost condition', [row('h1',blocks[0])], False),
+                ('added condition', [row('h1','\n'.join(blocks+['G3：连续保存']))], False),
+                ('wrong task', [row('h3','\n'.join(blocks))], False),
+                ('duplicate task id', [row('h1',block) for block in blocks], False)]:
+            with self.subTest(name=name):
+                s['goal_tracking_host_kind'] = 'task_list' if name in ('task list', 'duplicate task id', 'list packed into one') else 'aggregate'
+                s['goal_tracking_host_readback'] = returned
+                result = controller.begin_execution(s, copy.deepcopy(s))
+                self.assertEqual(accepted, result['ok'], result)
+                if not accepted:
+                    self.assertTrue(any('readback' in e for e in result['errors']))
+
+    def test_completed_business_can_keep_recorded_superseded_host_text(self):
+        s = state(phase='execution', status='complete', decisions=[],
+                  plan={'presented': True, 'evidence': '计划'},
+                  goals={'presented': True, 'evidence': '新目标'},
+                  goal_tracking_mode='host', goal_tracking_host_id='h1',
+                  goal_tracking_host_receipt='原创建回执', goal_tracking_host_kind='aggregate', host_goal_sync='stale',
+                  superseded_goals=[dict(host_id='h1', objective='旧正文',
+                                         source='用户变更', superseded_by='新目标')],
+                  gates={'plan':'确认','goals':'确认','execution':'授权','subagents':'未启用'},
+                  completion_evidence='新目标验证完成')
+        self.assertEqual([], controller.validate(s))
+        s['status'] = 'continue'
+        self.assertTrue(any('readback' in e for e in controller.validate(s)))
+        s['status'] = 'complete'
+        s['superseded_goals'][0]['host_id'] = 'different'
+        self.assertTrue(any('readback' in e for e in controller.validate(s)))
+
+    def test_superseded_readback_only_exempts_affected_host_tasks_in_review(self):
+        items = [dict(id=k, kind='changed', criterion=k+'结果', source='新范围') for k in ('G1','G2')]
+        s = state(phase='review', execution_occurred=True, read_only=True, decisions=[],
+                  plan={'presented': True, 'evidence': '计划'},
+                  goals={'presented': True, 'evidence': '新目标', 'included': items},
+                  goal_tracking_mode='host', goal_tracking_host_kind='task_list',
+                  goal_tracking_host_id='h1', goal_tracking_host_receipt='原查询回执',
+                  host_goal_sync='stale', gates={'plan':'确认','goals':'确认','execution':'授权','subagents':'未启用'})
+        for old, other, old_key, current_key in [('h1','h2','G1','G2'), ('h2','h1','G2','G1')]:
+            s['superseded_goals'] = [dict(host_id=old, objective='旧目标', source='用户变更',
+                                          superseded_by='新目标', replacement_goal_ids=[old_key])]
+            s['goal_tracking_host_readback'] = [dict(host_id=old, objective='旧目标'),
+                dict(host_id=other, objective=current_key+'：'+current_key+'结果')]
+            refresh_execution(s)
+            s['superseded_goals'].append(dict(host_id=other, objective='已被更新的旧文本', source='用户变更',
+                                               superseded_by='新目标', replacement_goal_ids=[current_key]))
+            self.assertEqual([], controller.validate(s))
+            s['goal_tracking_host_readback'][1]['objective'] = '其他条目正文不符'
+            self.assertTrue(any('readback' in e for e in controller.validate(s)))
+
+    def test_scope_change_after_real_begin_allows_only_readonly_acceptance(self):
+        s = state(phase='execution', decisions=[], plan={'presented': True,'evidence':'计划'},
+                  goals={'presented':True,'evidence':'原目标'}, goal_tracking_mode='host',
+                  goal_tracking_host_kind='aggregate', goal_tracking_host_id='h',
+                  goal_tracking_host_receipt='原回执',
+                  goal_tracking_host_readback=[dict(host_id='h',objective='G1：测试约定的目标')],
+                  gates={'plan':'确认','goals':'原确认','execution':'授权','subagents':'未启用'})
+        s.pop('execution_begun')
+        s.pop('execution_receipt')
+        s['plan']['steps'][0].update(status='pending', evidence=None)
+        receipt = controller.begin_execution(s, copy.deepcopy(s))['execution_receipt']
+        s['execution_receipt'], s['execution_begun'] = receipt, True
+        s['plan']['steps'][0].update(status='done', evidence='已交付')
+        previous = copy.deepcopy(s)
+        s.update(phase='review', execution_occurred=True, read_only=True,
+                 prior_execution_authorization=controller.execution_authorization_payload(previous),
+                 host_goal_sync='stale',
+                 superseded_goals=[dict(host_id='h',objective='G1：测试约定的目标',source='用户澄清',superseded_by='当前口径')],
+                 impact_review={'reason':'用户收窄，保留未变授权','retained':['plan','execution','subagents']})
+        s['goals']['included'][0]['criterion'] = '已确认的新口径'
+        s['goal_scope_baseline']['included'] = copy.deepcopy(s['goals']['included'])
+        s['gates']['goals'] = '用户新确认'
+        s['gates']['execution'] = '用户仅要求按新口径验收现有产物'
+        self.assertEqual([], controller.validate_transition(previous, s))
+        self.assertNotEqual('repair_state', controller.route(s)['action'])
+        for op_status, action in [('running','check_operation'), ('unknown','check_operation'),
+                                  ('failed','handle_operation_failure')]:
+            s['operations'] = [dict(id='op', reference='原验证作业', status=op_status,
+                                    side_effect=False, blocks_next=True, evidence='现场回执')]
+            self.assertEqual(action, controller.route(s)['action'])
+        s.pop('operations')
+        s.update(local_only=True, local_only_source='用户仅要求只读核对', local_only_read_only=True)
+        self.assertEqual('continue_local', controller.route(s)['action'])
+        s['local_done'] = True
+        self.assertEqual('local_complete', controller.route(s)['action'])
+        s.update(local_done=False, local_only_read_only=False, next_action='写入修复文件')
+        self.assertEqual('repair_state', controller.route(s)['action'])
+
     def test_begin_execution_blocks_without_receipt_and_returns_one(self):
         s = state(
             phase='execution',

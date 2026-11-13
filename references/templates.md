@@ -16,7 +16,7 @@ SKILL.md 各环节引用的展示模板，集中维护于此。
 - 临时事项（如有）：原阶段、原状态与下一动作 / 临时请求、来源与状态 / 结果及恢复核对：
 - 四项引证：计划与目标展示 / 计划确认 / 目标确认 / 执行授权（展示和确认分别对应实际消息；同轮展示可共用引用）：
 - 执行入口凭据：分析/讨论闭合、编号步骤、allowed_paths/allowed_actions、实际宿主 ID 与执行中回执，或经用户确认的有效降级依据；`execution_receipt`：
-- 目标跟踪：`goal_tracking_mode` / `goal_tracking_source` / `goal_tracking_confirmation_source`；`goal_tracking_host_id` + `goal_tracking_host_receipt`，或 `goals.local_goal_id` + 降级原因、能力证据：
+- 目标跟踪：`goal_tracking_mode` / `goal_tracking_source` / `goal_tracking_confirmation_source`；`goal_tracking_host_id` + `goal_tracking_host_receipt` + `goal_tracking_host_kind` + `goal_tracking_host_readback`（实际返回的 ID 与正文），或 `goals.local_goal_id` + 降级原因、能力证据：
 - 暂停或等待原因 / 恢复条件 / 恢复后第一步：
 
 ## 事实、约束与决定

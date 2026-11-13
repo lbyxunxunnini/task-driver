@@ -24,7 +24,7 @@
 
 分析阶段只返回 `continue_analysis`，不得把 `next_action` 写成业务写入；执行前使用 `local_only` 时必须另有 `local_only_source` 和 `local_only_read_only:true`。
 
-目标跟踪由 `goal_tracking_mode`、`goal_tracking_source`、`goal_tracking_confirmation_source` 记录。`host` 模式必须有真实 `goal_tracking_host_id` 和 `goal_tracking_host_receipt`；`plan` 或 `conversation` 模式必须有稳定的 `goals.local_goal_id`、`goal_tracking_fallback_reason`、`goal_tracking_fallback_evidence` 和用户确认来源；`unavailable` 不得进入执行。展示并确认验收目标不等于创建宿主 Goal。
+目标跟踪由 `goal_tracking_mode`、`goal_tracking_source`、`goal_tracking_confirmation_source` 记录。`host` 模式必须有真实 `goal_tracking_host_id` 和 `goal_tracking_host_receipt`；`plan` 或 `conversation` 模式必须有稳定的 `goals.local_goal_id`、`goal_tracking_fallback_reason`、`goal_tracking_fallback_evidence` 和用户确认来源；`unavailable` 不得进入执行。展示并确认验收目标不等于创建宿主 Goal。host 模式按真实工具类型保存 `goal_tracking_host_kind: aggregate | task_list`，不从返回条数推断。另存 `goal_tracking_host_readback`，格式如 `[{"host_id":"实际 ID","objective":"G1：已确认的通过条件"}]`。取实际创建返回或查询结果；任务列表中 host_id 各不相同，原 goal_tracking_host_id 对应其中一个。脚本校验正文与 included 一一对应，不鉴定来源真伪。旧状态缺该字段时从真实回执补录，勿自己补写或因补录重建目标；有替代记录的旧宿主不能同步时，已执行后的只读验证、审查（`read_only:true`）及业务收尾可以按新范围继续，不放行新的业务执行。范围变化致旧 execution_receipt 与当前范围不同，保留原 begin 状态的授权载荷（按脚本 execution_authorization_payload 取值）为 prior_execution_authorization；只读收尾核对原任务及原回执哈希，不能用它开始、恢复写入或分派。列表中仅对有替代记录且旧正文匹配的宿主任务例外，在该旧条目记录 `replacement_goal_ids` 指向取代它的当前验收项（纯删除为空列表），其余任务仍须逐项匹配。
 
 等待用户或工具期间，`independent_action` 只在 `independent_action_read_only:true` 且动作精确列入 `read_only_scope.allowed_actions` 时允许；否则必须先满足完整执行入口和有效 receipt，并且动作必须精确列入 `execution_scope.allowed_actions`。
 
