@@ -22,9 +22,9 @@ GOAL_TRACKING_MODES = {'host', 'plan', 'conversation', 'unavailable'}
 GOAL_TRACKING_FALLBACK_MODES = {'plan', 'conversation'}
 STEP_STATUSES = {'pending', 'in_progress', 'done', 'blocked'}
 GUIDANCE = {
-    'present_incomplete_plan': '在正文交付标明缺口的讨论稿，不能称为正式计划或请求执行。',
+    'present_incomplete_plan': '先读取或复用本 skill 的 references/planning.md、references/goals.md 及 references/templates.md 的目标草案章节，再在正文交付标明缺口的讨论稿，不能称为正式计划或请求执行。',
     'verify_plan_request': '核对当前计划请求与已交付草案的实际对应关系，再更新状态；不要重复提问或编造交付。',
-    'present_plan': '讨论闭合后在正文一起展示正式计划和目标；用户明确限制只展示其中一项时，说明严格流程并等待调整范围。展示不等于确认或执行授权，内容尚无有效确认时不提供执行选项；用户明确本轮不执行时不附执行选择。',
+    'present_plan': '先读取或复用本 skill 的 references/planning.md、references/goals.md 及 references/templates.md 的目标草案章节，按方法核对正文和状态，讨论闭合后在正文一起展示正式计划和目标；用户明确限制只展示其中一项时，说明严格流程并等待调整范围。展示不等于确认或执行授权，内容尚无有效确认时不提供执行选项；用户明确本轮不执行时，只确认尚缺的计划/目标内容，不问“是否按计划执行”，也不承诺“确认后就开始”。用户后续明确授权时沿用有效确认继续，不重复询问。',
     'request_plan_transition': '总结有效决定，完成 semantic_review 后最后询问是否结束讨论并开始展示正式计划与目标；措辞可自然变化。',
     'resolve_pending': '处理尚有影响的事项：能调查先调查，委托范围内自行决定，其余讨论。讨论阶段最终回复必须始终以一个问题结束，完成 semantic_review 后再收口，不得仅汇报分析；不要重问已决事项。',
     'check_coverage': '先核对目标、已有资料、决定和未决事项，再以新状态检查；不得编造问题。',
@@ -1599,6 +1599,36 @@ def validate_discussion_final(s, reply, handoff):
     return errors
 
 
+def add_error_diagnostics(result, state):
+    """Explain selected input errors without changing validation or routing."""
+    diagnostics = []
+    errors = [(error, 'errors') for error in result.get('errors', [])]
+    errors += [(error, 'original_state_errors') for error in result.get('original_state_errors', [])]
+    for error, source in errors:
+        detail = None
+        if error == 'invalid phase':
+            detail = {
+                'field': 'phase',
+                'actual': state.get('phase') if isinstance(state, dict) else None,
+                'allowed': sorted(PHASES),
+                'hint': '按实际环节填写合法值；不自动转换或推进阶段。',
+            }
+        elif error in ('presented plan requires evidence', 'presented goals require evidence'):
+            field = 'plan' if error == 'presented plan requires evidence' else 'goals'
+            detail = {
+                'field': field + '.evidence',
+                'hint': '准备展示不等于已经展示。只有实际已交付时才填写可核实消息来源；'
+                        '尚未展示时保留真实状态，按 next 返回动作展示，不能填未来回复来通过检查。'
+                        '已有展示不能为绕过检查改成未展示，应恢复其真实来源。',
+            }
+        if detail is not None:
+            if source == 'original_state_errors':
+                detail['error_source'] = source
+            diagnostics.append(detail)
+    if diagnostics:
+        result['diagnostics'] = diagnostics
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('mode', choices=('check', 'next', 'begin', 'final'))
@@ -1631,6 +1661,7 @@ def main():
             discussion_handoff = None
         if args.mode == 'begin':
             result = begin_execution(state, previous)
+            add_error_diagnostics(result, state)
             print(json.dumps(result, ensure_ascii=False))
             return 0 if result.get('ok') else 1
         previous_required = (
@@ -1669,6 +1700,7 @@ def main():
             result['scope'] = 'structure_and_changes_and_reply' if previous is not None else 'structure_and_reply'
         else:
             result['scope'] = 'structure_and_changes' if previous is not None else 'structure_only'
+        add_error_diagnostics(result, state)
         print(json.dumps(result, ensure_ascii=False))
         safe_actions = ('paused', 'handle_interruption', 'wait_interruption', 'reconcile_interruption')
         return bool(errors) and result.get('action') not in safe_actions

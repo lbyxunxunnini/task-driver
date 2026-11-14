@@ -8,6 +8,27 @@
 
 脚本只读标准输入或指定 JSON，不创建、覆盖或更新任务记录。例如 `next --state -` 从标准输入读取状态；`begin` 只返回一次性结构回执；`final` 从 `{"state":{...},"draft_reply":"最终回复草稿","discussion_handoff":{...}}` 读取状态、正文和唯一交接对象；`check` 只检查结构。
 
+### 调用与纠错
+
+`phase` 合法值为 `analysis`、`discussion`、`planning`、`goals`、`execution`、`verification`、`review`；计划阶段使用 `planning`，不是 `plan`。脚本为部分错误附加 `diagnostics`（字段位置、合法值或纠正提示）；原 `errors`、路由、退出码及授权检查不变，不自动补值。按错误和真实现场修正输入，不为通过检查补写尚未发生的展示、确认或执行证据。
+
+使用可访问的 skill 绝对路径调用脚本；状态文件路径相对于调用时的工作目录，不是脚本目录。已有获准保存的输入文件时可直接调用，无需临时编写 Python 包装脚本：
+
+```bash
+python3 /absolute/path/task-driver/scripts/workflow_control.py next --state /absolute/path/current-state.json
+python3 /absolute/path/task-driver/scripts/workflow_control.py final --state /absolute/path/final-input.json
+```
+
+上面的路径须替换为实际位置；`current-state.json` 是实际状态或含 `state`、`previous` 的对象，`final-input.json` 使用下文完整的讨论回复输入结构，并在需要跨轮检查时附 `previous`。不需要持久记录时优先通过宿主支持的标准输入传递同一 JSON（`--state -`）；仅输入较短且可正确引用时用 `--json`。不要把长正文拼成多层 Shell 转义，不为调用强制新建记录文件。工具拒绝时说明实际限制，不更换写法绕过；调用方式不改变 `next`、`final`、`begin` 的原有执行时点和失败关闭要求。
+
+首次展示正式计划前，草稿写好也仍是 `plan.presented:false`，目标亦未展示；先用真实状态调用 `next`，取得 `present_plan` 后发送正文。不要为了校验即将发送的内容，把“本轮最终正文”填成已发生的 `evidence` 或 `wait_evidence`。例如，下面是讨论已闭合、用户已要求计划、尚未发送计划时的输入形状；必须用实际决定和消息来源替换示例，不能把空决定列表当作自动闭合：
+
+```json
+{"task_id":"当前任务","phase":"planning","status":"continue","next_action":"展示正式计划和验收目标","decisions":[],"plan":{"presented":false},"coverage_checked":true,"plan_requested":true,"plan_request_source":"实际用户请求计划的消息","gates":{"plan":null,"goals":null,"execution":null,"subagents":null}}
+```
+
+正文实际发出后，才按可核实的送达事件或下一轮对话记录更新展示来源；宿主发送正文后不能再调用工具时，保留待同步，下一次自然续接时补齐，不额外索取用户回复。旧计划的局部修订仍保留真实历史及版本对应，不通过清空 `presented` 或删除来源绕过变更核对；新增内容未发出时也不能冒充已展示。
+
 脚本未运行、执行失败、输入不完整或结果无法解析时，只能停在本阶段：不得继续业务写入、启动执行子代理、创建交付产物或把字段自填为已通过。讨论和只读调查可在明确说明后人工核对；业务执行没有人工继续通道。
 
 状态包含 `task_id`、`phase`、`status`、`next_action`、`decisions`、`plan`、`coverage_checked`、`plan_requested` 和 `gates`；执行前还须填写 `goals`。决定项记录稳定 `id`、主题 `subject`、`status`、实际决定 `value` 和 `source`；`decided`、`delegated` 均须有实际决定，已获委托但尚未决定时仍记 `pending` 并保留委托来源，由模型落实；待定项不需要 `value`。计划与目标各自的 `presented` 和 `evidence` 来自对话中实际可见的内容；计划和目标首次同轮正式展示时必须共享同一个 `presentation_id`，局部调整时分别保留原展示与增量展示的可追溯引用，未展示完整原文不能把增量当作首次完整展示；不由脚本自行判断消息是否送达。`goals` 可在展示前省略，进入执行时须为 `{"presented":true,"evidence":"实际目标展示来源","presentation_id":"计划展示消息"}`；`goals.presented:true` 时 `plan.presented` 必须已经为真，不能只展示目标或把两者拆成不同轮次；只有 `plan_required:false` 且 `plan_waiver_source` 记录“已有结果满足任务”的收口例外可以没有计划展示。`plan.presented:false` 且目标已展示属于结构错误，先回到计划展示。计划请求和授权分别保留来源。`plan_requested` 表示当前须交付计划：用户请求计划，或用户要求直接进入执行且讨论已闭合时仍先进入计划阶段；后一种情况的来源如实指向直接执行请求，不把它写成用户主动要求计划或内容确认。讨论尚未闭合时先处理必要事项。`plan_required:false` 仅用于无需进入正式计划阶段的收口（如已有结果满足任务），不能用于跳过计划。`plan_request_source` 使用能唯一标识该次请求的实际消息引用。同一请求的草案已交付时，`plan.draft_for_request` 填完全相同的请求引用；若有依据确认旧草案不对应当前请求，`plan.draft_not_for_request` 填当前请求引用，即使旧请求的来源无法恢复也不编造。新草案实际交付后同步更新草案证据和 `draft_for_request`，清除对应的 `draft_not_for_request`；不能提前记录交付。不同引用可能只是不同写法，未确认关系时脚本返回 `verify_plan_request`，先核对对话再更新，不推定已送达或重复提问；确实无法判断时保留未知，不假称核实。用户只回答一部分时，只更新实际覆盖的决定。填写状态前先查对话和材料，无法恢复的事实标为未知，不猜测。`discussion_question_waiver_source` 仅在用户明确暂停、明确做本轮局部并完成交付，或任务结束时填写实际消息来源；`scope_limited:true` 且 `scope_limited_source` 记录用户明确限定本轮只交付指定内容的原话和范围。目标变化时，`superseded_goals` 保存旧目标原文、`host_id`、新范围来源和 `superseded_by`；`host_goal_sync` 记录 `synced`、`stale` 或 `unavailable`，不能把旧目标伪标为当前目标。工具等待和外部阻塞不能使用这些豁免。

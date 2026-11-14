@@ -2295,6 +2295,87 @@ class ControlTests(unittest.TestCase):
         self.assertEqual('present_plan', result['action'])
         self.assertIn('不等于', result['instruction'])
 
+    def test_diagnostics_do_not_convert_invalid_phase_or_release_execution(self):
+        s = state(phase='plan', decisions=[])
+        before = copy.deepcopy(s)
+        for mode in ('check', 'next', 'begin'):
+            with self.subTest(mode=mode):
+                p = subprocess.run([sys.executable, str(SCRIPT), mode, '--json', json.dumps(s)],
+                                   capture_output=True, text=True)
+                result = json.loads(p.stdout)
+                self.assertNotEqual(0, p.returncode)
+                self.assertIn('invalid phase', result['errors'])
+                self.assertNotIn('execution_receipt', result)
+                if mode == 'next':
+                    self.assertEqual('repair_state', result['action'])
+                else:
+                    self.assertFalse(result['ok'])
+                detail = next(d for d in result['diagnostics'] if d['field'] == 'phase')
+                self.assertEqual('plan', detail['actual'])
+                self.assertIn('planning', detail['allowed'])
+                self.assertNotIn('plan', detail['allowed'])
+        self.assertEqual(before, s)
+
+    def test_missing_presentation_evidence_still_fails_without_inventing_sources(self):
+        s = state(decisions=[], plan={'presented': True}, goals={'presented': True})
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'state.json'
+            path.write_text(json.dumps(s), encoding='utf-8')
+            before = path.read_bytes()
+            for mode in ('check', 'next'):
+                with self.subTest(mode=mode):
+                    p = subprocess.run([sys.executable, str(SCRIPT), mode, '--state', str(path)],
+                                       capture_output=True, text=True)
+                    result = json.loads(p.stdout)
+                    self.assertNotEqual(0, p.returncode)
+                    self.assertIn('presented plan requires evidence', result['errors'])
+                    self.assertIn('presented goals require evidence', result['errors'])
+                    self.assertEqual({'plan.evidence', 'goals.evidence'},
+                                     {d['field'] for d in result['diagnostics']})
+                    for detail in result['diagnostics']:
+                        self.assertIn('不能填未来回复', detail['hint'])
+                        self.assertIn('恢复其真实来源', detail['hint'])
+                    self.assertEqual(before, path.read_bytes())
+
+    def test_diagnostics_preserve_result_and_state_and_do_not_appear_on_success(self):
+        s = state(phase='plan')
+        result = {'action': 'repair_state', 'errors': ['invalid phase', 'other existing error'],
+                  'instruction': 'existing instruction', 'scope': 'structure_only'}
+        before_result, before_state = copy.deepcopy(result), copy.deepcopy(s)
+        controller.add_error_diagnostics(result, s)
+        result.pop('diagnostics')
+        self.assertEqual(before_result, result)
+        self.assertEqual(before_state, s)
+        p = subprocess.run([sys.executable, str(SCRIPT), 'next', '--json',
+                            json.dumps(state(decisions=[]))], capture_output=True, text=True, check=True)
+        self.assertEqual('present_plan', json.loads(p.stdout)['action'])
+        self.assertNotIn('diagnostics', json.loads(p.stdout))
+
+    def test_interruption_diagnostics_keep_original_errors_and_safe_route(self):
+        frame = {'id': 'i1', 'request': '只读回答局部问题', 'source': '用户局部请求',
+                 'status': 'continue', 'next_action': '只读回答问题'}
+        cases = [state(phase='plan', decisions=[], interruptions=[frame]),
+                 state(decisions=[], plan={'presented': True, 'presentation_id': 'm1'},
+                       goals={'presented': True, 'presentation_id': 'm1'}, interruptions=[frame])]
+        for s in cases:
+            with self.subTest(phase=s['phase']):
+                before = copy.deepcopy(s)
+                expected = controller.route(s)
+                p = subprocess.run([sys.executable, str(SCRIPT), 'next', '--json', json.dumps(s)],
+                                   capture_output=True, text=True)
+                result = json.loads(p.stdout)
+                self.assertEqual(0, p.returncode)
+                self.assertEqual('handle_interruption', result['action'])
+                self.assertEqual(expected['original_state_errors'], result['original_state_errors'])
+                self.assertNotIn('errors', result)
+                self.assertTrue(result['diagnostics'])
+                self.assertTrue(all(d['error_source'] == 'original_state_errors'
+                                    for d in result['diagnostics']))
+                fields = {d['field'] for d in result['diagnostics']}
+                self.assertEqual({'phase'} if s['phase'] == 'plan' else
+                                 {'plan.evidence', 'goals.evidence'}, fields)
+                self.assertEqual(before, s)
+
     def test_invalid_checkpoint_cannot_pass_check(self):
         with tempfile.TemporaryDirectory() as d:
             path = Path(d) / 'state.json'
