@@ -144,6 +144,11 @@ def semantic_review(kind, decision_id=None, reviewer='main', status='pass', chec
             'no_user_question': True,
             'no_trailing_content': True,
         },
+        'tool_wait': {
+            'tool_wait_is_current': True,
+            'no_blocking_pending_decisions': True,
+            'no_user_question': True,
+        },
     }
     result = {
         'reviewer': reviewer,
@@ -2922,6 +2927,220 @@ class ControlTests(unittest.TestCase):
         s['execution_scope']['allowed_actions'] = ['继续写业务文件']
         refresh_execution(s)
         self.assertIn('local_done cannot bypass unfinished plan steps', controller.validate(s))
+
+
+class RecoveryAndToolWaitTests(unittest.TestCase):
+    def execution(self):
+        s = state(
+            phase='execution', decisions=[],
+            plan={'presented': True, 'evidence': '原计划展示'},
+            goals={'presented': True, 'evidence': '原目标展示'},
+            gates={'plan': '用户确认计划', 'goals': '用户确认目标',
+                   'execution': '用户授权执行', 'subagents': '用户选择不开启'},
+        )
+        s['plan']['steps'] = [
+            {'id': 'S1', 'action': '第一步', 'status': 'done', 'evidence': '第一步现场回执'},
+            {'id': 'S2', 'action': '第二步', 'status': 'pending'},
+        ]
+        s['execution_scope']['allowed_actions'] = ['第一步', '第二步']
+        return refresh_execution(s)
+
+    def renewal(self, previous):
+        current = copy.deepcopy(previous)
+        current.update(
+            execution_begun=False, execution_reset_source='用户确认改用对话编号跟踪',
+            goal_tracking_mode='conversation', goal_tracking_source='原摘要中的编号',
+            goal_tracking_confirmation_source='用户确认改用对话编号跟踪',
+        )
+        current.pop('execution_receipt')
+        return current
+
+    def test_host_failure_fallback_renews_receipt_and_continues_remaining_step(self):
+        old = self.execution()
+        old.update(
+            goal_tracking_mode='host', goal_tracking_host_id='host-1',
+            goal_tracking_host_receipt='原宿主实际创建回执',
+            goal_tracking_host_kind='aggregate',
+            goal_tracking_host_readback=[{'host_id': 'host-1', 'objective': 'G1：测试约定的目标'}],
+        )
+        refresh_execution(old)
+        current = self.renewal(old)
+        current.pop('goal_tracking_host_id')
+        current.pop('goal_tracking_host_receipt')
+        current.update(goal_tracking_fallback_reason='宿主目标工具已不可用',
+                       goal_tracking_fallback_evidence='当前能力查询回执')
+        self.assertEqual([], controller.validate(old))
+        result = subprocess.run(
+            [sys.executable, str(SCRIPT), 'begin', '--state', '-'],
+            input=json.dumps({'previous': old, 'state': current}),
+            text=True, capture_output=True,
+        )
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        receipt = json.loads(result.stdout)['execution_receipt']
+        self.assertNotEqual(old['execution_receipt'], receipt)
+        current.update(execution_begun=True, execution_receipt=receipt)
+        self.assertEqual('S2', controller.route(current)['step_id'])
+        self.assertEqual(old['plan']['steps'][0], current['plan']['steps'][0])
+
+    def test_renewal_preserves_in_progress_step_without_starting_it_again(self):
+        old = self.execution()
+        old['plan']['steps'][1]['status'] = 'in_progress'
+        current = self.renewal(old)
+        result = controller.begin_execution(current, old)
+        self.assertTrue(result['ok'], result)
+        current.update(execution_begun=True, execution_receipt=result['execution_receipt'])
+        self.assertEqual('continue_step', controller.route(current)['action'])
+        self.assertEqual('S2', controller.route(current)['step_id'])
+
+    def test_revised_remaining_plan_renews_without_resetting_completed_step(self):
+        old = self.execution()
+        current = self.renewal(old)
+        current['plan'].update(evidence='修订计划已展示')
+        current['plan']['steps'][1]['action'] = '修订后的第二步'
+        current['execution_scope'].update(allowed_actions=['第一步', '修订后的第二步'], source='用户授权修订范围')
+        current['gates'].update(plan='用户确认修订计划', execution='用户授权修订范围')
+        current.update(plan_revision_source='用户确认只调整第二步',
+                       impact_review={'reason': '只改第二步做法，目标及子代理设置不变',
+                                      'retained': ['goals', 'subagents']})
+        result = controller.begin_execution(current, old)
+        self.assertTrue(result['ok'], result)
+        current.update(execution_begun=True, execution_receipt=result['execution_receipt'])
+        self.assertEqual('修订后的第二步', controller.route(current)['next_action'])
+        self.assertEqual(old['plan']['steps'][0], current['plan']['steps'][0])
+
+    def test_renewal_rejects_missing_or_invalid_prior_execution_and_reset_source(self):
+        for problem in ('missing_previous', 'bad_receipt', 'no_reset', 'different_task', 'completed_task'):
+            with self.subTest(problem=problem):
+                old = self.execution()
+                current = self.renewal(old)
+                if problem == 'missing_previous':
+                    old = None
+                elif problem == 'bad_receipt':
+                    old['execution_receipt'] = '0' * 64
+                elif problem == 'no_reset':
+                    current.pop('execution_reset_source')
+                elif problem == 'different_task':
+                    current['task_id'] = 'another-task'
+                else:
+                    old['status'] = 'complete'
+                self.assertFalse(controller.begin_execution(current, old)['ok'])
+
+    def test_revising_remaining_plan_cannot_reset_unchanged_completed_steps(self):
+        for reset_all in (False, True):
+            with self.subTest(reset_all=reset_all):
+                old = self.execution()
+                old['plan']['steps'][1].update(status='done', evidence='第二步现场回执')
+                old['plan']['steps'].append(dict(id='S3', action='第三步', status='pending'))
+                old['execution_scope']['allowed_actions'].append('第三步')
+                refresh_execution(old)
+                current = self.renewal(old)
+                current['plan']['evidence'] = '修订计划已展示'
+                current['plan']['steps'][2]['action'] = '第三步新实现'
+                current['execution_scope'].update(allowed_actions=['第一步', '第二步', '第三步新实现'],
+                                                  source='用户授权修订范围')
+                current['gates'].update(plan='用户确认修订计划', execution='用户授权修订范围')
+                current.update(plan_revision_source='用户确认只调整第三步',
+                               impact_review={'reason': '仅改第三步，目标及子代理设置不变',
+                                              'retained': ['goals', 'subagents']})
+                for step in current['plan']['steps'][:2] if reset_all else current['plan']['steps'][1:2]:
+                    step.update(status='pending')
+                    step.pop('evidence')
+                self.assertEqual([], controller.validate(current))
+                result = controller.begin_execution(current, old)
+                self.assertFalse(result['ok'], result)
+                self.assertIn('completed plan step cannot change status', result['errors'])
+
+    def test_renewal_rejects_invented_or_changed_progress_and_unresolved_operations(self):
+        for problem in ('invented_done', 'changed_action', 'changed_evidence', 'unknown_operation'):
+            with self.subTest(problem=problem):
+                old = self.execution()
+                current = self.renewal(old)
+                if problem == 'invented_done':
+                    current['plan']['steps'][1].update(status='done', evidence='没有原进度支持')
+                elif problem == 'changed_action':
+                    current['plan']['steps'][0]['action'] = '另一个动作'
+                    current['execution_scope']['allowed_actions'][0] = '另一个动作'
+                    current['plan']['evidence'] = '用户新确认的计划'
+                    current['plan_revision_source'] = '用户改计划'
+                elif problem == 'changed_evidence':
+                    current['plan']['steps'][0]['evidence'] = '另一份产物'
+                else:
+                    current['operations'] = [dict(id='op1', reference='原作业', status='unknown',
+                                                  side_effect=True, blocks_next=True)]
+                self.assertFalse(controller.begin_execution(current, old)['ok'])
+
+    def test_renewal_must_observe_original_unknown_operation_before_continuing(self):
+        for outcome in ('omitted', 'different_operation', 'succeeded'):
+            with self.subTest(outcome=outcome):
+                old = self.execution()
+                old['plan']['steps'][1]['status'] = 'in_progress'
+                old['operations'] = [dict(id='op1', reference='原写入作业', status='unknown',
+                                          side_effect=True, blocks_next=True)]
+                current = self.renewal(old)
+                if outcome == 'omitted':
+                    current.pop('operations')
+                else:
+                    current['operations'][0].update(status='succeeded', evidence='现场核实完成回执')
+                    if outcome == 'different_operation':
+                        current['operations'][0]['reference'] = '另一个作业'
+                result = controller.begin_execution(current, old)
+                self.assertEqual(outcome == 'succeeded', result['ok'], result)
+
+    def waiting(self, **updates):
+        return state(status='wait_tool', wait_reason='已查询原作业，仍在运行，等待下次观察',
+                     plan_requested=False, decisions=[], **updates)
+
+    def test_tool_wait_final_reports_wait_without_question_then_resumes(self):
+        waiting = self.waiting(operations=[dict(id='op1', reference='原查询作业', status='running',
+                                              side_effect=False, blocks_next=True)])
+        payload = {'state': waiting, 'draft_reply': '查询仍在运行，当前没有需要你决定的事项；保留原作业等待结果。',
+                   'discussion_handoff': handoff('tool_wait')}
+        result = subprocess.run(
+            [sys.executable, str(SCRIPT), 'final', '--state', '-'],
+            input=json.dumps(payload), text=True, capture_output=True,
+        )
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        self.assertTrue(json.loads(result.stdout)['ok'])
+        self.assertEqual('wait_tool', controller.route(waiting)['action'])
+        resumed = copy.deepcopy(waiting)
+        resumed.update(status='continue', next_action='按原结果继续讨论')
+        resumed['operations'][0].update(status='succeeded', evidence='原作业查询结果')
+        self.assertEqual([], controller.validate_transition(waiting, resumed))
+        self.assertEqual('request_plan_transition', controller.route(resumed)['action'])
+
+    def test_tool_wait_final_without_operation_list_does_not_require_fake_user_source(self):
+        self.assertEqual([], controller.validate_discussion_final(
+            self.waiting(), '接口仍在查询，保留当前状态等待结果。', handoff('tool_wait')))
+
+    def test_tool_wait_cannot_hide_decisions_work_plan_requests_or_failures(self):
+        cases = [
+            {'decisions': [{'id': 'd1', 'subject': '真实取舍', 'status': 'pending'}]},
+            {'status': 'continue'},
+            {'status': 'blocked'},
+            {'coverage_checked': False},
+            {'plan_requested': True},
+            {'interruptions': [interruption()]},
+            {'independent_action': '读取独立资料', 'independent_action_read_only': True,
+             'read_only_scope': {'allowed_actions': ['读取独立资料']}},
+            {'operations': [dict(id='op1', reference='原作业', status='failed', evidence='失败回执',
+                                 side_effect=False, blocks_next=True)]},
+        ]
+        for changes in cases:
+            with self.subTest(changes=changes):
+                s = self.waiting()
+                s.update(changes)
+                payload = {'state': s, 'draft_reply': '等待工具结果。',
+                           'discussion_handoff': handoff('tool_wait')}
+                result = subprocess.run(
+                    [sys.executable, str(SCRIPT), 'final', '--state', '-'],
+                    input=json.dumps(payload), text=True, capture_output=True,
+                )
+                self.assertNotEqual(0, result.returncode, result.stdout)
+
+    def test_tool_wait_requires_semantic_review_and_must_not_add_a_question(self):
+        for review, reply in [({'kind': 'tool_wait', 'semantic_review': {}}, '工具仍在运行。'),
+                              (handoff('tool_wait'), '要继续等待吗？')]:
+            self.assertTrue(controller.validate_discussion_final(self.waiting(), reply, review))
 
 
 if __name__ == '__main__':

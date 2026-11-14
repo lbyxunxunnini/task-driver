@@ -41,6 +41,8 @@ python3 /absolute/path/task-driver/scripts/workflow_control.py final --state /ab
 
 计划步骤新增、删除、重排或动作变化时必须记录 `plan_revision_source`；已开始执行后改变范围或目标跟踪方式时必须记录 `execution_reset_source` 并把 `execution_begun` 恢复为 false，随后重新 begin。
 
+首次 begin 不接受已完成或进行中步骤。重新 begin 则以变更前最后一份有效执行快照作为 `previous`，保留原回执供核验；当前状态填写新的有效授权与重置来源，不沿用旧回执执行。检查原执行有效且同一任务后，只有编号、动作、状态及证据与原快照一致的进度才可继承；同时反向核对原已完成步骤，编号及动作未变的不得退回待办，即使计划展示来源已更新。原操作仍运行或结果未知时先核实并保留同一操作的结果回执，取得新执行回执后从剩余或进行中步骤继续，不清零已完成部分。
+
 `local_only:true` 只在执行阶段还需要 `local_only_source`，保存用户明确限定本轮局部任务的实际来源；没有来源不能作为绕过步骤和完成门的路径。
 
 分析阶段只返回 `continue_analysis`，不得把 `next_action` 写成业务写入；执行前使用 `local_only` 时必须另有 `local_only_source` 和 `local_only_read_only:true`。
@@ -82,10 +84,11 @@ python3 /absolute/path/task-driver/scripts/workflow_control.py final --state /ab
 - `decision`：存在阻塞计划的 `pending` 决定，该决定必须填写 `question`，`decision_id` 必须对应其中一项；正文问题通过 `semantic_review` 证明它对应这个问题，不再要求逐字复制 `question`。待决项没有显式问题、语义复核目标不一致或复核未通过均失败。当 `next` 返回 `present_incomplete_plan`，或计划请求仍有缺口时，正文还必须交付绑定当前 `plan_request_source` 的缺口草案，并让语义复核填写 `incomplete_plan_delivered:true`；只问问题不交付草案不算完成计划请求。
 - `plan_transition`：没有阻塞计划的待决项，`next` 必须已返回 `request_plan_transition`，正式计划尚未展示；最后问题必须表达结束讨论并开始展示正式计划和目标，推荐使用“是否结束讨论并开始展示正式计划与目标？”但措辞可以自然变化。是否真的表达过渡由语义复核判断。
 - `waived`：仅用户明确暂停、明确限定本轮只交付指定内容、明确只做本轮局部且暂不追问并已完成局部交付，或任务结束时使用；状态必须相应为 `paused`、`scope_limited:true`、`local_only:true` 且 `local_done:true`，或 `complete`，并填写对应来源和 `semantic_review`。暂停、范围限定或局部处理恢复原任务时，旧豁免必须清除或重新取得来源。
+- `tool_wait`：仅当前状态及 `next` 路由均为 `wait_tool`，无阻塞讨论的待决事项、待交付计划草案、活动插问或可继续的独立工作时使用；须已完成覆盖检查，正文说明实际等待原因与续接点且不提问。可以报告尚在运行或结果未知的原操作；明确失败的阻塞操作仍先分类处理。保留原阶段、授权与操作标识，结果返回后重新核对状态并续接，不把等待当作用户暂停或目标完成。
 
-`final` 要求讨论阶段最后一条非空正文是一个问题，并同时核对 `next` 的当前动作和 `semantic_review` 契约；活动插问、未完成覆盖检查、阻塞操作及其他尚未接回的事项不能借最终问题或免问类型绕过。问题之后出现选项、总结或其他内容时校验失败；正文没有问号、最后一行不是问题、或只在中途提问也不能通过。`draft_reply` 必须显式传入字符串，即使当前不需要提问也不能省略。
+`final` 对问题交接要求讨论阶段最后一条非空正文是一个问题，并同时核对 `next` 的当前动作和 `semantic_review` 契约；活动插问、未完成覆盖检查、阻塞操作及其他尚未接回的事项不能借最终问题或免问类型绕过，只有满足上述条件的 `tool_wait` 可报告原操作仍在等待。问题交接在问题之后出现选项、总结或其他内容时校验失败；正文没有问号、最后一行不是问题、或只在中途提问也不能通过。`draft_reply` 必须显式传入字符串，即使当前不需要提问也不能省略。
 
-`semantic_review` 的 `reviewer` 为 `main` 或 `independent`，`target` 为 `decision`、`plan_transition` 或 `waived`，`status` 仅在语义检查通过时为 `pass`，并提供实际来源。`independent` 还必须填写实际 `review_id` 和 `authorization_source`；没有独立能力或授权时使用 `main` 并保留自检限制。检查项按交接类型填写：`decision` 使用 `target_is_current`、`not_already_decided`、`not_delegated`、`answerable_now`、`single_question`、`no_trailing_content`，计划请求仍有缺口时另加 `incomplete_plan_delivered`；`plan_transition` 使用 `transition_intent`、`no_blocking_pending_decisions`、`single_question`、`no_trailing_content`；`waived` 使用 `waiver_source_is_explicit`、`no_user_question`、`no_trailing_content`。脚本只核对这些字段、状态和交接动作，不能判断问题是否扣题、是否重复、是否可回答，也不能证明复核来源真实。
+`semantic_review` 的 `reviewer` 为 `main` 或 `independent`，`target` 与上述交接类型一致，`status` 仅在语义检查通过时为 `pass`，并提供实际来源。`independent` 还必须填写实际 `review_id` 和 `authorization_source`；没有独立能力或授权时使用 `main` 并保留自检限制。检查项按交接类型填写：`decision` 使用 `target_is_current`、`not_already_decided`、`not_delegated`、`answerable_now`、`single_question`、`no_trailing_content`，计划请求仍有缺口时另加 `incomplete_plan_delivered`；`plan_transition` 使用 `transition_intent`、`no_blocking_pending_decisions`、`single_question`、`no_trailing_content`；`waived` 使用 `waiver_source_is_explicit`、`no_user_question`、`no_trailing_content`；`tool_wait` 使用 `tool_wait_is_current`、`no_blocking_pending_decisions`、`no_user_question`，来源引用实际工具观察而非用户暂停。脚本只核对这些字段、状态和交接动作，不能判断问题是否扣题、是否重复、是否可回答，也不能证明复核来源真实。
 
 用户明确限定本轮只交付指定内容、覆盖检查已完成且没有待交付计划请求时，脚本返回 `scope_complete`；正文交付后停止，不追加问题或推进下一阶段。`scope_limited` 可以保留尚未影响本轮局部交付的待决项，但不能越过计划请求、计划/目标展示要求、未完成局部动作、覆盖检查、活动插问或阻塞操作。
 

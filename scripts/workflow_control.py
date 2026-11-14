@@ -66,6 +66,11 @@ WAIVER_REVIEW_CHECKS = (
     'no_user_question',
     'no_trailing_content',
 )
+TOOL_WAIT_REVIEW_CHECKS = (
+    'tool_wait_is_current',
+    'no_blocking_pending_decisions',
+    'no_user_question',
+)
 
 
 def make_resume_point(parent):
@@ -1128,6 +1133,12 @@ def validate_transition(previous, current):
     }
     old_step_order = [step.get('id') for step in old_steps if isinstance(step, dict)]
     new_step_order = [step.get('id') for step in new_steps if isinstance(step, dict)]
+    for ident in set(old_steps_by_id) & set(new_steps_by_id):
+        old_step, new_step = old_steps_by_id[ident], new_steps_by_id[ident]
+        if (old_step.get('status') == 'done' and
+                old_step.get('action') == new_step.get('action') and
+                new_step.get('status') != 'done'):
+            errors.append('completed plan step cannot change status')
     same_plan_identity = (
         isinstance(old_plan, dict) and isinstance(new_plan, dict) and
         old_plan.get('evidence') == new_plan.get('evidence') and
@@ -1146,9 +1157,7 @@ def validate_transition(previous, current):
             old_status, new_status = old_step.get('status'), new_step.get('status')
             if old_status == new_status:
                 continue
-            if old_status == 'done' and new_status != 'done':
-                errors.append('completed plan step cannot change status')
-            elif new_status == 'done' and old_status != 'in_progress':
+            if new_status == 'done' and old_status != 'in_progress':
                 errors.append('plan step can become done only from in_progress')
             elif new_status == 'in_progress' and old_status not in ('pending', 'blocked'):
                 errors.append('plan step can start only from pending or blocked')
@@ -1412,8 +1421,35 @@ def begin_execution(s, previous=None):
     if s.get('execution_begun') is True:
         errors.append('execution already begun; reuse the existing receipt or start a new task')
     steps = s.get('plan', {}).get('steps', [])
-    if any(isinstance(step, dict) and step.get('status') in ('done', 'in_progress') for step in steps):
-        errors.append('begin requires all steps to be pending or blocked before execution starts')
+    progressed = [step for step in steps if isinstance(step, dict) and
+                  step.get('status') in ('done', 'in_progress')]
+    if progressed:
+        renewing = (
+            isinstance(previous, dict) and previous.get('execution_begun') is True and
+            previous.get('phase') in ('execution', 'verification', 'review') and
+            previous.get('status') != 'complete' and not validate(previous) and
+            previous.get('execution_receipt') == execution_receipt(previous) and
+            isinstance(s.get('execution_reset_source'), str) and
+            bool(s['execution_reset_source'].strip())
+        )
+        if not renewing:
+            errors.append('begin with progressed steps requires a valid previous execution and reset source')
+        else:
+            old_steps = {step['id']: step for step in previous['plan']['steps']}
+            for step in progressed:
+                old = old_steps.get(step.get('id'), {})
+                if (old.get('action') != step.get('action') or
+                        old.get('status') != step.get('status') or
+                        old.get('evidence') != step.get('evidence')):
+                    errors.append('renewed begin must preserve evidenced progress: ' + str(step.get('id')))
+            current_operations = {op['id']: op for op in s.get('operations', []) if isinstance(op, dict) and 'id' in op}
+            for op in previous.get('operations', []):
+                if op.get('blocks_next') is True and op.get('status') in ('running', 'unknown'):
+                    observed = current_operations.get(op['id'], {})
+                    if (observed.get('reference') != op['reference'] or
+                            observed.get('status') not in ('succeeded', 'failed') or
+                            not observed.get('evidence')):
+                        errors.append('renewed begin must reconcile the original operation: ' + op['id'])
     if not errors:
         routed = route(s)
         if routed.get('action') != 'begin_execution':
@@ -1466,6 +1502,7 @@ def validate_semantic_review(review, kind, decision_id=None, extra_checks=()):
         'decision': DECISION_REVIEW_CHECKS,
         'plan_transition': TRANSITION_REVIEW_CHECKS,
         'waived': WAIVER_REVIEW_CHECKS,
+        'tool_wait': TOOL_WAIT_REVIEW_CHECKS,
     }.get(kind, ())
     for name in tuple(required) + tuple(extra_checks):
         if checks.get(name) is not True:
@@ -1496,7 +1533,7 @@ def count_questions_outside_code(reply):
 
 
 def validate_discussion_final(s, reply, handoff):
-    """Require a discussion handoff to end with one actionable question."""
+    """Validate a discussion question, user-scoped stop, or actual tool wait."""
     if not isinstance(s, dict) or s.get('phase') != 'discussion':
         return []
     if not isinstance(handoff, dict):
@@ -1510,14 +1547,17 @@ def validate_discussion_final(s, reply, handoff):
         and operation.get('status') in ('running', 'unknown', 'failed')
         and operation.get('blocks_next') is True
     ]
-    if blocking_operations:
-        return ['discussion final blocked by unresolved operation: ' + ', '.join(blocking_operations)]
     kind = handoff.get('kind')
-    if kind not in ('decision', 'plan_transition', 'waived'):
-        return ['discussion_handoff.kind must be decision, plan_transition, or waived']
+    if blocking_operations and (kind != 'tool_wait' or any(
+            isinstance(operation, dict) and operation.get('blocks_next') is True and
+            operation.get('status') == 'failed' for operation in s.get('operations', []))):
+        return ['discussion final blocked by unresolved operation: ' + ', '.join(blocking_operations)]
+    if kind not in ('decision', 'plan_transition', 'waived', 'tool_wait'):
+        return ['discussion_handoff.kind must be decision, plan_transition, waived, or tool_wait']
     question_count = count_questions_outside_code(reply)
     waiver = s.get('discussion_question_waiver_source')
-    route_action = route(s).get('action')
+    routed = route(s)
+    route_action = routed.get('action')
     extra_review_checks = (
         ('incomplete_plan_delivered',)
         if (kind == 'decision' and s.get('plan_requested') is True and
@@ -1528,6 +1568,20 @@ def validate_discussion_final(s, reply, handoff):
         handoff.get('semantic_review'), kind, handoff.get('decision_id'),
         extra_checks=extra_review_checks,
     )
+    if kind == 'tool_wait':
+        if s.get('status') != 'wait_tool' or routed.get('action') != 'wait_tool':
+            return review_errors + ['discussion tool wait requires the current wait_tool route']
+        if any(isinstance(item, dict) and item.get('status') == 'pending' and
+               item.get('blocks_plan', True) is not False for item in s.get('decisions', [])):
+            review_errors.append('discussion tool wait cannot bypass pending decisions')
+        if (routed.get('independent_action') or routed.get('independent_checks') or
+                pending_plan_request_action(s)):
+            review_errors.append('discussion tool wait cannot bypass available work or a pending plan request')
+        if s.get('coverage_checked') is not True:
+            review_errors.append('discussion final requires coverage_checked before handoff')
+        if question_count != 0:
+            review_errors.append('discussion tool wait final must not add a question')
+        return review_errors
     if kind == 'waived':
         if s.get('scope_limited') is True:
             source = s.get('scope_limited_source')
