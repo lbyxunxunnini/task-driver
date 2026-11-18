@@ -48,7 +48,7 @@ done
 check_patterns SKILL.md '^## 状态与主控职责' '^## 阶段转换' '^## 展示与确认策略' \
   '^## 确认与授权' '^## 完成门槛' '已有完整授权必须复用' \
   '链接不是递归加载指令' '动作前核对条件' '根据实际结果更新'  \
-  '同一场景可展示边界清楚的完整方案' \
+  '同一场景先交付有依据的建议' \
   '讨论中的局部请求完成后' '讨论阶段的最终回复必须以一个问题结束' '仅有阶段标记、总结或继续的承诺不算续接' '必须调用\[轻量检查\]' '计划与目标必须同轮展示' '等待用户调整限定' \
   '用户要求单独处理另一件事' '局部调整，默认只展示新增、修改或删除的条目' \
   '用户只授权审查子代理时不扩大为执行分派' '结果未知的副作用操作先核实' \
@@ -65,7 +65,7 @@ check_patterns SKILL.md '^## 状态与主控职责' '^## 阶段转换' '^## 展�
   'completion_basis' 'unverified_goals' '^## 不可短路主控' 'plan.steps' 'execution begin' \
   '有记录来源且未变化的已确认条件不重走' '调用本 skill 表示按固定链路推进'
 check_patterns references/analysis.md '用户目标 → 实际使用过程' '不等于删除支付覆盖' \
-  '未知条件若会改变' '不编造调查结果' '已核实的原有情况' '候选方案' '明确委托模型决定调查代理'
+  '未知条件若会改变' '不编造调查结果' '已核实的原有情况' '候选方案' 'subagents.md#选择执行方式'
 check_patterns references/discussion.md '^## 回答后的推进' '^## 讨论完成门禁' '^## 决策项与提问' '仅更新原话实际覆盖的内容' \
   '不是否定、不可用、取消或委托' '覆盖核对' '决定核对' '讨论阶段把回复交还用户时，最终回复必须以一个问题结束' \
   '先保存本轮有效变化，再问下一项' '未满足执行入口条件时，不得开始实际执行' \
@@ -122,9 +122,17 @@ check_patterns references/workflow-control.md 'interruptions' 'reconcile_interru
   'plan_revision_source' 'execution_reset_source' 'read_only_scope' 'local_only_source'
 check_patterns references/workflow-control.md 'continue_analysis' 'local_only_read_only'
 check_patterns references/subagents.md '^## 只读检查代理' '^## 提问语义复核代理' '不冒称已检查' \
-  '不产生或恢复子代理授权' '不能消除与主控同模型' '不计入修复次数与独立复核次数' \
+  '不产生或恢复子代理授权' '不能消除与主控同模型' '不计入修复次数与独立复核次数' '明确委托模型决定调查代理' \
   'reviewer: independent' 'reviewer: main'
 check_patterns references/review.md '属于执行途中的只读路线复查'
+check_patterns references/review.md '^## 审查发现的范围判断' '剩余额度不是继续检查的理由'
+check_patterns SKILL.md 'references/review.md#审查发现的范围判断'
+check_patterns references/templates.md '先读取.*审查发现的范围判断.*独立复核要求'
+check_patterns tests/dialogue-contracts/review-authority-summary.md '无关旧缺陷' '本次改动引入回归' '额外验证与修复权限'
+check_patterns references/review.md '^## 完成后汇总范围外问题'
+check_patterns SKILL.md 'references/review.md#完成后汇总范围外问题'
+check_patterns references/verification.md '^## 验证前限定范围'
+check_patterns SKILL.md 'references/verification.md#验证前限定范围'
 check_patterns references/templates.md '进度锚点交接模板' '引用与展开' '四项引证' \
   '\| 编号（如 F1） \|' '\| 编号（如 D1） \|' '\| 编号（如 G1） \|' \
   'included' 'excluded' 'source' 'evidence_map' 'goal_scope_baseline' 'completion_basis' 'completion_report' 'unverified_goals' \
