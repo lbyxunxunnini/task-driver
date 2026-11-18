@@ -131,6 +131,7 @@ check_patterns references/templates.md '先读取.*审查发现的范围判断.*
 check_patterns tests/dialogue-contracts/review-authority-summary.md '无关旧缺陷' '本次改动引入回归' '额外验证与修复权限'
 check_patterns references/review.md '^## 完成后汇总范围外问题'
 check_patterns SKILL.md 'references/review.md#完成后汇总范围外问题'
+check_patterns SKILL.md 'references/review.md#结论承接'
 check_patterns references/verification.md '^## 验证前限定范围'
 check_patterns SKILL.md 'references/verification.md#验证前限定范围'
 check_patterns references/templates.md '进度锚点交接模板' '引用与展开' '四项引证' \
