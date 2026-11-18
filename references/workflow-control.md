@@ -10,7 +10,7 @@
 
 ### 调用与纠错
 
-`phase` 合法值为 `analysis`、`discussion`、`planning`、`goals`、`execution`、`verification`、`review`；计划阶段使用 `planning`，不是 `plan`。脚本为部分错误附加 `diagnostics`（字段位置、合法值或纠正提示）；原 `errors`、路由、退出码及授权检查不变，不自动补值。按错误和真实现场修正输入，不为通过检查补写尚未发生的展示、确认或执行证据。
+`phase` 合法值为 `analysis`、`discussion`、`planning`、`goals`、`execution`、`verification`、`review`；计划阶段使用 `planning`，不是 `plan`。脚本为已知错误附加 `diagnostics`（字段位置、可用证据或修正指引；目标快照有差异时列出可定位的目标编号）；原 `errors`、路由、退出码及授权检查不变，不自动补值。按错误和真实现场修正输入，不为通过检查补写尚未发生的展示、确认或执行证据。
 
 使用可访问的 skill 绝对路径调用脚本；状态文件路径相对于调用时的工作目录，不是脚本目录。已有获准保存的输入文件时可直接调用，无需临时编写 Python 包装脚本：
 
@@ -21,17 +21,24 @@ python3 /absolute/path/task-driver/scripts/workflow_control.py final --state /ab
 
 上面的路径须替换为实际位置；`current-state.json` 是实际状态或含 `state`、`previous` 的对象，`final-input.json` 使用下文完整的讨论回复输入结构，并在需要跨轮检查时附 `previous`。不需要持久记录时优先通过宿主支持的标准输入传递同一 JSON（`--state -`）；仅输入较短且可正确引用时用 `--json`。不要把长正文拼成多层 Shell 转义，不为调用强制新建记录文件。工具拒绝时说明实际限制，不更换写法绕过；调用方式不改变 `next`、`final`、`begin` 的原有执行时点和失败关闭要求。
 
-首次展示正式计划前，草稿写好也仍是 `plan.presented:false`，目标亦未展示；先用真实状态调用 `next`，取得 `present_plan` 后发送正文。不要为了校验即将发送的内容，把“本轮最终正文”填成已发生的 `evidence` 或 `wait_evidence`。例如，下面是讨论已闭合、用户已要求计划、尚未发送计划时的输入形状；必须用实际决定和消息来源替换示例，不能把空决定列表当作自动闭合：
+### 首次从讨论转入计划
+
+1. 覆盖未核对或还有会影响方案的待决项时，先补查可核实事项，再就当前仍需用户决定的内容交接 `decision`。用户明确要求草案且正文确有缺口时，仍可按当前计划请求交付标明缺口的讨论稿。
+2. 覆盖核对通过且没有必要待决项时，`next` 返回 `request_plan_transition`。按 `plan_transition` 交接发出收口问题，保持讨论阶段。问题实际发出后保留待答状态（`phase:discussion`、`status:wait_user`）。用同一消息引用填写 `wait_evidence` 和 `discussion_closure_question_source`。仍在等答复时按原状态续接，插问答完可回到同一个收口问题。开场要求计划、要求直接实施、回答单项或补充材料只更新各自的意图或讨论内容。
+3. 用户肯定答复这道收口问题，且范围与决定仍有效时，记 `discussion_closed:true`，用 `discussion_closure_question_source` 指向实际发出的收口问题，`discussion_closure_source` 指向用户的肯定答复。来源必须是不同消息。用户继续讨论，或新信息使问题失效时，继续讨论受影响事项，并按当前范围重新收口。状态检查只核对结构，消息是否实际发送、答复是否同意当前范围由主控对照对话判断。
+4. 调用 `next` 时同时传入发出问题后的待答状态 `previous` 和收到答复后的 `state`。两份状态按实际对话填写，可从上下文恢复。检查器核对待答问题的引用和前后的影响方案决定，有效问答齐备才返回 `present_plan`。获准后进入 `planning`，同轮展示正式计划和验收目标。已有旧计划需要补齐目标时，`previous` 保留实际已展示的旧计划及来源。明确暂停、仅交付其他局部内容、任务到此结束或结果已满足任务的收口，按下文相应交接处理。
+
+首次展示正式计划前，草稿写好也仍是 `plan.presented:false`，目标亦未展示；先用真实状态调用 `next`，取得 `present_plan` 后发送正文。不要为了校验即将发送的内容，把“本轮最终正文”填成已发生的 `evidence` 或 `wait_evidence`。例如，下面是用户已肯定答复收口问题、尚未发送正式计划时的当前状态 `state`；必须用实际决定和消息来源替换示例，不能把空决定列表当作自动闭合：
 
 ```json
-{"task_id":"当前任务","phase":"planning","status":"continue","next_action":"展示正式计划和验收目标","decisions":[],"plan":{"presented":false},"coverage_checked":true,"plan_requested":true,"plan_request_source":"实际用户请求计划的消息","gates":{"plan":null,"goals":null,"execution":null,"subagents":null}}
+{"task_id":"当前任务","phase":"discussion","status":"continue","next_action":"核对收口答复后展示正式计划和验收目标","decisions":[],"plan":{"presented":false},"coverage_checked":true,"plan_requested":false,"discussion_closed":true,"discussion_closure_question_source":"实际发出的收口问题消息","discussion_closure_source":"用户肯定答复的消息","gates":{"plan":null,"goals":null,"execution":null,"subagents":null}}
 ```
 
 正文实际发出后，才按可核实的送达事件或下一轮对话记录更新展示来源；宿主发送正文后不能再调用工具时，保留待同步，下一次自然续接时补齐，不额外索取用户回复。旧计划的局部修订仍保留真实历史及版本对应，不通过清空 `presented` 或删除来源绕过变更核对；新增内容未发出时也不能冒充已展示。
 
 脚本未运行、执行失败、输入不完整或结果无法解析时，只能停在本阶段：不得继续业务写入、启动执行子代理、创建交付产物或把字段自填为已通过。讨论和只读调查可在明确说明后人工核对；业务执行没有人工继续通道。
 
-状态包含 `task_id`、`phase`、`status`、`next_action`、`decisions`、`plan`、`coverage_checked`、`plan_requested` 和 `gates`；执行前还须填写 `goals`。决定项记录稳定 `id`、主题 `subject`、`status`、实际决定 `value` 和 `source`；`decided`、`delegated` 均须有实际决定，已获委托但尚未决定时仍记 `pending` 并保留委托来源，由模型落实；待定项不需要 `value`。计划与目标各自的 `presented` 和 `evidence` 来自对话中实际可见的内容；计划和目标首次同轮正式展示时必须共享同一个 `presentation_id`，局部调整时分别保留原展示与增量展示的可追溯引用，未展示完整原文不能把增量当作首次完整展示；不由脚本自行判断消息是否送达。`goals` 可在展示前省略，进入执行时须为 `{"presented":true,"evidence":"实际目标展示来源","presentation_id":"计划展示消息"}`；`goals.presented:true` 时 `plan.presented` 必须已经为真，不能只展示目标或把两者拆成不同轮次；只有 `plan_required:false` 且 `plan_waiver_source` 记录“已有结果满足任务”的收口例外可以没有计划展示。`plan.presented:false` 且目标已展示属于结构错误，先回到计划展示。计划请求和授权分别保留来源。`plan_requested` 表示当前须交付计划：用户请求计划，或用户要求直接进入执行且讨论已闭合时仍先进入计划阶段；后一种情况的来源如实指向直接执行请求，不把它写成用户主动要求计划或内容确认。讨论尚未闭合时先处理必要事项。`plan_required:false` 仅用于无需进入正式计划阶段的收口（如已有结果满足任务），不能用于跳过计划。`plan_request_source` 使用能唯一标识该次请求的实际消息引用。同一请求的草案已交付时，`plan.draft_for_request` 填完全相同的请求引用；若有依据确认旧草案不对应当前请求，`plan.draft_not_for_request` 填当前请求引用，即使旧请求的来源无法恢复也不编造。新草案实际交付后同步更新草案证据和 `draft_for_request`，清除对应的 `draft_not_for_request`；不能提前记录交付。不同引用可能只是不同写法，未确认关系时脚本返回 `verify_plan_request`，先核对对话再更新，不推定已送达或重复提问；确实无法判断时保留未知，不假称核实。用户只回答一部分时，只更新实际覆盖的决定。填写状态前先查对话和材料，无法恢复的事实标为未知，不猜测。`discussion_question_waiver_source` 仅在用户明确暂停、明确做本轮局部并完成交付，或任务结束时填写实际消息来源；`scope_limited:true` 且 `scope_limited_source` 记录用户明确限定本轮只交付指定内容的原话和范围。目标变化时，`superseded_goals` 保存旧目标原文、`host_id`、新范围来源和 `superseded_by`；`host_goal_sync` 记录 `synced`、`stale` 或 `unavailable`，不能把旧目标伪标为当前目标。工具等待和外部阻塞不能使用这些豁免。
+状态包含 `task_id`、`phase`、`status`、`next_action`、`decisions`、`plan`、`coverage_checked`、`plan_requested` 和 `gates`；执行前还须填写 `goals`。决定项记录稳定 `id`、主题 `subject`、`status`、实际决定 `value` 和 `source`；`decided`、`delegated` 均须有实际决定，已获委托但尚未决定时仍记 `pending` 并保留委托来源，由模型落实；待定项不需要 `value`。计划与目标各自的 `presented` 和 `evidence` 来自对话中实际可见的内容；计划和目标首次同轮正式展示时必须共享同一个 `presentation_id`，局部调整时分别保留原展示与增量展示的可追溯引用，未展示完整原文不能把增量当作首次完整展示；不由脚本自行判断消息是否送达。`goals` 可在展示前省略，进入执行时须为 `{"presented":true,"evidence":"实际目标展示来源","presentation_id":"计划展示消息"}`；`goals.presented:true` 时 `plan.presented` 必须已经为真，不能只展示目标或把两者拆成不同轮次；只有 `plan_required:false` 且 `plan_waiver_source` 记录“已有结果满足任务”的收口例外可以没有计划展示。`plan.presented:false` 且目标已展示属于结构错误，先回到计划展示。计划请求和授权分别保留来源。`plan_requested` 记录当前需处理的明确计划请求，用于跟踪草案及交付。「讨论完给我计划」保留为后续交付要求，当前仍按讨论推进。首次展示正式计划使用前述收口问答门槛。`plan_required:false` 仅用于无需进入正式计划阶段的收口（如已有结果满足任务），不能用于跳过计划。`plan_request_source` 使用能唯一标识该次请求的实际消息引用。同一请求的草案已交付时，`plan.draft_for_request` 填完全相同的请求引用；若有依据确认旧草案不对应当前请求，`plan.draft_not_for_request` 填当前请求引用，即使旧请求的来源无法恢复也不编造。新草案实际交付后同步更新草案证据和 `draft_for_request`，清除对应的 `draft_not_for_request`；不能提前记录交付。不同引用可能只是不同写法，未确认关系时脚本返回 `verify_plan_request`，先核对对话再更新，不推定已送达或重复提问；确实无法判断时保留未知，不假称核实。用户只回答一部分时，只更新实际覆盖的决定。填写状态前先查对话和材料，无法恢复的事实标为未知，不猜测。`discussion_question_waiver_source` 仅在用户明确暂停、明确做本轮局部并完成交付，或任务结束时填写实际消息来源；`scope_limited:true` 且 `scope_limited_source` 记录用户明确限定本轮只交付指定内容的原话和范围。目标变化时，`superseded_goals` 保存旧目标原文、`host_id`、新范围来源和 `superseded_by`；`host_goal_sync` 记录 `synced`、`stale` 或 `unavailable`，不能把旧目标伪标为当前目标。工具等待和外部阻塞不能使用这些豁免。
 
 编号计划使用 `plan.steps`：每项必须有稳定 `id`、`action` 和 `status`，状态只能是 `pending`、`in_progress`、`done`、`blocked`；`done` 必须有实际证据，`blocked` 必须说明原因。步骤顺序不可通过重排改变；只能按列表顺序推进，一个计划最多一个进行中步骤，前项未完成时后项不能 done、in_progress 或 blocked，完成收口时默认全部步骤必须 done。
 
@@ -73,6 +80,10 @@ python3 /absolute/path/task-driver/scripts/workflow_control.py final --state /ab
 {"task_id":"当前任务","phase":"analysis","status":"continue","next_action":"分析当前请求","decisions":[],"plan":{"presented":false},"coverage_checked":false,"plan_requested":false,"gates":{"plan":null,"goals":null,"execution":null,"subagents":null}}
 ```
 
+## 讨论最终回复
+
+正常讨论以一个当前内容问题或转阶段问题收口。免问和等待按下列交接类型处理。
+
 讨论阶段最终回复示例（`semantic_review` 只表示语义复核契约已填写，不证明复核者真的独立或判断正确）：
 
 ```json
@@ -82,9 +93,9 @@ python3 /absolute/path/task-driver/scripts/workflow_control.py final --state /ab
 `discussion_handoff.kind` 只能是：
 
 - `decision`：存在阻塞计划的 `pending` 决定，该决定必须填写 `question`，`decision_id` 必须对应其中一项；正文问题通过 `semantic_review` 证明它对应这个问题，不再要求逐字复制 `question`。待决项没有显式问题、语义复核目标不一致或复核未通过均失败。当 `next` 返回 `present_incomplete_plan`，或计划请求仍有缺口时，正文还必须交付绑定当前 `plan_request_source` 的缺口草案，并让语义复核填写 `incomplete_plan_delivered:true`；只问问题不交付草案不算完成计划请求。
-- `plan_transition`：没有阻塞计划的待决项，`next` 必须已返回 `request_plan_transition`，正式计划尚未展示；最后问题必须表达结束讨论并开始展示正式计划和目标，推荐使用“是否结束讨论并开始展示正式计划与目标？”但措辞可以自然变化。是否真的表达过渡由语义复核判断。
-- `waived`：仅用户明确暂停、明确限定本轮只交付指定内容、明确只做本轮局部且暂不追问并已完成局部交付，或任务结束时使用；状态必须相应为 `paused`、`scope_limited:true`、`local_only:true` 且 `local_done:true`，或 `complete`，并填写对应来源和 `semantic_review`。暂停、范围限定或局部处理恢复原任务时，旧豁免必须清除或重新取得来源。
-- `tool_wait`：仅当前状态及 `next` 路由均为 `wait_tool`，无阻塞讨论的待决事项、待交付计划草案、活动插问或可继续的独立工作时使用；须已完成覆盖检查，正文说明实际等待原因与续接点且不提问。可以报告尚在运行或结果未知的原操作；明确失败的阻塞操作仍先分类处理。保留原阶段、授权与操作标识，结果返回后重新核对状态并续接，不把等待当作用户暂停或目标完成。
+- `plan_transition`：没有阻塞计划的待决项，`next` 必须已返回 `request_plan_transition`，本轮计划尚未展示；重开讨论时保留旧展示来源。最后问题必须表达结束讨论并开始展示正式计划和目标，推荐使用“是否结束讨论并开始展示正式计划与目标？”但措辞可以自然变化。是否真的表达过渡由语义复核判断。
+- `waived`：仅用户明确暂停、明确限定本轮只交付指定内容、明确只做本轮局部且暂不追问并已完成局部交付，或任务结束时使用；状态必须相应为 `paused`、`scope_limited:true`、`local_only:true` 且 `local_done:true`，或 `complete`，并填写对应来源和 `semantic_review`。用户明确只要有缺口的讨论稿时，`scope_limited_source` 与 `plan_request_source` 引用同一消息。按草案动作写正文并用 `waived`，语义复核用 `draft_only_scope:true` 确认用户限定，并用 `incomplete_plan_delivered:true` 核对待发正文包含草案。正式计划的限定交付在收口问答期间继续有效，交付完成后恢复原任务时清除旧限定。暂停或局部处理恢复原任务时，旧豁免必须清除或重新取得来源。
+- `tool_wait`：仅当前状态及 `next` 路由均为 `wait_tool`，无阻塞讨论的待决事项、待交付计划草案、活动插问或可继续的独立工作时使用。用户明确限定只交付查询完成后的正式计划和目标时，范围和请求引用同一实际消息，并在语义复核中确认 `formal_plan_only_wait:true`。须已完成覆盖检查，正文说明实际等待原因与续接点且不提问。可以报告尚在运行或结果未知的原操作；明确失败的阻塞操作仍先分类处理。保留原阶段、授权与操作标识，结果返回后重新核对状态并续接，不把等待当作用户暂停或目标完成。
 
 `final` 对问题交接要求讨论阶段最后一条非空正文是一个问题，并同时核对 `next` 的当前动作和 `semantic_review` 契约；活动插问、未完成覆盖检查、阻塞操作及其他尚未接回的事项不能借最终问题或免问类型绕过，只有满足上述条件的 `tool_wait` 可报告原操作仍在等待。问题交接在问题之后出现选项、总结或其他内容时校验失败；正文没有问号、最后一行不是问题、或只在中途提问也不能通过。`draft_reply` 必须显式传入字符串，即使当前不需要提问也不能省略。
 
@@ -100,6 +111,6 @@ python3 /absolute/path/task-driver/scripts/workflow_control.py final --state /ab
 
 如果有正在运行或结果未知的操作，可用 `operations` 保存其 `id`、实际 `reference`、`status`、`side_effect` 和 `blocks_next`。`blocks_next`、`blocks_completion` 按依赖判断，与是否有副作用无关；`side_effect` 用于判断结果未知时能否安全重试。同一操作不应换标识重复记录；不阻止下一步不自动等于可以宣告整项完成。`check_operation` 仅核实原操作，在查询权限内不受后续执行许可缺失阻挡；结构错误仍须处理，查明后继续或重试仍须有效授权。即使当前状态是等待用户或等待工具，`blocks_next:true` 的已失败操作也先返回 `handle_operation_failure`，不能被等待状态遮蔽。
 
-脚本返回下一动作供主控执行：主任务执行受阻但计划和目标可在授权内展示时，只能填 `independent_action` 为明确只读动作并设 `independent_action_read_only:true`；若动作可能有业务副作用，必须已有有效 `execution_receipt`、完整 gates、执行范围和许可动作，否则不能返回 `continue_local`。脚本返回 `continue_local` 时保留原阻塞原因。若该字段遗漏，但计划已展示、目标未展示且本轮不限于局部，脚本仍要求核对当前范围及确认依据，允许时一起展示计划和目标，不自行认定已授权。临时事项受阻仍保持等待。仍有影响方案的待决项时调查或讨论；用户要求计划且讨论闭合时列出计划，未闭合时可给标明缺口的草案；其他没有计划请求的情况按主控请求结束讨论。讨论闭合并进入正式计划阶段时同轮展示计划与目标；用户明确限定本轮只能展示其中一项时按主控等待调整限定。旧草案的待核实状态不能挡住已确认的正式计划。计划展示不是确认或执行授权。执行中准备继续实际操作时，覆盖尚未核对或仍有影响方案的待决项，脚本要求先修正状态并处理缺口；已完成的本轮局部动作可按限定收口，但存在 `running/unknown` 且 `blocks_next:true` 的操作时先核实，操作失败时返回 `handle_operation_failure`，成功后才允许 `local_complete`。用户暂停或明确限制本轮范围时优先遵从；未知副作用先核实原操作，不盲目重试。
+脚本返回下一动作供主控执行：主任务执行受阻但计划和目标已满足展示门槛时，只能填 `independent_action` 为明确只读动作并设 `independent_action_read_only:true`；若动作可能有业务副作用，必须已有有效 `execution_receipt`、完整 gates、执行范围和许可动作，否则不能返回 `continue_local`。脚本返回 `continue_local` 时保留原阻塞原因。若该字段遗漏，但计划已展示、目标未展示且本轮不限于局部，脚本仍要求核对当前范围及确认依据，允许时一起展示计划和目标，不自行认定已授权。临时事项受阻仍保持等待。仍有影响方案的待决项时调查或讨论；用户要求计划且讨论闭合时列出计划，未闭合时可给标明缺口的草案；其他没有计划请求的情况按主控请求结束讨论。讨论闭合并进入正式计划阶段时同轮展示计划与目标；用户明确限定本轮只能展示其中一项时按主控等待调整限定。旧草案的待核实状态不能挡住已确认的正式计划。计划展示不是确认或执行授权。执行中准备继续实际操作时，覆盖尚未核对或仍有影响方案的待决项，脚本要求先修正状态并处理缺口；已完成的本轮局部动作可按限定收口，但存在 `running/unknown` 且 `blocks_next:true` 的操作时先核实，操作失败时返回 `handle_operation_failure`，成功后才允许 `local_complete`。用户暂停或明确限制本轮范围时优先遵从；未知副作用先核实原操作，不盲目重试。
 
 目标展示后进入执行、验证、审查或完成时，必须传入 `{"previous":上一状态,"state":当前状态}` 检查明确变化；没有上一状态时脚本返回 `repair_state`，不能新目标直接通过 `next`/`check`。其他场景涉及计划请求撤回、暂停恢复或决定变化时也应按需传入上一状态。输出 `scope: structure_and_changes`；`decided`、`delegated`、`excluded` 的变更和删除均核对来源及沿用授权的影响；同一事项在有效委托内调整实际决定，可复用原来源，并在现有 `impact_review.reason` 说明委托范围和影响，不另索授权。若本次计划已在上一状态交付而本轮才清除请求，记录 `plan_request_delivery_source` 指向本次实际交付；旧计划不能冒充新请求的交付。脚本输出的 `scope: structure_only` 表示只检查结构；它不验证来源的真实性、决定是否被正确理解、问题覆盖是否完整或消息是否实际送达，也不能强迫模型调用。不可访问消息记录文件不妨碍通过可用对话判断下一步；证据不可核实就保留未知，不把普通文件冒充宿主回执。原有摘要的写入、并发和恢复仍由[记录模块](state-recovery.md)处理，本检查器不替换摘要文件。

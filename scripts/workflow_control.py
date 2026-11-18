@@ -25,7 +25,7 @@ GUIDANCE = {
     'present_incomplete_plan': '先读取或复用本 skill 的 references/planning.md、references/goals.md 及 references/templates.md 的目标草案章节，再在正文交付标明缺口的讨论稿，不能称为正式计划或请求执行。',
     'verify_plan_request': '核对当前计划请求与已交付草案的实际对应关系，再更新状态；不要重复提问或编造交付。',
     'present_plan': '先读取或复用本 skill 的 references/planning.md、references/goals.md 及 references/templates.md 的目标草案章节，按方法核对正文和状态，讨论闭合后在正文一起展示正式计划和目标；用户明确限制只展示其中一项时，说明严格流程并等待调整范围。展示不等于确认或执行授权，内容尚无有效确认时不提供执行选项；用户明确本轮不执行时，只确认尚缺的计划/目标内容，不问“是否按计划执行”，也不承诺“确认后就开始”。用户后续明确授权时沿用有效确认继续，不重复询问。',
-    'request_plan_transition': '总结有效决定，完成 semantic_review 后最后询问是否结束讨论并开始展示正式计划与目标；措辞可自然变化。',
+    'request_plan_transition': '保持讨论阶段。总结有效决定，完成 semantic_review 后最后询问是否结束讨论并开始展示正式计划与目标。问题实际发出后等待用户回答；已有计划请求也走此路径。',
     'resolve_pending': '处理尚有影响的事项：能调查先调查，委托范围内自行决定，其余讨论。讨论阶段最终回复必须始终以一个问题结束，完成 semantic_review 后再收口，不得仅汇报分析；不要重问已决事项。',
     'check_coverage': '先核对目标、已有资料、决定和未决事项，再以新状态检查；不得编造问题。',
     'continue_local': '先完成已获授权的独立或局部动作，不扩大用户限定的范围；原等待或受阻状态保持不变。',
@@ -1005,6 +1005,48 @@ def validate_transition(previous, current):
             if old['status'] in ('complete', 'cancelled') and new['status'] != old['status']:
                 errors.append('completed interruption cannot change status')
     old_plan, new_plan = previous.get('plan'), current.get('plan')
+    old_plan_unshown = isinstance(old_plan, dict) and old_plan.get('presented') is False
+    old_plan_shown = isinstance(old_plan, dict) and old_plan.get('presented') is True
+    new_plan_unshown = isinstance(new_plan, dict) and new_plan.get('presented') is False
+    new_plan_shown = isinstance(new_plan, dict) and new_plan.get('presented') is True
+    first_display = not old_plan_shown and new_plan_shown
+    if first_display and not old_plan_unshown:
+        errors.append('formal plan display requires the preceding discussion or presentation state')
+    revision_source = current.get('plan_revision_source')
+    if (old_plan_shown and new_plan_unshown and
+            (not isinstance(revision_source, str) or not revision_source.strip() or
+             revision_source == previous.get('plan_revision_source'))):
+        errors.append('a previously presented formal plan must retain its presentation state without a revision source')
+    old_goals_shown = isinstance(previous_goals, dict) and previous_goals.get('presented') is True
+    entered_planning = (previous.get('phase') == 'discussion' and current.get('phase') == 'planning' and
+                        (not old_plan_shown or old_goals_shown))
+    confirmed = discussion_transition_confirmed(current)
+    if (first_display or entered_planning) and (not confirmed or not discussion_ready(current)):
+        errors.append('first formal plan presentation requires confirmed discussion transition')
+    if first_display:
+        new_goals = current.get('goals')
+        if not isinstance(new_goals, dict) or new_goals.get('presented') is not True:
+            errors.append('first formal plan and goals must be presented together')
+    current_goals = current.get('goals')
+    reopening_discussion = (current.get('phase') == 'discussion' and
+                            new_plan_shown and
+                            isinstance(current_goals, dict) and current_goals.get('presented') is True)
+    if (new_plan_unshown or first_display or entered_planning or reopening_discussion) and confirmed:
+        follows_confirmed_discussion = (old_plan_unshown or
+                                        (old_plan_shown and new_plan_shown and
+                                         previous.get('phase') == 'discussion' and
+                                         previous.get('status') == 'continue'))
+        same_closure = (follows_confirmed_discussion and discussion_transition_confirmed(previous) and
+                        all(previous.get(key) == current.get(key) for key in
+                            ('discussion_closure_question_source', 'discussion_closure_source')))
+        waiting_for_question = (previous.get('phase') == 'discussion' and
+                                discussion_transition_waiting(previous) and
+                                previous.get('wait_evidence') == current.get('discussion_closure_question_source'))
+        if not (same_closure or waiting_for_question):
+            errors.append('discussion transition answer must match the preceding question')
+        if (not discussion_ready(previous) or not discussion_ready(current) or
+                discussion_decisions(previous) != discussion_decisions(current)):
+            errors.append('discussion transition must be reconfirmed after a material change')
     delivered = (isinstance(new_plan, dict) and new_plan.get('presented') is True and
                  (not isinstance(old_plan, dict) or old_plan.get('presented') is not True or
                   old_plan.get('evidence') != new_plan.get('evidence')))
@@ -1029,8 +1071,14 @@ def validate_transition(previous, current):
         previous.get(key) != current.get(key)
         for key in ('status', 'next_action', 'decisions', 'plan', 'goals', 'operations')
     )
+    pending_scoped_plan = (old_plan_unshown and previous.get('plan_requested') is True and
+                           previous.get('phase') in ('discussion', 'planning') and
+                           previous.get('status') in ('continue', 'wait_user', 'wait_tool') and
+                           current.get('phase') in ('discussion', 'planning') and
+                           current.get('status') in ('continue', 'wait_user', 'wait_tool'))
     if (previous.get('scope_limited') is True and current.get('scope_limited') is True and
             scope_state_changed and
+            not pending_scoped_plan and
             current.get('scope_limited_source') == previous.get('scope_limited_source')):
         errors.append('scope limited waiver cannot persist across resume')
     old_decisions = previous.get('decisions', [])
@@ -1250,6 +1298,39 @@ def validate_transition(previous, current):
     return errors
 
 
+def discussion_decisions(s):
+    decisions = s.get('decisions')
+    if not isinstance(decisions, list):
+        return {}
+    fields = ('subject', 'status', 'value', 'source')
+    return {
+        item['id']: tuple(item.get(field) for field in fields)
+        for item in decisions
+        if isinstance(item, dict) and isinstance(item.get('id'), str)
+        and item.get('blocks_plan') is not False
+    }
+
+
+def discussion_ready(s):
+    return (s.get('coverage_checked') is True and isinstance(s.get('decisions'), list) and
+            not any(decision[1] == 'pending' for decision in discussion_decisions(s).values()))
+
+
+def discussion_transition_waiting(s):
+    source = s.get('discussion_closure_question_source')
+    return (s.get('status') == 'wait_user' and
+            isinstance(source, str) and bool(source.strip()) and s.get('wait_evidence') == source)
+
+
+def discussion_transition_confirmed(s):
+    question = s.get('discussion_closure_question_source')
+    answer = s.get('discussion_closure_source')
+    return (s.get('discussion_closed') is True and
+            isinstance(question, str) and isinstance(answer, str) and
+            bool(question.strip()) and bool(answer.strip()) and
+            question.strip() != answer.strip())
+
+
 def pending_plan_request_action(s):
     """Distinguish a delivered draft for this request from an older draft."""
     if not s['plan_requested'] or s['plan']['presented']:
@@ -1398,8 +1479,9 @@ def route(s):
             return {'action': 'resolve_pending', 'next_action': s['next_action']}
         if s['plan']['presented'] and (not isinstance(goals, dict) or goals.get('presented') is not True):
             return {'action': 'present_plan'}
-        if s.get('plan_required', True) and not s['plan']['presented']:
-            return {'action': 'present_plan' if s['plan_requested'] else 'request_plan_transition'}
+        if s.get('plan_required', True) and (s['phase'] == 'discussion' or not s['plan']['presented']):
+            return {'action': ('present_plan' if discussion_transition_confirmed(s)
+                               else 'request_plan_transition')}
     if s['phase'] == 'analysis':
         return {'action': 'continue_analysis', 'next_action': '完成分析后进入讨论'}
     return {'action': 'continue_current_phase', 'next_action': s['next_action']}
@@ -1534,7 +1616,15 @@ def count_questions_outside_code(reply):
 
 def validate_discussion_final(s, reply, handoff):
     """Validate a discussion question, user-scoped stop, or actual tool wait."""
-    if not isinstance(s, dict) or s.get('phase') != 'discussion':
+    if not isinstance(s, dict):
+        return []
+    if s.get('phase') == 'planning' and discussion_transition_waiting(s):
+        return ['first formal plan presentation requires confirmed discussion transition']
+    if (s.get('phase') == 'planning' and s.get('plan_required', True) and
+            isinstance(s.get('plan'), dict) and s['plan'].get('presented') is False and
+            route(s).get('action') != 'present_plan'):
+        return ['first formal plan presentation requires confirmed discussion transition']
+    if s.get('phase') != 'discussion':
         return []
     if not isinstance(handoff, dict):
         return ['discussion final requires discussion_handoff']
@@ -1574,8 +1664,15 @@ def validate_discussion_final(s, reply, handoff):
         if any(isinstance(item, dict) and item.get('status') == 'pending' and
                item.get('blocks_plan', True) is not False for item in s.get('decisions', [])):
             review_errors.append('discussion tool wait cannot bypass pending decisions')
-        if (routed.get('independent_action') or routed.get('independent_checks') or
-                pending_plan_request_action(s)):
+        draft_action = pending_plan_request_action(s)
+        if draft_action and s.get('scope_limited') is True and s.get('scope_limited_source') == s.get('plan_request_source'):
+            wait_review = validate_semantic_review(
+                handoff.get('semantic_review'), kind, extra_checks=('formal_plan_only_wait',))
+            if not wait_review:
+                draft_action = None
+            else:
+                review_errors = wait_review
+        if routed.get('independent_action') or routed.get('independent_checks') or draft_action:
             review_errors.append('discussion tool wait cannot bypass available work or a pending plan request')
         if s.get('coverage_checked') is not True:
             review_errors.append('discussion final requires coverage_checked before handoff')
@@ -1587,7 +1684,15 @@ def validate_discussion_final(s, reply, handoff):
             source = s.get('scope_limited_source')
             if not isinstance(source, str) or not source.strip():
                 return ['scope limited source required']
-            if route_action not in ('scope_complete', 'local_complete', 'paused', 'complete'):
+            draft_only = (route_action in ('present_incomplete_plan', 'resolve_pending') and
+                          s.get('coverage_checked') is True and
+                          source == s.get('plan_request_source') and
+                          s.get('plan_requested') is True)
+            if draft_only:
+                review_errors = validate_semantic_review(
+                    handoff.get('semantic_review'), kind,
+                    extra_checks=('draft_only_scope', 'incomplete_plan_delivered'))
+            elif route_action not in ('scope_complete', 'local_complete', 'paused', 'complete'):
                 return ['discussion final cannot bypass active interruption or blocking state with scoped stop']
             if question_count != 0:
                 review_errors.append('scope limited discussion final must not add a question')
@@ -1646,14 +1751,76 @@ def validate_discussion_final(s, reply, handoff):
     elif kind == 'plan_transition':
         if pending:
             errors.append('discussion plan transition cannot bypass pending decisions')
-        if route_action != 'request_plan_transition':
+        waiting_for_answer = route_action == 'wait_user' and discussion_transition_waiting(s)
+        if waiting_for_answer and (routed.get('independent_action') or routed.get('independent_checks')):
+            errors.append('discussion plan transition cannot bypass available independent work')
+        if route_action != 'request_plan_transition' and not waiting_for_answer:
             errors.append('discussion plan transition conflicts with next action: ' + str(route_action))
-        if isinstance(s.get('plan'), dict) and s['plan'].get('presented') is True:
-            errors.append('discussion plan transition cannot be used after the formal plan is already presented')
     return errors
 
 
-def add_error_diagnostics(result, state):
+STATE_REPAIR_HINTS = {
+    'first formal plan presentation requires confirmed discussion transition': (
+        'discussion_closure_question_source', '保持讨论阶段。核对已发出的收口问题与针对它的肯定答复；'
+        '尚未提问就先提问，已问未答则等待。只引用实际发生的两条消息。'),
+    'discussion transition answer must match the preceding question': (
+        'discussion_closure_question_source', '引用上一讨论状态中实际待答的收口问题及本次对应的肯定答复。'),
+    'discussion transition must be reconfirmed after a material change': (
+        'discussion_closed', '接回讨论并核对变化影响，原收口答复只覆盖原决定。当前方案谈妥后再收口。'),
+    'formal plan display requires the preceding discussion or presentation state': (
+        'previous', '首次展示传入发出收口问题后的待答状态。补齐旧计划的目标时传入有真实展示来源的旧状态。'),
+    'a previously presented formal plan must retain its presentation state without a revision source': (
+        'plan.presented', '保留真实的旧计划和展示来源。用户确实要求撤换旧计划时，'
+        '保留前态并引用实际修订消息，按影响核对旧确认。'),
+    'execution_scope.source required': (
+        'execution_scope.source', '引用明确授权本次执行范围的用户消息。只有计划或目标确认时，保留未授权状态。'),
+    'goal_scope_baseline required for previous goal state': (
+        'previous.goal_scope_baseline', '从上一轮目标快照恢复当时的 included 和 excluded；'
+        '若手上的 previous 不是那一轮快照，先核对记录，不能用当前目标填旧快照。'),
+    'changed goals require superseded_goals or stale host goal record': (
+        'goals', '对照上一状态的目标、展示来源及目标标识。仅取证进展写入 evidence_map；'
+        '目标确实变更时按实际范围和确认来源记录替代关系，宿主同步状态按现场填写。'),
+    'wait_user requires reference to already presented question': (
+        'wait_evidence', '引用已经实际发出的那道待答问题。拟发问题先走提问交接，发出后才记为等待用户。'),
+    'resuming paused task requires source': (
+        'resume_source', '核对用户是否明确恢复当前任务。已恢复则引用该消息，只有反馈或插问时保留原任务暂停状态。'),
+    'changed goal tracking requires a new confirmation source': (
+        'goal_tracking_confirmation_source', '核对当前目标跟踪方式是否真的变了。未变则沿用有效设置；'
+        '确实改用降级方式时，先取得并引用对应确认。'),
+    'plan step action cannot change without a new plan': (
+        'plan.steps', '核对动作变化对应的计划修订。只有状态或证据变化时沿用原动作；'
+        '动作确实变更时，用实际修订来源更新计划，并保留未受影响的步骤进度。'),
+    'completion evidence required': (
+        'completion_evidence', '引用已发生的交付或完成证据。仍待回复中交付的内容先交付，按实际事件再同步。'),
+}
+
+
+def changed_goal_ids(previous, current):
+    if not isinstance(previous, dict) or not isinstance(current, dict):
+        return []
+
+    def items_by_id(record):
+        if not isinstance(record, dict):
+            return {}
+        return {
+            item['id']: (group, item)
+            for group in ('included', 'excluded')
+            for item in (record.get(group) if isinstance(record.get(group), list) else [])
+            if isinstance(item, dict) and isinstance(item.get('id'), str)
+        }
+
+    affected = set()
+    for field in ('goals', 'goal_scope_baseline'):
+        before_record, after_record = previous.get(field), current.get(field)
+        if not isinstance(before_record, dict) or not isinstance(after_record, dict):
+            continue
+        before, after = items_by_id(before_record), items_by_id(after_record)
+        affected.update(ident for ident in before.keys() | after.keys()
+                        if before.get(ident) != after.get(ident))
+    return sorted(affected)
+
+
+def add_error_diagnostics(result, state, previous=None):
     """Explain selected input errors without changing validation or routing."""
     diagnostics = []
     errors = [(error, 'errors') for error in result.get('errors', [])]
@@ -1675,6 +1842,13 @@ def add_error_diagnostics(result, state):
                         '尚未展示时保留真实状态，按 next 返回动作展示，不能填未来回复来通过检查。'
                         '已有展示不能为绕过检查改成未展示，应恢复其真实来源。',
             }
+        elif error in STATE_REPAIR_HINTS:
+            field, hint = STATE_REPAIR_HINTS[error]
+            detail = {'field': field, 'hint': hint}
+            if error == 'changed goals require superseded_goals or stale host goal record':
+                affected = changed_goal_ids(previous, state)
+                if affected:
+                    detail['changed_goal_ids'] = affected
         if detail is not None:
             if source == 'original_state_errors':
                 detail['error_source'] = source
@@ -1715,7 +1889,7 @@ def main():
             discussion_handoff = None
         if args.mode == 'begin':
             result = begin_execution(state, previous)
-            add_error_diagnostics(result, state)
+            add_error_diagnostics(result, state, previous)
             print(json.dumps(result, ensure_ascii=False))
             return 0 if result.get('ok') else 1
         previous_required = (
@@ -1728,17 +1902,25 @@ def main():
         transition_errors = []
         if previous is not None:
             transition_errors = validate_transition(previous, state)
-            errors.extend(transition_errors)
+        routed = route(state) if args.mode in ('next', 'final') else None
+        if not errors and routed is not None and routed.get('action') == 'present_plan':
+            plan = state['plan']
+            old_plan = previous.get('plan') if isinstance(previous, dict) else None
+            if (not isinstance(old_plan, dict) or not isinstance(old_plan.get('presented'), bool) or
+                    (plan.get('presented') is True and
+                     (old_plan.get('presented') is not True or old_plan.get('evidence') != plan.get('evidence')))):
+                transition_errors.append('formal plan display requires the preceding discussion or presentation state')
+        errors.extend(transition_errors)
         if args.mode == 'final':
             errors.extend(validate_discussion_final(state, draft_reply, discussion_handoff))
             result = {'ok': not errors, 'errors': errors}
         elif args.mode == 'next':
-            result = route(state)
+            result = routed
             if previous_required:
                 result = {'action': 'repair_state', 'errors': errors}
         else:
             result = {'ok': not errors, 'errors': errors}
-        if previous is not None and transition_errors and isinstance(state, dict):
+        if transition_errors and isinstance(state, dict):
             is_paused = result.get('action') == 'paused' or (result.get('action') == 'wait_interruption' and result.get('status') == 'paused')
             if args.mode == 'next' and is_paused:
                 result['errors'] = errors
@@ -1754,7 +1936,7 @@ def main():
             result['scope'] = 'structure_and_changes_and_reply' if previous is not None else 'structure_and_reply'
         else:
             result['scope'] = 'structure_and_changes' if previous is not None else 'structure_only'
-        add_error_diagnostics(result, state)
+        add_error_diagnostics(result, state, previous)
         print(json.dumps(result, ensure_ascii=False))
         safe_actions = ('paused', 'handle_interruption', 'wait_interruption', 'reconcile_interruption')
         return bool(errors) and result.get('action') not in safe_actions

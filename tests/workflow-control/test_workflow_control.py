@@ -111,6 +111,24 @@ def state(**updates):
     return value
 
 
+DISCUSSION_QUESTION = '助手发出的讨论收口问题'
+
+
+def wait_for_discussion_transition(s):
+    return dict(s, phase='discussion', status='wait_user', wait_reason='等待用户收口答复',
+                wait_evidence=DISCUSSION_QUESTION,
+                discussion_closure_question_source=DISCUSSION_QUESTION)
+
+
+def confirm_discussion_transition(s):
+    s.update(
+        discussion_closed=True,
+        discussion_closure_question_source=DISCUSSION_QUESTION,
+        discussion_closure_source='用户答复同意展示计划和目标',
+    )
+    return s
+
+
 def refresh_execution(s):
     """Recompute the receipt after a test changes an authorization field."""
     if s.get('phase') in ('execution', 'verification', 'review'):
@@ -247,7 +265,8 @@ class ControlTests(unittest.TestCase):
         self.assertEqual('resolve_pending', controller.route(s)['action'])
         s['decisions'][0].update(status='delegated', value='保留一份可恢复备份')
         s['plan_requested'] = True
-        self.assertEqual('present_plan', controller.route(s)['action'])
+        self.assertEqual('request_plan_transition', controller.route(s)['action'])
+        self.assertEqual('present_plan', controller.route(confirm_discussion_transition(s))['action'])
         s.update(phase='execution', plan={'presented':True, 'evidence':'计划', 'presentation_id':'委托展示'},
                  goals={'presented':True, 'evidence':'目标', 'presentation_id':'委托展示',
                         'included':[{'id':'G1','kind':'changed','criterion':'委托目标','source':'用户委托'}],
@@ -290,9 +309,10 @@ class ControlTests(unittest.TestCase):
         s['plan'].update(draft_presented=True, draft_evidence='上一轮已发送草案', draft_for_request=s['plan_request_source'])
         self.assertEqual('resolve_pending', controller.route(s)['action'])
         s['decisions'][0].update(status='decided', value='用户选定范围', source='用户回答')
-        self.assertEqual('present_plan', controller.route(s)['action'])
+        self.assertEqual('request_plan_transition', controller.route(s)['action'])
         s['plan_requested'] = False
         self.assertEqual('request_plan_transition', controller.route(s)['action'])
+        self.assertEqual('present_plan', controller.route(confirm_discussion_transition(s))['action'])
         s.update(status='paused', wait_reason='用户暂停')
         self.assertEqual('paused', controller.route(s)['action'])
 
@@ -341,9 +361,143 @@ class ControlTests(unittest.TestCase):
         s['decisions'] = [answered]
         self.assertEqual('request_plan_transition', controller.route(s)['action'])
         s.update(plan_requested=True, plan_request_source='用户要求计划')
-        self.assertEqual('present_plan', controller.route(s)['action'])
+        self.assertEqual('request_plan_transition', controller.route(s)['action'])
         s.update(status='wait_user', wait_reason='等待用户决定', wait_evidence='已展示的问题')
         self.assertEqual('wait_user', controller.route(s)['action'])
+
+    def test_first_plan_requires_distinct_question_and_answer_sources(self):
+        s = state(decisions=[], plan_request_source='尽可能优化整个项目')
+        self.assertEqual('request_plan_transition', controller.route(s)['action'])
+        self.assertEqual([], controller.validate_discussion_final(
+            s, '是否结束讨论并展示计划和目标？', handoff('plan_transition')))
+
+        s['discussion_closure_question_source'] = '助手已发出的收口问题'
+        s.update(status='wait_user', wait_reason='等待收口答复',
+                 wait_evidence=s['discussion_closure_question_source'])
+        self.assertEqual('wait_user', controller.route(s)['action'])
+
+        s.update(status='continue', phase='planning')
+        s.update(discussion_closed=True, discussion_closure_source=s['discussion_closure_question_source'])
+        self.assertEqual('request_plan_transition', controller.route(s)['action'])
+        self.assertIn('first formal plan presentation requires confirmed discussion transition',
+                      controller.validate_discussion_final(s, '正式计划', None))
+
+        s['discussion_closure_source'] = '用户答复：可以，继续'
+        self.assertEqual('present_plan', controller.route(s)['action'])
+        s.update(coverage_checked=False, plan_requested=False)
+        self.assertEqual('check_coverage', controller.route(s)['action'])
+
+    def test_discussion_transition_rejects_stale_question_or_changed_scope(self):
+        decision = {'id': 'd1', 'subject': '平台', 'status': 'decided',
+                    'value': 'Android', 'source': '用户选 Android'}
+        previous = wait_for_discussion_transition(state(decisions=[decision]))
+        current = confirm_discussion_transition(dict(previous, status='continue'))
+        self.assertEqual([], controller.validate_transition(previous, current))
+        current['decisions'] = [dict(decision, blocks_plan=True)]
+        self.assertEqual([], controller.validate_transition(previous, current))
+        current['discussion_closure_question_source'] = '另一次收口问题'
+        self.assertIn('discussion transition answer must match the preceding question',
+                      controller.validate_transition(previous, current))
+        current = confirm_discussion_transition(dict(previous, status='continue', decisions=[
+            dict(decision, value='Android 和 iOS', source='用户同意收口并增加 iOS'),
+        ]))
+        self.assertIn('discussion transition must be reconfirmed after a material change',
+                      controller.validate_transition(previous, current))
+
+    def test_active_plan_only_scope_survives_the_required_discussion_wait(self):
+        initial = state(decisions=[], scope_limited=True,
+                        scope_limited_source='用户只要计划和目标')
+        waiting = wait_for_discussion_transition(initial)
+        self.assertEqual([], controller.validate_transition(initial, waiting))
+        tool_wait = dict(initial, status='wait_tool', wait_reason='等待核对材料')
+        self.assertEqual([], controller.validate_transition(initial, tool_wait))
+        self.assertEqual([], controller.validate_transition(tool_wait, initial))
+        current = confirm_discussion_transition(dict(waiting, status='continue', phase='planning'))
+        self.assertEqual([], controller.validate_transition(waiting, current))
+
+    def test_pending_discussion_transition_can_resume_after_an_interruption(self):
+        s = wait_for_discussion_transition(state(decisions=[]))
+        reply = '保留链接的意思是沿用原地址。\n\n是否结束讨论并展示计划和目标？'
+        self.assertEqual([], controller.validate_discussion_final(s, reply, handoff('plan_transition')))
+        s['operations'] = [{'id': 'probe', 'reference': '已发查询', 'status': 'running',
+                            'side_effect': False, 'blocks_next': False, 'independent_of_wait': True}]
+        self.assertIn('discussion plan transition cannot bypass available independent work',
+                      controller.validate_discussion_final(s, reply, handoff('plan_transition')))
+        s.pop('operations')
+        s['wait_evidence'] = '另一个问题'
+        self.assertIn('discussion plan transition conflicts with next action: wait_user',
+                      controller.validate_discussion_final(s, reply, handoff('plan_transition')))
+
+    def test_unresolved_discussion_cannot_get_final_permission_by_switching_to_planning(self):
+        s = state(phase='planning')
+        self.assertIn('first formal plan presentation requires confirmed discussion transition',
+                      controller.validate_discussion_final(s, '正式计划和验收目标', None))
+        waiting = wait_for_discussion_transition(state(decisions=[]))
+        self.assertIn('first formal plan presentation requires confirmed discussion transition',
+                      controller.validate_discussion_final(
+                          dict(waiting, phase='planning'), '正式计划和验收目标', None))
+
+    def test_only_an_explicitly_scoped_incomplete_draft_can_end_without_a_question(self):
+        source = '用户明确只交付标明缺口的讨论稿'
+        s = state(scope_limited=True, scope_limited_source=source, plan_request_source=source)
+        reply = '讨论稿已说明当前存储方案的缺口。'
+        ordinary_waiver = handoff('waived')
+        self.assertTrue(controller.validate_discussion_final(s, reply, ordinary_waiver))
+        ordinary_waiver['semantic_review']['checks']['draft_only_scope'] = True
+        self.assertTrue(controller.validate_discussion_final(s, '稍后给你讨论稿。', ordinary_waiver))
+        ordinary_waiver['semantic_review']['checks']['incomplete_plan_delivered'] = True
+        self.assertEqual([], controller.validate_discussion_final(s, reply, ordinary_waiver))
+
+    def test_old_plan_does_not_close_reopened_discussion(self):
+        s = state(decisions=[], plan={'presented': True, 'evidence': '实际旧计划'},
+                  goals={'presented': True, 'evidence': '实际旧目标'})
+        self.assertEqual('request_plan_transition', controller.route(s)['action'])
+        self.assertEqual([], controller.validate_discussion_final(
+            s, '是否结束讨论并展示修订计划和验收目标？', handoff('plan_transition')))
+        waiting = wait_for_discussion_transition(s)
+        premature = dict(waiting, phase='planning')
+        error = 'first formal plan presentation requires confirmed discussion transition'
+        self.assertIn(error, controller.validate_transition(waiting, premature))
+        self.assertIn(error, controller.validate_discussion_final(premature, '修订计划和验收目标', None))
+        approved = confirm_discussion_transition(dict(waiting, status='continue'))
+        self.assertEqual([], controller.validate_transition(waiting, approved))
+        self.assertEqual('present_plan', controller.route(approved)['action'])
+        self.assertEqual([], controller.validate_transition(approved, dict(approved, phase='planning')))
+        erased = dict(approved, plan={'presented': False}, goals={'presented': False})
+        self.assertIn('a previously presented formal plan must retain its presentation state without a revision source',
+                      controller.validate_transition(waiting, erased))
+
+    def test_marking_both_outputs_presented_still_requires_a_valid_preceding_state(self):
+        previous = state(decisions=[], plan={})
+        current = state(phase='planning', decisions=[], plan={'presented': True, 'evidence': '展示'},
+                        goals={'presented': True, 'evidence': '展示'})
+        payload = {'previous': previous, 'state': current, 'draft_reply': '正式计划与验收目标'}
+        for mode in ('next', 'final'):
+            with self.subTest(mode=mode):
+                p = subprocess.run([sys.executable, str(SCRIPT), mode, '--state', '-'],
+                                   input=json.dumps(payload), capture_output=True, text=True)
+                result = json.loads(p.stdout)
+                self.assertNotEqual(0, p.returncode)
+                self.assertIn('formal plan display requires the preceding discussion or presentation state',
+                              result['errors'])
+
+    def test_scoped_formal_plan_can_report_real_tool_wait_without_requesting_a_draft(self):
+        source = '用户本轮只要查完后的正式计划和目标'
+        s = state(status='wait_tool', wait_reason='查询仍运行', decisions=[],
+                  scope_limited=True, scope_limited_source=source, plan_request_source=source)
+        waiting = handoff('tool_wait')
+        reply = '查询仍在运行，取得结果后接着核对方案。'
+        self.assertTrue(controller.validate_discussion_final(s, reply, waiting))
+        waiting['semantic_review']['checks']['formal_plan_only_wait'] = True
+        self.assertEqual([], controller.validate_discussion_final(s, reply, waiting))
+
+    def test_missing_or_previously_shown_plan_cannot_substitute_for_a_waiting_state(self):
+        approved = confirm_discussion_transition(state(decisions=[]))
+        for old_plan in ({}, {'presented': True, 'evidence': '真实旧计划'}):
+            with self.subTest(old_plan=old_plan):
+                previous = state(decisions=[], plan=old_plan)
+                self.assertIn('discussion transition answer must match the preceding question',
+                              controller.validate_transition(previous, approved))
 
     def test_discussion_final_must_end_with_one_question(self):
         s = state(plan_requested=False, decisions=[{
@@ -968,7 +1122,8 @@ class ControlTests(unittest.TestCase):
         s = state(phase='planning', decisions=[], plan_requested=False, next_action='暂时结束')
         self.assertEqual('request_plan_transition', controller.route(s)['action'])
         s['plan_requested'] = True
-        self.assertEqual('present_plan', controller.route(s)['action'])
+        self.assertEqual('request_plan_transition', controller.route(s)['action'])
+        self.assertEqual('present_plan', controller.route(confirm_discussion_transition(s))['action'])
         s.update(status='paused', wait_reason='用户暂停')
         self.assertEqual('paused', controller.route(s)['action'])
 
@@ -1000,9 +1155,10 @@ class ControlTests(unittest.TestCase):
     def test_entering_planning_after_a_request_to_skip_still_presents_both(self):
         s = state(phase='planning', plan_requested=True, plan_request_source='用户要求跳过计划并执行',
                   decisions=[], next_action='按主控展示计划和目标')
-        result = controller.route(s)
+        self.assertEqual('request_plan_transition', controller.route(s)['action'])
+        result = controller.route(confirm_discussion_transition(s))
         self.assertEqual('present_plan', result['action'])
-        self.assertIn('一起展示正式计划和目标', result.get('instruction', controller.GUIDANCE['present_plan']))
+        self.assertIn('一起展示正式计划和目标', controller.GUIDANCE['present_plan'])
 
     def test_explicit_skip_cannot_disable_plan_when_entering_planning(self):
         s = state(phase='planning', plan_requested=False, plan_required=False,
@@ -1804,7 +1960,8 @@ class ControlTests(unittest.TestCase):
         s['plan'].pop('draft_for_request')
         self.assertEqual('verify_plan_request',controller.route(s)['action'])
         s['decisions']=[]
-        self.assertEqual('present_plan',controller.route(s)['action'])
+        self.assertEqual('request_plan_transition', controller.route(s)['action'])
+        self.assertEqual('present_plan', controller.route(confirm_discussion_transition(s))['action'])
 
     def test_old_draft_can_be_distinguished_without_old_request_reference(self):
         s=state(plan_request_source='本轮请求',plan={'presented':False,'draft_presented':True,
@@ -1831,14 +1988,15 @@ class ControlTests(unittest.TestCase):
     def test_reported_draft_does_not_block_new_formal_plan(self):
         s = state(decisions=[], plan={'presented':False,'draft_presented':True,
                   'draft_evidence':'上轮草案','draft_delivery':{'status':'reported','evidence':'旧草案'}})
-        self.assertEqual('present_plan', controller.route(s)['action'])
+        self.assertEqual('request_plan_transition', controller.route(s)['action'])
+        self.assertEqual('present_plan', controller.route(confirm_discussion_transition(s))['action'])
 
     def test_direct_cli_does_not_create_bytecode(self):
         with tempfile.TemporaryDirectory() as d:
             import shutil
             copied=Path(d)/'workflow_control.py';shutil.copy2(SCRIPT,copied)
             p=subprocess.run([sys.executable,str(copied),'next','--json',json.dumps(state(decisions=[]))],capture_output=True,text=True,check=True)
-            self.assertEqual('present_plan',json.loads(p.stdout)['action'])
+            self.assertEqual('request_plan_transition', json.loads(p.stdout)['action'])
             self.assertFalse((Path(d)/'__pycache__').exists())
 
     def test_never_treat_missing_source_as_confirmation(self):
@@ -2126,9 +2284,13 @@ class ControlTests(unittest.TestCase):
         self.assertEqual([],controller.validate_transition(previous,current))
 
     def test_fulfilled_plan_request_can_be_cleared(self):
-        previous=state(decisions=[])
-        current=dict(previous,plan_requested=False,plan={'presented':True,'evidence':'已列出计划'})
-        self.assertEqual([],controller.validate_transition(previous,current))
+        previous = wait_for_discussion_transition(state(decisions=[]))
+        current = state(decisions=[], plan_requested=False,
+                        plan={'presented': True, 'evidence': '同轮展示'},
+                        goals={'presented': True, 'evidence': '同轮展示'})
+        self.assertIn('first formal plan presentation requires confirmed discussion transition',
+                      controller.validate_transition(previous, current))
+        self.assertEqual([], controller.validate_transition(previous, confirm_discussion_transition(current)))
 
     def test_old_plan_does_not_fulfil_new_plan_request(self):
         previous=state(decisions=[],plan={'presented':True,'evidence':'旧计划'})
@@ -2294,11 +2456,28 @@ class ControlTests(unittest.TestCase):
             self.assertEqual(before,path.read_bytes());self.assertEqual('keep',attr.stdout.strip())
 
     def test_inline_state_needs_no_file(self):
-        s = state(decisions=[])
-        p = subprocess.run([sys.executable, str(SCRIPT), 'next', '--json', json.dumps(s)], capture_output=True, text=True, check=True)
+        s = confirm_discussion_transition(state(decisions=[]))
+        payload = {'state': s, 'previous': wait_for_discussion_transition(state(decisions=[]))}
+        p = subprocess.run([sys.executable, str(SCRIPT), 'next', '--json', json.dumps(payload)],
+                           capture_output=True, text=True, check=True)
         result = json.loads(p.stdout)
         self.assertEqual('present_plan', result['action'])
         self.assertIn('不等于', result['instruction'])
+
+    def test_cli_preserves_real_plan_only_history_but_requires_a_previous_state(self):
+        s = state(decisions=[], phase='planning', plan={'presented': True, 'evidence': '真实旧计划'})
+        for previous, action in (
+            (None, 'repair_state'),
+            (state(decisions=[]), 'repair_state'),
+            (s, 'present_plan'),
+        ):
+            with self.subTest(action=action, previous=previous):
+                payload = {'state': s, 'previous': previous}
+                result = subprocess.run(
+                    [sys.executable, str(SCRIPT), 'next', '--json', json.dumps(payload)],
+                    capture_output=True, text=True,
+                )
+                self.assertEqual(action, json.loads(result.stdout)['action'])
 
     def test_diagnostics_do_not_convert_invalid_phase_or_release_execution(self):
         s = state(phase='plan', decisions=[])
@@ -2353,8 +2532,38 @@ class ControlTests(unittest.TestCase):
         self.assertEqual(before_state, s)
         p = subprocess.run([sys.executable, str(SCRIPT), 'next', '--json',
                             json.dumps(state(decisions=[]))], capture_output=True, text=True, check=True)
-        self.assertEqual('present_plan', json.loads(p.stdout)['action'])
+        self.assertEqual('request_plan_transition', json.loads(p.stdout)['action'])
         self.assertNotIn('diagnostics', json.loads(p.stdout))
+
+    def test_diagnostics_locate_changed_goals_without_updating_evidence(self):
+        previous = state(
+            plan={'presented': True, 'evidence': '计划'},
+            goals={'presented': True, 'evidence': '旧目标'},
+        )
+        current = copy.deepcopy(previous)
+        current['goals']['included'][0]['criterion'] = '已改变的验收结果'
+        payload = {'state': current, 'previous': previous}
+        result = subprocess.run(
+            [sys.executable, str(SCRIPT), 'next', '--state', '-'],
+            input=json.dumps(payload), capture_output=True, text=True,
+        )
+        response = json.loads(result.stdout)
+        self.assertNotEqual(0, result.returncode)
+        self.assertEqual('repair_state', response['action'])
+        self.assertIn('changed goals require superseded_goals or stale host goal record',
+                      response['errors'])
+        goal_diagnostic = next(item for item in response['diagnostics'] if item['field'] == 'goals')
+        self.assertEqual(['G1'], goal_diagnostic['changed_goal_ids'])
+        self.assertIn('evidence_map', goal_diagnostic['hint'])
+
+    def test_diagnostics_explain_wait_without_replacing_the_error(self):
+        s = state(status='wait_user', wait_reason='等待回答')
+        result = controller.route(s)
+        controller.add_error_diagnostics(result, s)
+        self.assertEqual('repair_state', result['action'])
+        self.assertIn('wait_user requires reference to already presented question', result['errors'])
+        self.assertEqual('wait_evidence', result['diagnostics'][0]['field'])
+        self.assertIn('已经实际发出', result['diagnostics'][0]['hint'])
 
     def test_interruption_diagnostics_keep_original_errors_and_safe_route(self):
         frame = {'id': 'i1', 'request': '只读回答局部问题', 'source': '用户局部请求',
