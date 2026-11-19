@@ -4,7 +4,7 @@
 
 ## 强制入口与失败关闭
 
-`workflow_control.py` 是主控的结构检查器，不是另一个流程源。主控每完成一个阶段结果、准备提问、展示计划/目标、启动子代理或开始执行前，必须调用 `next` 并执行返回动作；讨论最终回复必须调用 `final`。准备业务执行时还必须调用 `begin`，取得 `execution_receipt` 后才能启动第一项。
+`workflow_control.py` 是主控的结构检查器，不是另一个流程源。主控每完成一个阶段结果、准备提问、展示计划/目标、启动子代理或开始执行前，必须调用 `next` 并执行返回动作；讨论最终回复和正式计划正文必须调用 `final`。准备业务执行时还必须调用 `begin`，取得 `execution_receipt` 后才能启动第一项。
 
 脚本只读标准输入或指定 JSON，不创建、覆盖或更新任务记录。例如 `next --state -` 从标准输入读取状态；`begin` 只返回一次性结构回执；`final` 从 `{"state":{...},"draft_reply":"最终回复草稿","discussion_handoff":{...}}` 读取状态、正文和唯一交接对象；`check` 只检查结构。
 
@@ -91,7 +91,7 @@ python3 /absolute/path/task-driver/scripts/workflow_control.py next \
 
 `host_goal_sync` 为 `synced` 或 `stale` 时必须仍有非空宿主 `host_id`；纯本地目标或没有 Goal 模式时只能使用 `None` 或 `unavailable`，不能声称宿主目标已同步。
 
-目标展示时，`goals.included` 只能包含 `kind:changed`（改动直接结果）或 `kind:associated`（直接关联结果），每项必须有 `id`、`criterion` 和 `source`；`goals.excluded` 每项必须有 `id`、`item` 和用户 `source`；`goals.evidence_map` 按 included 的 id 保存非空证据引用列表。进入完成前，脚本要求每个 included 都有证据，excluded 或未知 id 不能出现在 evidence_map；脚本只校验结构和覆盖关系，不判断证据是否真实支持目标。
+目标展示时，`goals.included` 只能包含 `kind:changed`（改动直接结果）或 `kind:associated`（直接关联结果），每项必须有 `id`、`criterion` 和 `source`；`goals.excluded` 每项必须有 `id`、`item` 和用户 `source`；`goals.evidence_map` 按 included 的 id 保存[证据记录](verification.md#执行验证)列表。例如 `{"G1":[{"kind":"tool","source":"本次测试原始输出或可回查工具事件","subject":"实际被测构建或版本","observed":"明确输入下的实际断言结果"}]}`。旧字符串引用可以读取，只是线索；重新从实际来源核对并补录，不能仅换格式。默认完成时每个 included 须有结构化记录，按用户要求结束时缺少该记录的目标仍归入未验证。excluded 或未知 id 不能出现在 evidence_map；脚本不鉴定来源真伪、测试覆盖或版本是否正确，这些由验证和审查负责。
 
 `goal_scope_baseline` 保存最后一次已确认目标的 included/excluded 快照。初次展示时与当前目标一致；目标临时 `presented:false` 时保留旧快照；用户变更范围并取得来源、记录 `superseded_goals` 后，更新为新范围。目标展示后进入执行、验证、审查或完成时必须提供 `previous`，用于核对当前范围与上一快照。
 
@@ -104,6 +104,12 @@ python3 /absolute/path/task-driver/scripts/workflow_control.py next \
 ```json
 {"task_id":"当前任务","phase":"analysis","status":"continue","next_action":"分析当前请求","decisions":[],"plan":{"presented":false},"coverage_checked":false,"plan_requested":false,"gates":{"plan":null,"goals":null,"execution":null,"subagents":null}}
 ```
+
+## 正式计划正文检查
+
+按[计划覆盖核对](planning.md#正式计划的覆盖核对)整理本次展示所依据的必要行为，使用 `final` 检查实际待发送正文。发首次正式计划时使用 `planning` 阶段、尚未展示的当前状态及可核实的 `previous`。已展示后需补齐或修订时，在 `planning` 或 `goals` 阶段沿用原展示记录和现有权限；正式修订的 `final` 输入标明 `formal_plan:true`。首次展示、旧计划补齐和正式修订都提交 `plan_coverage`，普通内容确认无需提供。执行受阻且本轮专门补齐旧计划和目标时，按 `next` 返回的 `plan_supplement` 处理；一般的独立查询沿用原分流。暂停、有阻塞待决项或仍依赖原操作时先处理下一动作。正文送达前不得为通过检查先标记已展示。
+
+输入在现有 `state`、`previous`、`draft_reply` 外加入 `plan_coverage`，每项包含实际来源和短而明确的触发、结果片段。例如 `[{"source":"用户确认的歌词编辑交互","trigger":"沿歌词连续滑动","expected":"选区随手势更新"}]`。将触发和结果放在同一条验收描述或同一段，脚本按空白归一后检查该对片段是否同时出现；有缺项先补正文。有依据的额外来源和范围取舍仍由主控核查，脚本只能检查传入清单和正文是否对应，不能从需求自动发现未列事项。此检查沿用现有回复时点，无需保存新状态或再次询问已确认事项。
 
 ## 讨论最终回复
 

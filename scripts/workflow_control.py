@@ -18,6 +18,8 @@ STATUSES = {'continue', 'wait_user', 'wait_tool', 'blocked', 'paused', 'complete
 GATES = ('plan', 'goals', 'execution', 'subagents')
 INTERRUPTION_STATUSES = STATUSES | {'cancelled'}
 GOAL_KINDS = {'changed', 'associated'}
+EVIDENCE_KINDS = ('tool', 'artifact', 'user')
+EVIDENCE_FIELDS = ('source', 'subject', 'observed')
 COMPLETION_BASES = {'evidence', 'user_requested'}
 GOAL_TRACKING_MODES = {'host', 'plan', 'conversation', 'unavailable'}
 GOAL_TRACKING_FALLBACK_MODES = {'plan', 'conversation'}
@@ -25,7 +27,7 @@ STEP_STATUSES = {'pending', 'in_progress', 'done', 'blocked'}
 GUIDANCE = {
     'present_incomplete_plan': '先读取或复用本 skill 的 references/planning.md、references/goals.md 及 references/templates.md 的目标草案章节，再在正文交付标明缺口的讨论稿，不能称为正式计划或请求执行。',
     'verify_plan_request': '核对当前计划请求与已交付草案的实际对应关系，再更新状态；不要重复提问或编造交付。',
-    'present_plan': '先读取或复用本 skill 的 references/planning.md、references/goals.md 及 references/templates.md 的目标草案章节，按方法核对正文和状态，讨论闭合后在正文一起展示正式计划和目标；用户明确限制只展示其中一项时，说明严格流程并等待调整范围。展示不等于确认或执行授权，内容尚无有效确认时不提供执行选项；用户明确本轮不执行时，只确认尚缺的计划/目标内容，不问“是否按计划执行”，也不承诺“确认后就开始”。用户后续明确授权时沿用有效确认继续，不重复询问。',
+    'present_plan': '先读取或复用本 skill 的 references/planning.md、references/goals.md 及 references/templates.md 的目标草案章节，按方法核对正文和状态，调用 final 检查实际正文及 plan_coverage，再一起展示正式计划和目标；用户明确限制只展示其中一项时，说明严格流程并等待调整范围。展示不等于确认或执行授权，内容尚无有效确认时不提供执行选项；用户明确本轮不执行时，只确认尚缺的计划/目标内容，不问“是否按计划执行”，也不承诺“确认后就开始”。用户后续明确授权时沿用有效确认继续，不重复询问。',
     'request_plan_transition': '保持讨论阶段。总结有效决定，完成 semantic_review 后最后询问是否结束讨论并开始展示正式计划与目标。问题实际发出后等待用户回答；已有计划请求也走此路径。',
     'resolve_pending': '处理尚有影响的事项：能调查先调查，委托范围内自行决定，其余讨论。讨论阶段最终回复必须始终以一个问题结束，完成 semantic_review 后再收口，不得仅汇报分析；不要重问已决事项。',
     'check_coverage': '先核对目标、已有资料、决定和未决事项，再以新状态检查；不得编造问题。',
@@ -34,7 +36,7 @@ GUIDANCE = {
     'check_operation': '仅在查询权限内只读核实原操作及回执；不授权新操作或重试，结果未知时不得重复执行副作用动作。',
     'handle_operation_failure': '原操作已失败且阻塞下一步；先按审查模块分类，保留失败证据，不重复执行，不把局部任务标记完成。',
     'scope_complete': '本轮只交付用户明确限定的内容；交付后停止，保留整体任务恢复点，不追加问题或推进下一阶段。',
-    'complete': '完成前逐项核对 goals.included：每项都必须在 evidence_map 中有非空证据，excluded 不得计入完成；证据不足时保持未完成。',
+    'complete': '完成前逐项核对 goals.included：在 evidence_map 中核对实际来源、当前产物或运行及观察结果是否覆盖通过条件，excluded 不得计入完成；证据不足时保持未完成。',
     'repair_state': '修正状态结构；旧目标补录 included、excluded、evidence_map 和 goal_scope_baseline 后继续。若用户明确要求结束/完成但仍有未验证项，先设置 completion_basis:user_requested，记录用户来源、completion_report 和 unverified_goals，再重试；不要把用户结束要求当成验收或宣称已验证。',
     'handle_interruption': '先处理当前临时请求，核对用户与宿主授权；业务执行仍须满足原有执行门槛，不扩大原任务授权。',
     'reconcile_interruption': '核对临时结果、恢复点、最新用户要求和实际现场；正文先交付临时结果，再接回对应事项。用户明确暂停时保持暂停。',
@@ -126,6 +128,23 @@ def validate_interruptions(s):
     return errors
 
 
+def evidence_record_errors(record):
+    if not isinstance(record, dict):
+        return ['must be a record']
+    errors = []
+    if record.get('kind') not in EVIDENCE_KINDS:
+        errors.append('kind must be tool, artifact, or user')
+    for field in EVIDENCE_FIELDS:
+        value = record.get(field)
+        if not isinstance(value, str) or not value.strip():
+            errors.append(field + ' required')
+    return errors
+
+
+def has_goal_evidence(records):
+    return isinstance(records, list) and any(not evidence_record_errors(record) for record in records)
+
+
 def validate_goal_scope(goals, require_completion_evidence=False, allow_empty_included=False):
     """Validate the goal scope and verify every included goal has evidence before completion."""
     errors = []
@@ -182,15 +201,26 @@ def validate_goal_scope(goals, require_completion_evidence=False, allow_empty_in
         if not isinstance(ident, str) or ident not in included_ids:
             errors.append('goals.evidence_map contains unknown goal id')
             continue
+        label = 'goals.evidence_map.' + ident
         if not isinstance(references, list):
-            errors.append('goals.evidence_map.' + ident + ' must be a list')
-        elif not references or any(not isinstance(ref, str) or not ref.strip() for ref in references):
-            errors.append('goals.evidence_map.' + ident + ' requires nonempty evidence references')
+            errors.append(label + ' must be a list')
+        elif not references:
+            errors.append(label + ' requires nonempty evidence references')
+        else:
+            for index, reference in enumerate(references):
+                if isinstance(reference, str) and reference.strip():
+                    continue  # Legacy references remain readable but do not prove completion.
+                errors.extend(
+                    f'{label}[{index}] {error}' for error in evidence_record_errors(reference)
+                )
 
     if require_completion_evidence:
         for ident in sorted(included_ids):
-            if not evidence_map.get(ident):
+            references = evidence_map.get(ident)
+            if not references:
                 errors.append('goal evidence missing: ' + ident)
+            elif not has_goal_evidence(references):
+                errors.append('goal evidence requires a verified observation: ' + ident)
     return errors
 
 
@@ -235,7 +265,7 @@ def validate_completion_accounting(s, goals):
         evidence_map = goals.get('evidence_map')
         if not isinstance(evidence_map, dict):
             evidence_map = {}
-        missing = [ident for ident in sorted(included_ids) if not evidence_map.get(ident)]
+        missing = [ident for ident in sorted(included_ids) if not has_goal_evidence(evidence_map.get(ident))]
         missing_unverified = set(missing) - seen
         if missing_unverified:
             errors.append(
@@ -1415,6 +1445,13 @@ def pending_plan_request_action(s):
     return 'verify_plan_request'
 
 
+def missing_goal_presentation(s):
+    goals = s.get('goals')
+    return s['plan']['presented'] is True and (
+        not isinstance(goals, dict) or goals.get('presented') is not True
+    )
+
+
 def route(s):
     """Return the next required category based on supplied facts, not model prose."""
     errors = validate(s)
@@ -1453,12 +1490,10 @@ def route(s):
     if (status == 'blocked' and isinstance(independent, str) and independent.strip() and
             independent_action_allowed(s)):
         return {'action': 'continue_local', 'next_action': independent, 'blocked_reason': s['wait_reason']}
-    goals = s.get('goals')
     if (status == 'blocked' and s['phase'] in ('planning', 'goals') and
-            s['plan'].get('presented') is True and
-            (not isinstance(goals, dict) or goals.get('presented') is not True) and
+            missing_goal_presentation(s) and
             s.get('local_only') is not True):
-        return {'action': 'continue_local',
+        return {'action': 'continue_local', 'plan_supplement': True,
                 'next_action': '先核对计划确认、待决事项及当前展示范围；允许时一起展示计划和目标，否则处理缺口或等待。',
                 'blocked_reason': s['wait_reason']}
     if status in ('wait_user', 'wait_tool'):
@@ -1532,8 +1567,7 @@ def route(s):
         return {'action': 'continue_local', 'next_action': s['next_action']}
     if (s.get('scope_limited') is True and s.get('coverage_checked') is True and
             s.get('plan_requested') is not True and
-            not (s.get('plan', {}).get('presented') is True and
-                 (not isinstance(goals, dict) or goals.get('presented') is not True))):
+            not missing_goal_presentation(s)):
         return {'action': 'scope_complete'}
     if s['phase'] in ('discussion', 'planning', 'goals'):
         if not s['coverage_checked']:
@@ -1546,7 +1580,7 @@ def route(s):
             if action:
                 return {'action': action}
             return {'action': 'resolve_pending', 'next_action': s['next_action']}
-        if s['plan']['presented'] and (not isinstance(goals, dict) or goals.get('presented') is not True):
+        if missing_goal_presentation(s):
             return {'action': 'present_plan'}
         if s.get('plan_required', True) and (s['phase'] == 'discussion' or not s['plan']['presented']):
             return {'action': ('present_plan' if discussion_transition_confirmed(s)
@@ -1617,6 +1651,48 @@ def begin_execution(s, previous=None):
 def discussion_final_line(reply):
     lines = [line.strip() for line in reply.splitlines() if line.strip()]
     return lines[-1] if lines else ''
+
+
+def validate_plan_final(state, reply, payload, routed):
+    explicit = payload.get('formal_plan') is True or 'plan_coverage' in payload
+    phase = state.get('phase') if isinstance(state, dict) else None
+    if phase not in ('planning', 'goals'):
+        return ['formal plan draft requires planning or goals phase'] if explicit else []
+
+    action = routed['action']
+    supplement = routed.get('plan_supplement') is True
+    if action != 'present_plan' and not supplement and not explicit:
+        return []
+    revision = (action == 'continue_current_phase' and state['plan']['presented'] is True and
+                not missing_goal_presentation(state))
+    if not (action == 'present_plan' or supplement or revision):
+        return ['formal plan draft conflicts with next action: ' + action]
+    if supplement and (not discussion_ready(state) or any(
+            op.get('blocks_next') is True and op['status'] in ('running', 'unknown', 'failed')
+            for op in state.get('operations', []))):
+        return ['formal plan supplement has pending decisions, unchecked coverage, or a blocking operation']
+    return validate_plan_coverage(reply, payload.get('plan_coverage'))
+
+
+def validate_plan_coverage(reply, requirements):
+    """Check that the source-derived requirements have an actionable test in the draft."""
+    if not isinstance(requirements, list) or not requirements:
+        return ['formal plan requires a nonempty plan_coverage list']
+    paragraphs = [' '.join(part.split()) for part in re.split(r'\n\s*\n', reply)]
+    errors = []
+    for index, requirement in enumerate(requirements):
+        label = f'plan_coverage[{index}]'
+        if not isinstance(requirement, dict) or any(
+                not isinstance(requirement.get(field), str) or not requirement[field].strip()
+                for field in ('source', 'trigger', 'expected')):
+            errors.append(label + ' requires source, trigger, and expected')
+            continue
+        trigger = ' '.join(requirement['trigger'].split())
+        expected = ' '.join(requirement['expected'].split())
+        if trigger == expected or not any(
+                trigger in paragraph and expected in paragraph for paragraph in paragraphs):
+            errors.append(f'{label} ({requirement["source"]}) is missing a trigger or expected result in the draft')
+    return errors
 
 
 def validate_semantic_review(review, kind, decision_id=None, extra_checks=()):
@@ -2040,6 +2116,7 @@ def main():
         errors.extend(transition_errors)
         if args.mode == 'final':
             errors.extend(validate_discussion_final(state, draft_reply, discussion_handoff))
+            errors.extend(validate_plan_final(state, draft_reply, payload, routed))
             result = {'ok': not errors, 'errors': errors}
         elif args.mode == 'next':
             result = routed

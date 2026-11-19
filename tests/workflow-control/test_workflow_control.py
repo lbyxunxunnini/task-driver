@@ -13,6 +13,11 @@ controller = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(controller)
 
 
+def observed_evidence(source='测试工具原始输出'):
+    return {'kind': 'tool', 'source': source, 'subject': '样例构建 1',
+            'observed': '样例输入返回了约定结果'}
+
+
 def state(**updates):
     value = {'task_id': 'task-a', 'phase': 'discussion', 'status': 'continue',
              'next_action': '继续讨论未决事项', 'decisions': [{'id': 'd1', 'subject': '范围', 'status': 'pending'}],
@@ -30,7 +35,7 @@ def state(**updates):
             'source': '测试需求',
         }])
         value['goals'].setdefault('excluded', [])
-        value['goals'].setdefault('evidence_map', {'G1': ['测试证据']})
+        value['goals'].setdefault('evidence_map', {'G1': [observed_evidence()]})
         value.setdefault('goal_scope_baseline', {
             'included': copy.deepcopy(value['goals']['included']),
             'excluded': copy.deepcopy(value['goals']['excluded']),
@@ -299,7 +304,7 @@ class ControlTests(unittest.TestCase):
                   plan_waiver_source='已有成果满足用户目标',
                   goals={'presented': True, 'evidence': '已完成结果',
                          'included': [{'id':'G1','kind':'changed','criterion':'结果已交付','source':'用户目标'}],
-                         'excluded': [], 'evidence_map': {'G1':['交付回执']}},
+                         'excluded': [], 'evidence_map': {'G1': [observed_evidence('交付回执')]}},
                   decisions=[{'id':'later','subject':'后续事项','status':'pending','blocks_completion':False,'nonblocking_reason':'用户同意延期且不影响本次目标'}])
         self.assertEqual([], controller.validate(s))
 
@@ -1114,6 +1119,74 @@ class ControlTests(unittest.TestCase):
         self.assertNotEqual(0, p.returncode)
         self.assertIn('draft_reply', json.loads(p.stdout)['errors'][0])
 
+    def test_formal_plan_final_rejects_a_missing_confirmed_behavior(self):
+        previous = wait_for_discussion_transition(state(decisions=[]))
+        current = confirm_discussion_transition(dict(previous, status='continue', phase='planning'))
+        coverage = [
+            {'source': '已确认的歌词选区交互', 'trigger': '沿歌词连续滑动', 'expected': '选区随手势更新'},
+            {'source': '已确认的音高编辑交互', 'trigger': '拖动音高控制柄', 'expected': '音高随拖动改变'},
+        ]
+        draft = ('计划：实现约定的歌词编辑。\n\n'
+                 'G1：沿歌词连续滑动时，选区随手势更新。')
+        payload = {'previous': previous, 'state': current, 'draft_reply': draft}
+
+        def final():
+            result = subprocess.run([sys.executable, str(SCRIPT), 'final', '--state', '-'],
+                                    input=json.dumps(payload), capture_output=True, text=True)
+            return json.loads(result.stdout)
+
+        self.assertIn('formal plan requires a nonempty plan_coverage list', final()['errors'])
+        payload['plan_coverage'] = coverage
+        failed = final()
+        self.assertFalse(failed['ok'])
+        self.assertIn('已确认的音高编辑交互', failed['errors'][0])
+        payload['draft_reply'] += '\n\nG2：拖动音高控制柄时，音高随拖动改变。'
+        self.assertTrue(final()['ok'])
+
+    def test_formal_plan_final_respects_revision_and_supplement_routes(self):
+        reply = 'G1：拖动音高控制柄时，音高随拖动改变。'
+        coverage = [{'source': '实际用户要求', 'trigger': '拖动音高控制柄',
+                     'expected': '音高随拖动改变'}]
+        current = state(phase='planning', plan_requested=False, decisions=[],
+                        plan={'presented': True, 'evidence': '原计划'},
+                        goals={'presented': True, 'evidence': '原目标'})
+        operation = {'id': 'op', 'reference': '原操作', 'status': 'unknown',
+                     'side_effect': True, 'blocks_next': True}
+
+        def final(checkpoint, **extra):
+            result = subprocess.run(
+                [sys.executable, str(SCRIPT), 'final', '--state', '-'],
+                input=json.dumps({'state': checkpoint, 'draft_reply': reply, **extra}),
+                capture_output=True, text=True,
+            )
+            return json.loads(result.stdout)
+
+        self.assertTrue(final(current)['ok'])  # An ordinary reply can confirm existing content.
+        self.assertIn('formal plan requires a nonempty plan_coverage list',
+                      final(current, formal_plan=True)['errors'])
+        self.assertTrue(final(current, formal_plan=True, plan_coverage=coverage)['ok'])
+        for updated, action in (
+            (dict(current, status='paused', wait_reason='用户暂停'), 'paused'),
+            (dict(current, decisions=[{'id': 'd1', 'subject': '待定范围', 'status': 'pending'}]),
+             'resolve_pending'),
+            (dict(current, operations=[operation]), 'check_operation'),
+        ):
+            with self.subTest(action=action):
+                self.assertIn('formal plan draft conflicts with next action: ' + action,
+                              final(updated, plan_coverage=coverage)['errors'])
+
+        supplement = dict(current, goals=None, status='blocked', wait_reason='只缺执行权限')
+        self.assertIn('formal plan requires a nonempty plan_coverage list', final(supplement)['errors'])
+        self.assertTrue(final(supplement, plan_coverage=coverage)['ok'])
+        independent = dict(supplement, independent_action='查询已有资料',
+                           independent_action_read_only=True,
+                           read_only_scope={'allowed_actions': ['查询已有资料'], 'source': '用户只读要求'})
+        self.assertTrue(final(independent)['ok'])
+        self.assertIn('formal plan draft conflicts with next action: continue_local',
+                      final(independent, formal_plan=True, plan_coverage=coverage)['errors'])
+        supplement['operations'] = [operation]
+        self.assertFalse(final(supplement, plan_coverage=coverage)['ok'])
+
     def test_unchecked_coverage_does_not_mean_discussion_is_done(self):
         s = state(plan_requested=False, decisions=[], coverage_checked=False)
         self.assertEqual('check_coverage', controller.route(s)['action'])
@@ -1286,7 +1359,7 @@ class ControlTests(unittest.TestCase):
                     {'id': 'G2', 'kind': 'associated', 'criterion': '关联项', 'source': '计划关联'},
                 ],
                 'excluded': [{'id': 'E1', 'item': '服务端能力', 'source': '用户明确排除'}],
-                'evidence_map': {'G1': ['模拟器截图']},
+                'evidence_map': {'G1': [observed_evidence('模拟器原始观察')]},
             },
             gates={'plan': '确认', 'goals': '确认', 'execution': '授权',
                    'subagents': '用户选择不开启'},
@@ -1294,8 +1367,14 @@ class ControlTests(unittest.TestCase):
         )
         self.assertIn('goal evidence missing: G2', controller.validate(s))
         self.assertEqual('repair_state', controller.route(s)['action'])
-        s['goals']['evidence_map']['G2'] = ['组件测试']
+        s['goals']['evidence_map']['G2'] = ['模型自述：已验证']
+        self.assertIn('goal evidence requires a verified observation: G2', controller.validate(s))
+        self.assertEqual('repair_state', controller.route(s)['action'])
+        s['goals']['evidence_map']['G2'] = [observed_evidence('组件测试原始输出')]
         self.assertEqual('complete', controller.route(s)['action'])
+
+        s['goals']['evidence_map']['G2'][0].pop('subject')
+        self.assertIn('goals.evidence_map.G2[0] subject required', controller.validate(s))
 
     def test_user_requested_completion_records_unverified_goals(self):
         s = state(
@@ -1308,7 +1387,7 @@ class ControlTests(unittest.TestCase):
                     {'id': 'G2', 'kind': 'associated', 'criterion': '关联项', 'source': '计划关联'},
                 ],
                 'excluded': [],
-                'evidence_map': {'G1': ['模拟器截图']},
+                'evidence_map': {'G1': [observed_evidence('模拟器原始观察')], 'G2': ['历史自述线索']},
             },
             completion_basis='user_requested',
             completion_request_source='用户明确要求结束任务',
@@ -2018,7 +2097,7 @@ class ControlTests(unittest.TestCase):
         self.assertEqual('repair_state', controller.route(s)['action'])
         s['goals'] = {'presented':True, 'evidence':'计划与目标正文', 'presentation_id':'计划正文',
                       'included':[{'id':'G1','kind':'changed','criterion':'目标','source':'测试需求'}],
-                      'excluded':[], 'evidence_map':{'G1':['计划与目标正文']}}
+                      'excluded': [], 'evidence_map': {'G1': [observed_evidence('计划与目标正文')]}}
         s['goal_scope_baseline'] = {'included':s['goals']['included'], 'excluded':[]}
         self.assertEqual('complete', controller.route(s)['action'])
 
