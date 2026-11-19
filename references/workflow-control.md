@@ -134,7 +134,13 @@ python3 /absolute/path/task-driver/scripts/workflow_control.py next \
 
 原任务明确暂停时，仅在用户另行要求临时事项且未暂停全部工作时，才设 `allow_while_paused:true` 及其用户消息 `allow_while_paused_source`；接回后仍保持暂停。临时事项被用户暂停后恢复须提供 `resume_source`。原状态存在结构或执行门槛错误时，`original_state_errors` 须在恢复原任务前处理，不妨碍独立且获准的临时请求。恢复不必传两份完整状态；已有 `previous` 时仍可用于原有的跨轮检查。脚本只返回结果，不自行写记录或授予权限。
 
-如果有正在运行或结果未知的操作，可用 `operations` 保存其 `id`、实际 `reference`、`status`、`side_effect` 和 `blocks_next`。`blocks_next`、`blocks_completion` 按依赖判断，与是否有副作用无关；`side_effect` 用于判断结果未知时能否安全重试。同一操作不应换标识重复记录；不阻止下一步不自动等于可以宣告整项完成。`check_operation` 仅核实原操作，在查询权限内不受后续执行许可缺失阻挡；结构错误仍须处理，查明后继续或重试仍须有效授权。即使当前状态是等待用户或等待工具，`blocks_next:true` 的已失败操作也先返回 `handle_operation_failure`，不能被等待状态遮蔽。
+如果有正在运行或结果未知的操作，可用 `operations` 保存其 `id`、实际 `reference`、`status`、`side_effect` 和 `blocks_next`。`blocks_next` 和 `blocks_completion` 分别对应实际下一动作和最终完成的依赖。`side_effect` 用于判断结果未知时能否安全重试。同一操作沿用标识和引用。`check_operation` 仅核实原操作，在查询权限内不受后续执行许可缺失阻挡。结构错误仍须处理，查明后继续或重试仍须有效授权。`blocks_next:true` 的已失败操作先返回 `handle_operation_failure`，不能被等待状态遮蔽。
+
+### 操作结果与依赖
+
+更新操作结果或依赖时，提交实际 `previous`，也可以用已有有效快照的增量输入。结果或完成依赖有新观察时，更新 `evidence`。若证据来源地址未变，可保留 `evidence`，用可核对的新结果位置、版本或观测记录填写 `evidence_revision`。新旧状态使用的来源和版本都须对应当时的实际观察。
+
+只读操作还未出结果时，若新证据证明实际下一动作可以独立推进，在 `next_dependency_evidence` 写入该证据并更新 `blocks_next`，保留原操作。下一动作变化后按其实际依赖重新核对。完成依赖另行核对，解除 `blocks_completion` 仍按[恢复规则](state-recovery.md#中断恢复)处理。结果未知且有副作用的操作保留原有阻塞，已获准的独立工作按下文推进。失败结果按异常处理。检查器比较相邻快照，比较 `evidence_revision` 和 `next_dependency_evidence` 时忽略空白字符。主控查核证据来源和较早记录，确认标识属于本次实际观察，并能证明相应结果、处置或依赖变化。
 
 脚本返回下一动作供主控执行：主任务执行受阻但计划和目标已满足展示门槛时，只能填 `independent_action` 为明确只读动作并设 `independent_action_read_only:true`；若动作可能有业务副作用，必须已有有效 `execution_receipt`、完整 gates、执行范围和许可动作，否则不能返回 `continue_local`。脚本返回 `continue_local` 时保留原阻塞原因。若该字段遗漏，但计划已展示、目标未展示且本轮不限于局部，脚本仍要求核对当前范围及确认依据，允许时一起展示计划和目标，不自行认定已授权。临时事项受阻仍保持等待。仍有影响方案的待决项时调查或讨论；用户要求计划且讨论闭合时列出计划，未闭合时可给标明缺口的草案；其他没有计划请求的情况按主控请求结束讨论。讨论闭合并进入正式计划阶段时同轮展示计划与目标；用户明确限定本轮只能展示其中一项时按主控等待调整限定。旧草案的待核实状态不能挡住已确认的正式计划。计划展示不是确认或执行授权。执行中准备继续实际操作时，覆盖尚未核对或仍有影响方案的待决项，脚本要求先修正状态并处理缺口；已完成的本轮局部动作可按限定收口，但存在 `running/unknown` 且 `blocks_next:true` 的操作时先核实，操作失败时返回 `handle_operation_failure`，成功后才允许 `local_complete`。用户暂停或明确限制本轮范围时优先遵从；未知副作用先核实原操作，不盲目重试。
 

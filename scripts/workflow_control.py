@@ -894,8 +894,14 @@ def validate(s):
         for key in ('blocks_completion', 'independent_of_wait'):
             if key in op and not isinstance(op[key], bool):
                 errors.append('operation ' + key + ' must be boolean')
-        if op.get('status') in ('failed', 'succeeded') and (not isinstance(op.get('evidence'), str) or not op['evidence'].strip()):
+        evidence = op.get('evidence')
+        if op.get('status') in ('failed', 'succeeded') and (not isinstance(evidence, str) or not evidence.strip()):
             errors.append('operation result requires evidence')
+        for key in ('evidence_revision', 'next_dependency_evidence'):
+            if key in op and (not isinstance(op[key], str) or not op[key].strip()):
+                errors.append('operation ' + key + ' must be nonempty text')
+        if 'evidence_revision' in op and (not isinstance(evidence, str) or not evidence.strip()):
+            errors.append('operation evidence_revision requires evidence')
         if op.get('status') in ('running', 'unknown') and op.get('blocks_completion') is False and (not isinstance(op.get('completion_unblock_reason'), str) or not op['completion_unblock_reason'].strip()):
             errors.append('nonblocking operation requires reason')
     checking_operation = any(isinstance(op, dict) and op.get('blocks_next') is True and op.get('status') in ('unknown', 'running') for op in operations)
@@ -968,9 +974,14 @@ def operations_by_id(state):
             if isinstance(op, dict) and isinstance(op.get('id'), str)}
 
 
-def has_new_source(value, previous):
-    previous = previous.strip() if isinstance(previous, str) else None
-    return isinstance(value, str) and bool(value.strip()) and value.strip() != previous
+def has_new_source(value, previous, *, normalize_spacing=False):
+    if not isinstance(value, str):
+        return False
+    previous = previous if isinstance(previous, str) else ''
+    if normalize_spacing:
+        value = ''.join(value.split())
+        previous = ''.join(previous.split())
+    return bool(value.strip()) and value.strip() != previous.strip()
 
 
 def validate_operation_transition(previous, current, confirmed_scope_change):
@@ -990,17 +1001,24 @@ def validate_operation_transition(previous, current, confirmed_scope_change):
         if old.get('side_effect') is True and observed.get('side_effect') is False:
             errors.append('unresolved operation cannot discard its side effect: ' + ident)
         new_status = observed.get('status')
-        fresh_evidence = has_new_source(observed.get('evidence'), old.get('evidence'))
+        fresh_evidence = (has_new_source(observed.get('evidence'), old.get('evidence')) or
+                          has_new_source(observed.get('evidence_revision'), old.get('evidence_revision'),
+                                         normalize_spacing=True))
         if new_status in ('succeeded', 'failed') and new_status != old.get('status') and not fresh_evidence:
             errors.append('operation result requires new evidence: ' + ident)
         if new_status == 'succeeded':
             continue
         handled_failure = old.get('status') == new_status == 'failed' and fresh_evidence
-        if old.get('blocks_next') is True and observed.get('blocks_next') is False and not handled_failure:
+        read_only_pending = (new_status in ('running', 'unknown') and
+                             old.get('side_effect') is False and observed.get('side_effect') is False)
+        next_is_independent = (pending and read_only_pending and
+                               has_new_source(observed.get('next_dependency_evidence'),
+                                              old.get('next_dependency_evidence'), normalize_spacing=True))
+        if (old.get('blocks_next') is True and observed.get('blocks_next') is False and
+                not (handled_failure or next_is_independent)):
             errors.append('unresolved operation cannot stop blocking next: ' + ident)
         if old.get('blocks_completion', True) and observed.get('blocks_completion') is False:
-            observed_scope = (new_status in ('running', 'unknown') and
-                              old.get('side_effect') is False and fresh_evidence)
+            observed_scope = read_only_pending and fresh_evidence
             if not (confirmed_scope_change or observed_scope or handled_failure):
                 errors.append('unresolved operation cannot stop blocking completion without scope evidence: ' + ident)
     return errors

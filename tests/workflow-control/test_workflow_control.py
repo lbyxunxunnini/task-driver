@@ -3199,6 +3199,66 @@ class RecoveryAndToolWaitTests(unittest.TestCase):
         self.assertEqual('request_plan_transition', actual[1]['action'])
         self.assertEqual(current, actual[1]['state'])
 
+    def test_operation_result_can_update_at_the_same_evidence_source(self):
+        old = self.waiting(operations=[
+            dict(id='observation', reference='原操作标识', status='running', side_effect=False,
+                 blocks_next=True, evidence='持续更新的观测记录', evidence_revision='状态版本 17'),
+        ])
+        for status, action in (('succeeded', 'request_plan_transition'), ('failed', 'handle_operation_failure')):
+            with self.subTest(status=status):
+                current = copy.deepcopy(old)
+                current.update(status='continue', next_action='处理已返回的结果')
+                changes = [
+                    {'path': ['status'], 'value': 'continue'},
+                    {'path': ['next_action'], 'value': '处理已返回的结果'},
+                    {'path': ['operations', 0, 'status'], 'value': status},
+                ]
+                operation = current['operations'][0]
+                operation['status'] = status
+                for revision in ('状态版本 17 ', '状态版本  17', '状态版本17', '    ', 42):
+                    code, rejected = self.cli('next', {'previous': old, 'changes': changes + [
+                        {'path': ['operations', 0, 'evidence_revision'], 'value': revision},
+                    ]})
+                    self.assertEqual(1, code, rejected)
+                operation['evidence_revision'] = '结果版本'
+                added = {'path': ['operations', 0, 'evidence_revision'], 'value': '结果版本'}
+                actual = self.cli('next', {'previous': old, 'changes': changes + [added]})
+                self.assertEqual(self.cli('next', {'previous': old, 'state': current}), actual)
+                self.assertEqual(0, actual[0], actual)
+                self.assertEqual(action, actual[1]['action'])
+
+    def test_new_evidence_can_release_a_read_only_dependency_on_the_next_action(self):
+        discussion = state(plan_requested=False)
+        verification = self.execution()
+        verification.update(phase='verification', execution_occurred=True)
+        verification['plan']['steps'][1].update(status='done', evidence='第二步已核实')
+        for old, action in ((discussion, 'resolve_pending'), (verification, 'continue_current_phase')):
+            with self.subTest(phase=old['phase']):
+                old['operations'] = [
+                    dict(id='source', reference='原只读操作', status='running', side_effect=False,
+                         blocks_next=True, blocks_completion=True, evidence='依赖核对记录',
+                         evidence_revision='依赖尚未确认', next_dependency_evidence='既有观测 14'),
+                ]
+                self.assertEqual('check_operation', controller.route(old)['action'])
+                released = {'path': ['operations', 0, 'blocks_next'], 'value': False}
+                progress = {'path': ['operations', 0, 'evidence_revision'], 'value': '操作仍在运行的新观测'}
+                dependency = {'path': ['operations', 0, 'next_dependency_evidence'], 'value': '输入已齐备，下一动作无需依赖原结果'}
+                side_effect = {'path': ['operations', 0, 'side_effect'], 'value': True}
+                repeated = dict(dependency, value='既有观测  14')
+                compacted = dict(dependency, value='既有观测14')
+                for changes in ([released], [released, progress], [released, repeated],
+                                [released, compacted], [released, dependency, side_effect]):
+                    code, blocked = self.cli('next', {'previous': old, 'changes': changes})
+                    self.assertEqual(1, code, blocked)
+                    self.assertIn('unresolved operation cannot stop blocking next: source', blocked['errors'])
+                current = copy.deepcopy(old)
+                current['operations'][0].update(blocks_next=False, next_dependency_evidence=dependency['value'])
+                actual = self.cli('next', {'previous': old, 'changes': [released, dependency]}, '--emit-state')
+                self.assertEqual(self.cli('next', {'previous': old, 'state': current}, '--emit-state'), actual)
+                self.assertEqual(0, actual[0], actual)
+                self.assertEqual(action, actual[1]['action'])
+                self.assertTrue(actual[1]['state']['operations'][0]['blocks_completion'])
+
     def test_incremental_begin_renews_receipt_without_resubmitting_completed_step(self):
         old = self.execution()
         current = self.renewal(old)
@@ -3327,6 +3387,10 @@ class RecoveryAndToolWaitTests(unittest.TestCase):
             self.assertEqual(1, code, result)
             self.assertIn('unresolved operation cannot stop blocking next: op1', result['errors'])
             self.assertNotIn('state', result)
+        new_scope_evidence = {'path': ['operations', 0, 'next_dependency_evidence'], 'value': '已观测下一动作的依赖'}
+        code, result = self.cli('begin', {'previous': old, 'changes': changes + [unblock, new_scope_evidence]})
+        self.assertEqual(1, code, result)
+        self.assertIn('unresolved operation cannot stop blocking next: op1', result['errors'])
         downgrade = {'path': ['operations', 0, 'side_effect'], 'value': False}
         code, result = self.cli('check', {'previous': old, 'changes': [downgrade]}, '--emit-state')
         self.assertEqual(1, code, result)
