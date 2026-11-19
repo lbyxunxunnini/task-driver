@@ -63,6 +63,8 @@ description: >-
 | 判断达标、处理缺陷和独立复核 | [审查修复](references/review.md) | 目标结论、缺口分类与次数 |
 | 保存进度或中断后核对现场 | [记录恢复](references/state-recovery.md) | 同一记录、现场证据及有效续接点 |
 
+用户提供设计稿、截图或 HTML 原型，并要求据此实现或修复界面时，必须在调查阶段读取或复用[按参考稿实现与验收](references/ui-reference-implementation.md)。计划、执行和验证分别使用适用章节。参考材料中途新增或更换时，先核对受影响的对象和条件，再按现有流程承接变化。材料仅供风格参考时，按当前任务的验收要求处理。
+
 [模板](references/templates.md)只定义格式，[场景](references/scenarios.md)和[快速开始](references/quick-start.md)提供正反例，[FAQ](references/faq.md)解释规则。禁止用这些文档另定流程或扩大用户需求。
 
 ## 状态与主控职责
