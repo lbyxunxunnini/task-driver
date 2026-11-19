@@ -25,29 +25,66 @@ GOAL_TRACKING_MODES = {'host', 'plan', 'conversation', 'unavailable'}
 GOAL_TRACKING_FALLBACK_MODES = {'plan', 'conversation'}
 STEP_STATUSES = {'pending', 'in_progress', 'done', 'blocked'}
 GUIDANCE = {
-    'present_incomplete_plan': '先读取或复用本 skill 的 references/planning.md、references/goals.md 及 references/templates.md 的目标草案章节，再在正文交付标明缺口的讨论稿，不能称为正式计划或请求执行。',
-    'verify_plan_request': '核对当前计划请求与已交付草案的实际对应关系，再更新状态；不要重复提问或编造交付。',
-    'present_plan': '先读取或复用本 skill 的 references/planning.md、references/goals.md 及 references/templates.md 的目标草案章节，按方法核对正文和状态，调用 final 检查实际正文及 plan_coverage，再一起展示正式计划和目标；用户明确限制只展示其中一项时，说明严格流程并等待调整范围。展示不等于确认或执行授权，内容尚无有效确认时不提供执行选项；用户明确本轮不执行时，只确认尚缺的计划/目标内容，不问“是否按计划执行”，也不承诺“确认后就开始”。用户后续明确授权时沿用有效确认继续，不重复询问。',
-    'request_plan_transition': '保持讨论阶段。总结有效决定，完成 semantic_review 后最后询问是否结束讨论并开始展示正式计划与目标。问题实际发出后等待用户回答；已有计划请求也走此路径。',
-    'resolve_pending': '处理尚有影响的事项：能调查先调查，委托范围内自行决定，其余讨论。讨论阶段最终回复必须始终以一个问题结束，完成 semantic_review 后再收口，不得仅汇报分析；不要重问已决事项。',
-    'check_coverage': '先核对目标、已有资料、决定和未决事项，再以新状态检查；不得编造问题。',
-    'continue_local': '先完成已获授权的独立或局部动作，不扩大用户限定的范围；原等待或受阻状态保持不变。',
-    'local_complete': '交付局部结果并保留原任务恢复点。',
-    'check_operation': '仅在查询权限内只读核实原操作及回执；不授权新操作或重试，结果未知时不得重复执行副作用动作。',
-    'handle_operation_failure': '原操作已失败且阻塞下一步；先按审查模块分类，保留失败证据，不重复执行，不把局部任务标记完成。',
-    'scope_complete': '本轮只交付用户明确限定的内容；交付后停止，保留整体任务恢复点，不追加问题或推进下一阶段。',
-    'complete': '完成前逐项核对 goals.included：在 evidence_map 中核对实际来源、当前产物或运行及观察结果是否覆盖通过条件，excluded 不得计入完成；证据不足时保持未完成。',
-    'repair_state': '修正状态结构；旧目标补录 included、excluded、evidence_map 和 goal_scope_baseline 后继续。若用户明确要求结束/完成但仍有未验证项，先设置 completion_basis:user_requested，记录用户来源、completion_report 和 unverified_goals，再重试；不要把用户结束要求当成验收或宣称已验证。',
-    'handle_interruption': '先处理当前临时请求，核对用户与宿主授权；业务执行仍须满足原有执行门槛，不扩大原任务授权。',
-    'reconcile_interruption': '核对临时结果、恢复点、最新用户要求和实际现场；正文先交付临时结果，再接回对应事项。用户明确暂停时保持暂停。',
-    'begin_execution': '执行入口尚未通过。先核对分析闭合、讨论闭合、编号步骤、计划与目标确认、执行授权、子代理设置和目标跟踪回执；运行 begin 并取得 execution_receipt 后才能开始业务动作。',
-    'start_step': '只开始当前编号步骤；取得实际结果和证据后再标记完成，不能提前勾选后续步骤。',
-    'continue_step': '继续当前进行中的编号步骤；完成并核对证据后才进入下一步。',
-    'step_blocked': '当前步骤受阻；先说明已完成部分、失败原因和是否影响后续步骤，不得跳过该步骤。',
-    'steps_complete': '所有编号步骤已完成；只能进入验证与审查，不得继续做未列入计划的新业务动作。',
-    'continue_analysis': '当前仍在分析阶段；只允许补事实、核范围和进入讨论，不得执行任何业务写入。',
+    'present_incomplete_plan': (
+        '必须先读取或复用本 skill 的 references/planning.md、references/goals.md 及 references/templates.md 的目标草案章节，'
+        '再在正文交付标明缺口的讨论稿。禁止将讨论稿称为正式计划或请求执行。'
+    ),
+    'verify_plan_request': '必须先核对当前计划请求与已交付草案的实际对应关系，再更新状态。禁止重复提问或编造交付。',
+    'present_plan': (
+        '用户明确限制只展示其中一项时，禁止单独展示，必须说明同轮展示要求并等待用户调整范围。'
+        '首次正式展示前，必须核实用户已对实际发出的收口问题明确作出肯定答复。'
+        '必须先读取或复用本 skill 的 references/planning.md、references/goals.md 及 references/templates.md 的目标草案章节，'
+        '按方法核对正文和状态，并调用 final 检查实际正文及 plan_coverage。符合展示条件时必须一起展示正式计划和目标，二者同轮送达。'
+        '展示不等于确认或执行授权。内容尚无有效确认时，禁止提供执行选项。'
+        '用户明确本轮不执行时，必须将确认限定在尚缺的计划或目标内容。禁止问“是否按计划执行”或承诺“确认后就开始”。'
+        '开始执行前，必须另行取得用户对已展示内容的明确执行授权。用户后续明确授权时，必须沿用有效确认继续，禁止重复询问。'
+    ),
+    'request_plan_transition': (
+        '调查分析完成且没有待决项时，必须保持讨论阶段并总结有效决定。完成 semantic_review 后，'
+        '必须以一个实际发出的收口问题结束回复，询问用户是否结束讨论并开始展示正式计划与验收目标。'
+        '发出问题后必须等待用户答复。进入计划阶段前，必须取得用户针对该问题的明确肯定答复。'
+        '即使用户已经给出完整方案、要求直接执行或要求展示计划，也必须完成这次收口问答。'
+    ),
+    'resolve_pending': (
+        '处理仍有影响的待决项时，必须先调查可查事实，在委托范围内自行决定，其余与用户讨论。'
+        '调查或决策改变待决状态时，必须按实际新状态重新调用 next。'
+        '仍有必须由用户决定的待决项时，必须完成 semantic_review，并以一个当前的具体问题结束最终回复。'
+        '待决项消除后必须按新路由处理收口或适用的免问情况。收到答复后必须重新核对剩余待决项。'
+        '禁止重问已决事项、编造问题或在仍有待决项时请求结束讨论。'
+    ),
+    'check_coverage': '必须先核对目标、已有资料、决定和未决事项，再以新状态检查。禁止编造问题。',
+    'continue_local': '必须先完成已获授权的独立或局部动作，并保持原等待或受阻状态。禁止扩大用户限定的范围。',
+    'local_complete': '必须交付局部结果并保留原任务恢复点。',
+    'check_operation': (
+        '必须在查询权限内只读核实原操作及回执。禁止将查询权限用于新操作或重试。结果未知时禁止重复执行有副作用的动作。'
+    ),
+    'handle_operation_failure': '原操作已失败且阻塞下一步。必须先按审查模块分类并保留失败证据。禁止重复执行或将局部任务标记为完成。',
+    'scope_complete': '必须将本轮交付限定在用户明确指定的内容内。交付后必须停止并保留整体任务恢复点。禁止追加问题或推进下一阶段。',
+    'complete': (
+        '完成前必须逐项检查 goals.included，核对 evidence_map 中的实际来源、当前产物或运行及观察结果是否覆盖各自的通过条件。'
+        '禁止将 excluded 计入完成。证据不足时必须保持未完成。'
+    ),
+    'repair_state': (
+        '必须修正状态结构。旧目标必须补录 included、excluded、evidence_map 和 goal_scope_baseline 后再继续。'
+        '若用户明确要求结束或完成但仍有未验证项，必须先设置 completion_basis:user_requested，记录用户来源、completion_report 和 unverified_goals，再重试。'
+        '禁止将用户结束要求视为验收或宣称未验证项已经验证。'
+    ),
+    'handle_interruption': '必须优先处理当前临时请求，处理前必须核对用户与宿主授权。业务执行仍必须满足原有执行门槛。禁止扩大原任务授权。',
+    'reconcile_interruption': '必须核对临时结果、恢复点、最新用户要求和实际现场，正文必须先交付临时结果，再接回对应事项。用户明确暂停时必须保持暂停。',
+    'begin_execution': (
+        '执行入口尚未通过。必须核对分析闭合、讨论闭合、编号步骤、计划与目标确认、执行授权、子代理设置和目标跟踪回执。'
+        '开始业务动作前必须运行 begin 并取得 execution_receipt。'
+    ),
+    'start_step': '必须从当前编号步骤开始。标记该步骤完成前，必须取得实际结果和证据。禁止提前开始或勾选后续步骤。',
+    'continue_step': '必须继续当前进行中的编号步骤。进入下一步前必须完成该步骤并核对证据。',
+    'step_blocked': '当前步骤受阻。必须先说明已完成部分、失败原因和是否影响后续步骤。禁止跳过该步骤。',
+    'steps_complete': '所有编号步骤已完成。必须进入验证与审查，禁止继续做未列入计划的新业务动作。',
+    'continue_analysis': '当前仍在分析阶段。必须将当前动作限定在补充事实、核对范围和进入讨论。禁止执行任何业务写入。',
 }
-USER_REQUESTED_COMPLETION_GUIDANCE = '用户明确要求完成：按要求将业务标记完成，但必须在 unverified_goals 和正文中逐项说明未验证目标、原因和影响，并记录 completion_request_source；不得写成所有目标已验证。'
+USER_REQUESTED_COMPLETION_GUIDANCE = (
+    '用户明确要求完成，必须按要求将业务标记完成，在 unverified_goals 和正文中逐项说明未验证目标、原因和影响，并记录 completion_request_source。'
+    '禁止写成所有目标已验证。'
+)
 
 SEMANTIC_REVIEWERS = {'main', 'independent'}
 DECISION_REVIEW_CHECKS = (
@@ -957,6 +994,8 @@ def validate(s):
                     completion_basis != 'user_requested'
                 ),
             ))
+            if phase in ('verification', 'review') and s.get('execution_begun') is not True:
+                errors.append('verification or review of executed work requires execution begin')
         for name in GATES:
             if not gates.get(name) and not (name in ('execution', 'subagents') and querying_operation):
                 errors.append(name + ' evidence required for execution or later')
@@ -1218,10 +1257,21 @@ def validate_transition(previous, current):
             errors.append('changed plan evidence requires a new plan_revision_source')
     old_execution_begun = previous.get('execution_begun') is True
     new_execution_begun = current.get('execution_begun') is True
+    previous_authorization = execution_authorization_payload(previous)
+    current_authorization = execution_authorization_payload(current)
+    if (new_execution_begun and not old_execution_begun and
+            (previous.get('phase') != 'execution' or previous.get('status') != 'continue' or
+             previous_authorization != current_authorization)):
+        errors.append('starting execution requires the matching state used for begin')
     if old_execution_begun and not new_execution_begun:
         if (not isinstance(current.get('execution_reset_source'), str) or
                 not current['execution_reset_source'].strip()):
             errors.append('stopping begun execution requires execution_reset_source')
+    if (old_execution_begun and new_execution_begun and
+            current.get('execution_receipt') != previous.get('execution_receipt') and
+            current.get('execution_receipt') == authorization_hash(current_authorization) and
+            previous_authorization != current_authorization):
+        errors.append('changed execution authorization requires stopping and a new begin')
     old_scope = previous.get('execution_scope')
     new_scope = current.get('execution_scope')
     if old_scope != new_scope:
@@ -1494,7 +1544,7 @@ def route(s):
             missing_goal_presentation(s) and
             s.get('local_only') is not True):
         return {'action': 'continue_local', 'plan_supplement': True,
-                'next_action': '先核对计划确认、待决事项及当前展示范围；允许时一起展示计划和目标，否则处理缺口或等待。',
+                'next_action': '必须先核对计划确认、待决事项及当前展示范围，再按结果行动。允许时一起展示计划和目标，否则必须处理缺口或等待。',
                 'blocked_reason': s['wait_reason']}
     if status in ('wait_user', 'wait_tool'):
         for operation in s.get('operations', []):
@@ -1533,10 +1583,10 @@ def route(s):
         if s.get('local_only') and s.get('local_done'):
             return {'action': 'local_complete' if s.get('coverage_checked') else 'check_coverage'}
         return {'action': 'continue_local' if s.get('local_only') else 'continue_current_phase',
-                'next_action': '仅在本轮范围内只读核对既有证据；新业务动作另取有效入口'}
+                'next_action': '必须将只读核对限定在本轮范围内的既有证据。开始新业务动作前必须另行满足有效的执行入口条件。'}
     if (s['phase'] == 'execution' and s.get('status') == 'continue' and
             not checking_operation and s.get('execution_begun') is not True):
-        return {'action': 'begin_execution', 'next_action': '取得执行入口回执后继续'}
+        return {'action': 'begin_execution', 'next_action': '必须取得执行入口回执后再继续'}
     if (s['phase'] == 'execution' and s.get('status') == 'continue' and
             not s.get('local_only')):
         steps = s.get('plan', {}).get('steps', [])
@@ -1555,7 +1605,7 @@ def route(s):
                         'next_action': pending.get('action')}
             if (not s.get('local_only') and steps and
                     all(isinstance(step, dict) and step.get('status') == 'done' for step in steps)):
-                return {'action': 'steps_complete', 'next_action': '进入验证与审查'}
+                return {'action': 'steps_complete', 'next_action': '必须进入验证与审查'}
     if s.get('local_only') and s.get('local_done'):
         if s.get('coverage_checked') is not True:
             return {'action': 'check_coverage'}
@@ -1563,7 +1613,7 @@ def route(s):
     if s.get('local_only'):
         steps = s.get('plan', {}).get('steps', [])
         if (steps and all(isinstance(step, dict) and step.get('status') == 'done' for step in steps)):
-            return {'action': 'steps_complete', 'next_action': '进入验证与审查'}
+            return {'action': 'steps_complete', 'next_action': '必须进入验证与审查'}
         return {'action': 'continue_local', 'next_action': s['next_action']}
     if (s.get('scope_limited') is True and s.get('coverage_checked') is True and
             s.get('plan_requested') is not True and
@@ -1586,7 +1636,7 @@ def route(s):
             return {'action': ('present_plan' if discussion_transition_confirmed(s)
                                else 'request_plan_transition')}
     if s['phase'] == 'analysis':
-        return {'action': 'continue_analysis', 'next_action': '完成分析后进入讨论'}
+        return {'action': 'continue_analysis', 'next_action': '必须完成分析后再进入讨论'}
     return {'action': 'continue_current_phase', 'next_action': s['next_action']}
 
 
@@ -1595,7 +1645,7 @@ def begin_execution(s, previous=None):
     if not isinstance(s, dict):
         return {'ok': False, 'errors': ['checkpoint must be an object']}
     errors = validate(s)
-    if previous is None and goal_scope_requires_previous(s):
+    if previous is None:
         errors.append('previous state required for execution begin')
     if previous is not None:
         errors.extend(validate_transition(previous, s))
@@ -1605,6 +1655,22 @@ def begin_execution(s, previous=None):
         errors.append('begin requires status continue')
     if s.get('execution_begun') is True:
         errors.append('execution already begun; reuse the existing receipt or start a new task')
+    if s.get('scope_limited') is True or s.get('local_only_read_only') is True:
+        errors.append('begin is blocked by the current scope limit')
+    renewing = isinstance(previous, dict) and previous.get('execution_begun') is True
+    if renewing:
+        renewing = (
+            previous.get('phase') in ('execution', 'verification', 'review') and
+            previous.get('status') != 'complete' and not validate(previous) and
+            previous.get('execution_receipt') == execution_receipt(previous) and
+            has_new_source(s.get('execution_reset_source'), None)
+        )
+        if not renewing:
+            errors.append('renewed begin requires a valid previous execution and reset source')
+        else:
+            errors.extend(validate_execution_confirmation(previous, s, renewing=True))
+    elif isinstance(previous, dict):
+        errors.extend(validate_execution_confirmation(previous, s, renewing=False))
     plan = s.get('plan')
     steps = plan.get('steps', []) if isinstance(plan, dict) else []
     if not isinstance(steps, list):
@@ -1612,14 +1678,6 @@ def begin_execution(s, previous=None):
     progressed = [step for step in steps if isinstance(step, dict) and
                   step.get('status') in ('done', 'in_progress')]
     if progressed:
-        renewing = (
-            isinstance(previous, dict) and previous.get('execution_begun') is True and
-            previous.get('phase') in ('execution', 'verification', 'review') and
-            previous.get('status') != 'complete' and not validate(previous) and
-            previous.get('execution_receipt') == execution_receipt(previous) and
-            isinstance(s.get('execution_reset_source'), str) and
-            bool(s['execution_reset_source'].strip())
-        )
         if not renewing:
             errors.append('begin with progressed steps requires a valid previous execution and reset source')
         else:
@@ -1646,6 +1704,49 @@ def begin_execution(s, previous=None):
         ],
         'scope': 'structure_only',
     }
+
+
+def validate_execution_confirmation(previous, current, *, renewing):
+    """Require the already displayed content followed by a separate user decision."""
+    if not renewing and (previous.get('phase') not in ('planning', 'goals') or
+            any(not isinstance(previous.get(key), dict) or
+                previous[key].get('presented') is not True for key in ('plan', 'goals'))):
+        return ['first begin requires a previous state with plan and goals already presented']
+    old = execution_authorization_payload(previous)
+    new = execution_authorization_payload(current)
+    # A local tracking ID can first be assigned after the user authorizes execution.
+    del old['goals']['local_goal_id']
+    del new['goals']['local_goal_id']
+    errors = []
+    changed_content = [key for key in ('plan', 'goals') if old[key] != new[key]]
+    if not renewing and changed_content:
+        errors.append('first begin requires the same plan and goals as previously presented')
+    if renewing:
+        for key in changed_content:
+            if not has_new_source(new[key]['evidence'], old[key]['evidence'], normalize_spacing=True):
+                errors.append('renewed begin requires new presentation evidence for changed ' + key)
+        changed_scope = any(
+            {item for item in old['execution_scope'][key] if isinstance(item, str)} !=
+            {item for item in new['execution_scope'][key] if isinstance(item, str)}
+            for key in ('allowed_paths', 'allowed_actions')
+            if isinstance(old['execution_scope'].get(key), list) and
+            isinstance(new['execution_scope'].get(key), list)
+        )
+        if not changed_scope and not changed_content:
+            return errors
+        if changed_scope and 'plan' not in changed_content:
+            errors.append('renewed begin requires new plan presentation for changed execution scope')
+    old_gates = old['gates'] if isinstance(old['gates'], dict) else {}
+    new_gates = new['gates'] if isinstance(new['gates'], dict) else {}
+    earlier_sources = ([old_gates.get('execution')] if renewing else
+                       [*old_gates.values(), previous.get('plan_request_source'),
+                        previous.get('discussion_closure_source')])
+    earlier_sources.extend(new[key][field] for key in ('plan', 'goals')
+                           for field in ('evidence', 'presentation_id'))
+    if any(not has_new_source(new_gates.get('execution'), source, normalize_spacing=True)
+           for source in earlier_sources):
+        errors.append('begin requires a new user execution confirmation after presentation')
+    return errors
 
 
 def discussion_final_line(reply):
@@ -1901,37 +2002,38 @@ def validate_discussion_final(s, reply, handoff):
 
 STATE_REPAIR_HINTS = {
     'first formal plan presentation requires confirmed discussion transition': (
-        'discussion_closure_question_source', '保持讨论阶段。核对已发出的收口问题与针对它的肯定答复；'
-        '尚未提问就先提问，已问未答则等待。只引用实际发生的两条消息。'),
+        'discussion_closure_question_source', '必须保持讨论阶段，按收口条件核对实际发出的问题和用户对该问题的明确肯定答复。'
+        '满足收口条件但尚未提问时，必须先实际询问。已问但尚无明确肯定答复时，禁止进入计划阶段。未答时必须等待。'
+        '必须引用实际发出的问题和实际收到的对应答复。'),
     'discussion transition answer must match the preceding question': (
-        'discussion_closure_question_source', '引用上一讨论状态中实际待答的收口问题及本次对应的肯定答复。'),
+        'discussion_closure_question_source', '必须引用上一讨论状态中实际待答的收口问题，以及用户本次对该问题的明确肯定答复。'),
     'discussion transition must be reconfirmed after a material change': (
-        'discussion_closed', '接回讨论并核对变化影响，原收口答复只覆盖原决定。当前方案谈妥后再收口。'),
+        'discussion_closed', '必须接回讨论并核对变化影响。原收口答复只覆盖原决定，禁止用于本次收口。当前方案谈妥后必须重新询问是否结束讨论，并等待对应的明确肯定答复。'),
     'formal plan display requires the preceding discussion or presentation state': (
-        'previous', '首次展示传入发出收口问题后的待答状态。补齐旧计划的目标时传入有真实展示来源的旧状态。'),
+        'previous', '首次展示必须传入实际发出收口问题后的待答状态。补齐旧计划的目标时，必须传入有真实展示来源的旧状态。'),
     'a previously presented formal plan must retain its presentation state without a revision source': (
-        'plan.presented', '保留真实的旧计划和展示来源。用户确实要求撤换旧计划时，'
-        '保留前态并引用实际修订消息，按影响核对旧确认。'),
+        'plan.presented', '必须保留真实的旧计划和展示来源。用户确实要求撤换旧计划时，'
+        '必须保留前态并引用实际修订消息，再按影响核对旧确认。'),
     'execution_scope.source required': (
-        'execution_scope.source', '引用明确授权本次执行范围的用户消息。只有计划或目标确认时，保留未授权状态。'),
+        'execution_scope.source', '必须引用用户明确授权本次执行范围的消息。只有计划或目标内容确认时，必须保持未授权状态。'),
     'goal_scope_baseline required for previous goal state': (
-        'previous.goal_scope_baseline', '从上一轮目标快照恢复当时的 included 和 excluded；'
-        '若手上的 previous 不是那一轮快照，先核对记录，不能用当前目标填旧快照。'),
+        'previous.goal_scope_baseline', '必须从上一轮目标快照恢复当时的 included 和 excluded。'
+        '若手上的 previous 并非那一轮快照，必须先核对记录。禁止用当前目标填旧快照。'),
     'changed goals require superseded_goals or stale host goal record': (
-        'goals', '对照上一状态的目标、展示来源及目标标识。仅取证进展写入 evidence_map；'
-        '目标确实变更时按实际范围和确认来源记录替代关系，宿主同步状态按现场填写。'),
+        'goals', '必须对照上一状态的目标、展示来源及目标标识。仅有取证进展时，必须将目标字段的变更限定在 evidence_map。'
+        '目标确实变更时，必须按实际范围和确认来源记录替代关系，并按现场填写宿主同步状态。'),
     'wait_user requires reference to already presented question': (
-        'wait_evidence', '引用已经实际发出的那道待答问题。拟发问题先走提问交接，发出后才记为等待用户。'),
+        'wait_evidence', '必须引用已经实际发出的那道待答问题。拟发问题必须先走提问交接，禁止在问题发出前记为等待用户。'),
     'resuming paused task requires source': (
-        'resume_source', '核对用户是否明确恢复当前任务。已恢复则引用该消息，只有反馈或插问时保留原任务暂停状态。'),
+        'resume_source', '必须核对用户是否明确恢复当前任务。已明确恢复时必须引用该消息。只有反馈或插问时，必须保持原任务暂停。'),
     'changed goal tracking requires a new confirmation source': (
-        'goal_tracking_confirmation_source', '核对当前目标跟踪方式是否真的变了。未变则沿用有效设置；'
-        '确实改用降级方式时，先取得并引用对应确认。'),
+        'goal_tracking_confirmation_source', '必须核对当前目标跟踪方式是否实际变更。未变时必须沿用有效设置。'
+        '确实改用降级方式时，必须先取得并引用对应确认。'),
     'plan step action cannot change without a new plan': (
-        'plan.steps', '核对动作变化对应的计划修订。只有状态或证据变化时沿用原动作；'
-        '动作确实变更时，用实际修订来源更新计划，并保留未受影响的步骤进度。'),
+        'plan.steps', '必须核对动作变化对应的计划修订。只有状态或证据变化时，必须沿用原动作。'
+        '动作确实变更时，必须用实际修订来源更新计划，并保留未受影响的步骤进度。'),
     'completion evidence required': (
-        'completion_evidence', '引用已发生的交付或完成证据。仍待回复中交付的内容先交付，按实际事件再同步。'),
+        'completion_evidence', '必须引用已发生的交付或完成证据。仍待在回复中交付的内容，必须先实际交付，再按实际事件同步。'),
 }
 
 
@@ -1972,15 +2074,15 @@ def add_error_diagnostics(result, state, previous=None):
                 'field': 'phase',
                 'actual': state.get('phase') if isinstance(state, dict) else None,
                 'allowed': sorted(PHASES),
-                'hint': '按实际环节填写合法值；不自动转换或推进阶段。',
+                'hint': '必须按实际环节填写合法值。禁止为修正字段而自动转换或推进阶段。',
             }
         elif error in ('presented plan requires evidence', 'presented goals require evidence'):
             field = 'plan' if error == 'presented plan requires evidence' else 'goals'
             detail = {
                 'field': field + '.evidence',
-                'hint': '准备展示不等于已经展示。只有实际已交付时才填写可核实消息来源；'
-                        '尚未展示时保留真实状态，按 next 返回动作展示，不能填未来回复来通过检查。'
-                        '已有展示不能为绕过检查改成未展示，应恢复其真实来源。',
+                'hint': '准备展示不等于已经展示。展示来源必须引用实际交付的可核实消息。'
+                        '尚未展示时必须保留真实状态，按 next 返回动作展示。禁止填未来回复来通过检查。'
+                        '已经展示时必须恢复其真实来源，禁止为绕过检查改成未展示。',
             }
         elif error in STATE_REPAIR_HINTS:
             field, hint = STATE_REPAIR_HINTS[error]

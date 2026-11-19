@@ -18,6 +18,14 @@ def observed_evidence(source='测试工具原始输出'):
             'observed': '样例输入返回了约定结果'}
 
 
+def before_execution_confirmation(current):
+    previous = copy.deepcopy(current)
+    previous['phase'] = 'goals'
+    previous['gates']['execution'] = None
+    previous.pop('execution_scope', None)
+    return previous
+
+
 def state(**updates):
     value = {'task_id': 'task-a', 'phase': 'discussion', 'status': 'continue',
              'next_action': '继续讨论未决事项', 'decisions': [{'id': 'd1', 'subject': '范围', 'status': 'pending'}],
@@ -2599,7 +2607,7 @@ class ControlTests(unittest.TestCase):
                     self.assertEqual({'plan.evidence', 'goals.evidence'},
                                      {d['field'] for d in result['diagnostics']})
                     for detail in result['diagnostics']:
-                        self.assertIn('不能填未来回复', detail['hint'])
+                        self.assertIn('禁止填未来回复', detail['hint'])
                         self.assertIn('恢复其真实来源', detail['hint'])
                     self.assertEqual(before, path.read_bytes())
 
@@ -2752,7 +2760,7 @@ class ControlTests(unittest.TestCase):
             with self.subTest(name=name):
                 s['goal_tracking_host_kind'] = 'task_list' if name in ('task list', 'duplicate task id', 'list packed into one') else 'aggregate'
                 s['goal_tracking_host_readback'] = returned
-                result = controller.begin_execution(s, copy.deepcopy(s))
+                result = controller.begin_execution(s, before_execution_confirmation(s))
                 self.assertEqual(accepted, result['ok'], result)
                 if not accepted:
                     self.assertTrue(any('readback' in e for e in result['errors']))
@@ -2804,7 +2812,7 @@ class ControlTests(unittest.TestCase):
         s.pop('execution_begun')
         s.pop('execution_receipt')
         s['plan']['steps'][0].update(status='pending', evidence=None)
-        receipt = controller.begin_execution(s, copy.deepcopy(s))['execution_receipt']
+        receipt = controller.begin_execution(s, before_execution_confirmation(s))['execution_receipt']
         s['execution_receipt'], s['execution_begun'] = receipt, True
         s['plan']['steps'][0].update(status='done', evidence='已交付')
         previous = copy.deepcopy(s)
@@ -2850,10 +2858,55 @@ class ControlTests(unittest.TestCase):
         s.pop('execution_begun')
         s.pop('execution_receipt')
         self.assertEqual('begin_execution', controller.route(s)['action'])
-        result = controller.begin_execution(s, copy.deepcopy(s))
+        result = controller.begin_execution(s, before_execution_confirmation(s))
         self.assertTrue(result['ok'])
         self.assertTrue(result['execution_receipt'])
         self.assertEqual(['S1'], result['step_ids'])
+
+    def test_first_begin_rejects_early_confirmation_and_undelivered_content(self):
+        current = state(
+            phase='execution', decisions=[],
+            plan={'presented': True, 'evidence': '已发送的编号计划'},
+            goals={'presented': True, 'evidence': '已发送的验收目标'},
+            gates={'plan': '计划确认', 'goals': '目标确认',
+                   'execution': '用户同意执行', 'subagents': '用户选择不开启'},
+        )
+        current['plan']['steps'][0].update(status='pending', evidence=None)
+        current.update(execution_begun=False, execution_receipt=None)
+        shown = before_execution_confirmation(current)
+        for previous, error in (
+            (None, 'previous state required for execution begin'),
+            (current, 'first begin requires a previous state with plan and goals already presented'),
+            ({**shown, 'goals': {'presented': False}},
+             'first begin requires a previous state with plan and goals already presented'),
+            ({**shown, 'gates': current['gates']},
+             'begin requires a new user execution confirmation after presentation'),
+            ({**shown, 'plan_request_source': current['gates']['execution']},
+             'begin requires a new user execution confirmation after presentation'),
+            ({**shown, 'discussion_closure_source': current['gates']['execution']},
+             'begin requires a new user execution confirmation after presentation'),
+        ):
+            with self.subTest(error=error):
+                result = controller.begin_execution(current, previous)
+                self.assertIn(error, result['errors'])
+                self.assertNotIn('execution_receipt', result)
+        changed = copy.deepcopy(shown)
+        changed['plan']['steps'][0]['action'] = '展示过的不同步骤'
+        result = controller.begin_execution(current, changed)
+        self.assertIn('first begin requires the same plan and goals as previously presented', result['errors'])
+        still_limited = dict(current, scope_limited=True, scope_limited_source='用户说只看计划')
+        denied = controller.begin_execution(still_limited, shown)
+        self.assertIn('begin is blocked by the current scope limit', denied['errors'])
+        presented_as_confirmation = copy.deepcopy(current)
+        presented_as_confirmation['gates']['execution'] = shown['plan']['presentation_id']
+        denied = controller.begin_execution(presented_as_confirmation, shown)
+        self.assertIn('begin requires a new user execution confirmation after presentation', denied['errors'])
+        confirmed = controller.begin_execution(current, shown)
+        self.assertTrue(confirmed['ok'], confirmed)
+        begun = dict(current, execution_begun=True, execution_receipt=confirmed['execution_receipt'])
+        self.assertIn('starting execution requires the matching state used for begin',
+                      controller.validate_transition(shown, begun))
+        self.assertEqual([], controller.validate_transition(current, begun))
 
     def test_execution_steps_must_run_in_order(self):
         s = state(
@@ -2973,7 +3026,7 @@ class ControlTests(unittest.TestCase):
         s.pop('execution_receipt')
         p = subprocess.run(
             [sys.executable, '-B', str(SCRIPT), 'begin', '--json',
-             json.dumps({'previous': s, 'state': s})],
+            json.dumps({'previous': before_execution_confirmation(s), 'state': s})],
             capture_output=True, text=True,
         )
         self.assertEqual(0, p.returncode, p.stdout)
@@ -3020,7 +3073,7 @@ class ControlTests(unittest.TestCase):
         s['plan']['steps'] = [{'id': 'S1', 'action': '第一步', 'status': 'pending'}]
         s.pop('execution_begun')
         s.pop('execution_receipt')
-        result = controller.begin_execution(s, copy.deepcopy(s))
+        result = controller.begin_execution(s, before_execution_confirmation(s))
         self.assertFalse(result['ok'])
         self.assertIn('begin blocked by next action: check_operation', result['errors'])
 
@@ -3592,11 +3645,34 @@ class RecoveryAndToolWaitTests(unittest.TestCase):
         current.update(plan_revision_source='用户确认只调整第二步',
                        impact_review={'reason': '只改第二步做法，目标及子代理设置不变',
                                       'retained': ['goals', 'subagents']})
+        stale = copy.deepcopy(current)
+        stale['gates']['execution'] = old['gates']['execution']
+        stale['impact_review']['retained'].append('execution')
+        result = controller.begin_execution(stale, old)
+        self.assertIn('begin requires a new user execution confirmation after presentation', result['errors'])
+        self.assertNotIn('execution_receipt', result)
+
+        undisplayed = copy.deepcopy(current)
+        undisplayed['plan']['evidence'] = old['plan']['evidence']
+        result = controller.begin_execution(undisplayed, old)
+        self.assertIn('renewed begin requires new presentation evidence for changed plan', result['errors'])
+        self.assertNotIn('execution_receipt', result)
+
         result = controller.begin_execution(current, old)
         self.assertTrue(result['ok'], result)
         current.update(execution_begun=True, execution_receipt=result['execution_receipt'])
         self.assertEqual('修订后的第二步', controller.route(current)['next_action'])
         self.assertEqual(old['plan']['steps'][0], current['plan']['steps'][0])
+
+    def test_widening_write_scope_requires_revised_plan_presentation(self):
+        old = self.execution()
+        current = self.renewal(old)
+        current['execution_scope']['allowed_paths'].append('另一目录')
+        current['execution_scope']['source'] = '用户同意扩大范围'
+        current['gates']['execution'] = '用户同意扩大范围'
+        result = controller.begin_execution(current, old)
+        self.assertIn('renewed begin requires new plan presentation for changed execution scope', result['errors'])
+        self.assertNotIn('execution_receipt', result)
 
     def test_renewal_rejects_missing_or_invalid_prior_execution_and_reset_source(self):
         for problem in ('missing_previous', 'bad_receipt', 'no_reset', 'different_task', 'completed_task'):
