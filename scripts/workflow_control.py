@@ -8,6 +8,7 @@ import sys
 sys.dont_write_bytecode = True
 
 import argparse
+from copy import deepcopy
 import hashlib
 import json
 import re
@@ -508,12 +509,13 @@ def validate_execution_entry(s):
             errors.append('execution_scope.allowed_actions requires nonempty actions')
         else:
             steps = s.get('plan', {}).get('steps', []) if isinstance(s.get('plan'), dict) else []
-            for index, step in enumerate(steps):
-                if (isinstance(step, dict) and isinstance(step.get('action'), str) and
-                        step['action'] not in allowed_actions):
-                    errors.append(
-                        'plan.steps[' + str(index) + '] action is not in execution_scope.allowed_actions'
-                    )
+            if isinstance(steps, list):
+                for index, step in enumerate(steps):
+                    if (isinstance(step, dict) and isinstance(step.get('action'), str) and
+                            step['action'] not in allowed_actions):
+                        errors.append(
+                            'plan.steps[' + str(index) + '] action is not in execution_scope.allowed_actions'
+                        )
         if (not isinstance(scope.get('source'), str) or
                 not scope['source'].strip()):
             errors.append('execution_scope.source required')
@@ -958,6 +960,52 @@ def validate(s):
     return errors
 
 
+def operations_by_id(state):
+    operations = state.get('operations', [])
+    if not isinstance(operations, list):
+        return {}
+    return {op['id']: op for op in operations
+            if isinstance(op, dict) and isinstance(op.get('id'), str)}
+
+
+def has_new_source(value, previous):
+    previous = previous.strip() if isinstance(previous, str) else None
+    return isinstance(value, str) and bool(value.strip()) and value.strip() != previous
+
+
+def validate_operation_transition(previous, current, confirmed_scope_change):
+    errors = []
+    current_operations = operations_by_id(current)
+    for ident, old in operations_by_id(previous).items():
+        pending = old.get('status') in ('running', 'unknown')
+        blocking = old.get('blocks_next') or old.get('blocks_completion', True)
+        if not (pending and old.get('side_effect') or
+                (pending or old.get('status') == 'failed') and blocking):
+            continue
+        observed = current_operations.get(ident)
+        if observed is None or observed.get('reference') != old.get('reference'):
+            problem = 'unresolved' if pending else 'blocking failed'
+            errors.append(problem + ' operation must keep its id and reference: ' + ident)
+            continue
+        if old.get('side_effect') is True and observed.get('side_effect') is False:
+            errors.append('unresolved operation cannot discard its side effect: ' + ident)
+        new_status = observed.get('status')
+        fresh_evidence = has_new_source(observed.get('evidence'), old.get('evidence'))
+        if new_status in ('succeeded', 'failed') and new_status != old.get('status') and not fresh_evidence:
+            errors.append('operation result requires new evidence: ' + ident)
+        if new_status == 'succeeded':
+            continue
+        handled_failure = old.get('status') == new_status == 'failed' and fresh_evidence
+        if old.get('blocks_next') is True and observed.get('blocks_next') is False and not handled_failure:
+            errors.append('unresolved operation cannot stop blocking next: ' + ident)
+        if old.get('blocks_completion', True) and observed.get('blocks_completion') is False:
+            observed_scope = (new_status in ('running', 'unknown') and
+                              old.get('side_effect') is False and fresh_evidence)
+            if not (confirmed_scope_change or observed_scope or handled_failure):
+                errors.append('unresolved operation cannot stop blocking completion without scope evidence: ' + ident)
+    return errors
+
+
 def validate_transition(previous, current):
     """Check explicit changes when both snapshots are available; never infer intent."""
     if not isinstance(previous, dict) or not isinstance(current, dict):
@@ -1000,7 +1048,7 @@ def validate_transition(previous, current):
             if old.get('resume_point') is not None and old.get('resume_point') != new.get('resume_point'):
                 errors.append('saved interruption resume_point cannot change')
             if old['status'] == 'paused' and new['status'] not in ('paused', 'cancelled'):
-                if not isinstance(new.get('resume_source'), str) or not new['resume_source'].strip():
+                if not has_new_source(new.get('resume_source'), old.get('resume_source')):
                     errors.append('resuming paused interruption requires source')
             if old['status'] in ('complete', 'cancelled') and new['status'] != old['status']:
                 errors.append('completed interruption cannot change status')
@@ -1058,8 +1106,7 @@ def validate_transition(previous, current):
         if not isinstance(source, str) or not source.strip():
             errors.append('withdrawing plan request requires source')
     if previous.get('status') == 'paused' and current.get('status') != 'paused':
-        source = current.get('resume_source')
-        if not isinstance(source, str) or not source.strip():
+        if not has_new_source(current.get('resume_source'), previous.get('resume_source')):
             errors.append('resuming paused task requires source')
     old_waiver = previous.get('discussion_question_waiver_source')
     new_waiver = current.get('discussion_question_waiver_source')
@@ -1295,6 +1342,10 @@ def validate_transition(previous, current):
             for name in ('goals', 'execution'):
                 if old_gates.get(name) and old_gates.get(name) == new_gates.get(name):
                     errors.append('changed goals require reviewing old ' + name + ' authorization')
+    confirmed_scope_change = (goal_scope_changed and isinstance(old_gates, dict) and
+                              isinstance(new_gates, dict) and
+                              has_new_source(new_gates.get('goals'), old_gates.get('goals')))
+    errors.extend(validate_operation_transition(previous, current, confirmed_scope_change))
     return errors
 
 
@@ -1502,7 +1553,10 @@ def begin_execution(s, previous=None):
         errors.append('begin requires status continue')
     if s.get('execution_begun') is True:
         errors.append('execution already begun; reuse the existing receipt or start a new task')
-    steps = s.get('plan', {}).get('steps', [])
+    plan = s.get('plan')
+    steps = plan.get('steps', []) if isinstance(plan, dict) else []
+    if not isinstance(steps, list):
+        steps = []
     progressed = [step for step in steps if isinstance(step, dict) and
                   step.get('status') in ('done', 'in_progress')]
     if progressed:
@@ -1524,14 +1578,6 @@ def begin_execution(s, previous=None):
                         old.get('status') != step.get('status') or
                         old.get('evidence') != step.get('evidence')):
                     errors.append('renewed begin must preserve evidenced progress: ' + str(step.get('id')))
-            current_operations = {op['id']: op for op in s.get('operations', []) if isinstance(op, dict) and 'id' in op}
-            for op in previous.get('operations', []):
-                if op.get('blocks_next') is True and op.get('status') in ('running', 'unknown'):
-                    observed = current_operations.get(op['id'], {})
-                    if (observed.get('reference') != op['reference'] or
-                            observed.get('status') not in ('succeeded', 'failed') or
-                            not observed.get('evidence')):
-                        errors.append('renewed begin must reconcile the original operation: ' + op['id'])
     if not errors:
         routed = route(s)
         if routed.get('action') != 'begin_execution':
@@ -1857,12 +1903,57 @@ def add_error_diagnostics(result, state, previous=None):
         result['diagnostics'] = diagnostics
 
 
+def apply_state_changes(previous, changes):
+    """Expand changes against a valid snapshot before running normal checks."""
+    errors = validate(previous)
+    if errors:
+        raise ValueError('invalid previous state: ' + '; '.join(errors))
+    if not isinstance(changes, list):
+        raise ValueError('changes must be a list')
+    state = deepcopy(previous)
+    for index, change in enumerate(changes, 1):
+        label = f'change {index}'
+        if not isinstance(change, dict):
+            raise ValueError(label + ' must be an object')
+        setting = set(change) == {'path', 'value'}
+        removing = set(change) == {'path', 'remove'} and change['remove'] is True
+        if not (setting or removing):
+            raise ValueError(label + ' requires path and either value or remove:true')
+        path = change['path']
+        if not isinstance(path, list) or not path:
+            raise ValueError(label + ' requires a nonempty path')
+        parent = state
+        for depth, key in enumerate(path):
+            last = depth == len(path) - 1
+            if isinstance(parent, dict) and isinstance(key, str):
+                if last and setting:
+                    parent[key] = deepcopy(change['value'])
+                elif key not in parent:
+                    raise ValueError(f'{label} path does not exist at {path[:depth + 1]!r}')
+                elif last:
+                    del parent[key]
+                else:
+                    parent = parent[key]
+            elif isinstance(parent, list) and type(key) is int and 0 <= key < len(parent):
+                if not last:
+                    parent = parent[key]
+                elif setting:
+                    parent[key] = deepcopy(change['value'])
+                else:
+                    raise ValueError(label + ' must replace the list to remove an element')
+            else:
+                raise ValueError(f'{label} invalid path at {path[:depth + 1]!r}')
+    return state
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('mode', choices=('check', 'next', 'begin', 'final'))
     source = parser.add_mutually_exclusive_group(required=True)
     source.add_argument('--state')
     source.add_argument('--json', dest='inline_json')
+    parser.add_argument('--previous-state', help='Read the previous checkpoint from a JSON file for changes input')
+    parser.add_argument('--emit-state', action='store_true', help='Include the checked current state on success')
     args = parser.parse_args()
     try:
         if args.inline_json is not None:
@@ -1872,6 +1963,22 @@ def main():
         else:
             with open(args.state, encoding='utf-8') as f:
                 payload = json.load(f)
+
+        if (isinstance(payload, dict) and 'changes' in payload and
+                ('task_id' not in payload or 'state' in payload or 'previous' in payload)):
+            if 'state' in payload or (args.previous_state is not None and 'previous' in payload):
+                raise ValueError('changes require one previous state and no current state')
+            if args.previous_state is not None:
+                with open(args.previous_state, encoding='utf-8') as f:
+                    previous = json.load(f)
+            else:
+                previous = payload.get('previous')
+            if not isinstance(previous, dict):
+                raise ValueError('changes require a previous checkpoint object')
+            state = apply_state_changes(previous, payload['changes'])
+            payload = {**payload, 'previous': previous, 'state': state}
+        elif args.previous_state is not None:
+            raise ValueError('--previous-state requires changes input')
 
         if args.mode == 'final':
             if not isinstance(payload, dict) or not isinstance(payload.get('state'), dict):
@@ -1890,6 +1997,8 @@ def main():
         if args.mode == 'begin':
             result = begin_execution(state, previous)
             add_error_diagnostics(result, state, previous)
+            if args.emit_state and result.get('ok'):
+                result['state'] = state
             print(json.dumps(result, ensure_ascii=False))
             return 0 if result.get('ok') else 1
         previous_required = (
@@ -1937,6 +2046,8 @@ def main():
         else:
             result['scope'] = 'structure_and_changes' if previous is not None else 'structure_only'
         add_error_diagnostics(result, state, previous)
+        if args.emit_state and not errors and not result.get('original_state_errors'):
+            result['state'] = state
         print(json.dumps(result, ensure_ascii=False))
         safe_actions = ('paused', 'handle_interruption', 'wait_interruption', 'reconcile_interruption')
         return bool(errors) and result.get('action') not in safe_actions

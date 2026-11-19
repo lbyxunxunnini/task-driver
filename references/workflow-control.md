@@ -21,6 +21,31 @@ python3 /absolute/path/task-driver/scripts/workflow_control.py final --state /ab
 
 上面的路径须替换为实际位置；`current-state.json` 是实际状态或含 `state`、`previous` 的对象，`final-input.json` 使用下文完整的讨论回复输入结构，并在需要跨轮检查时附 `previous`。不需要持久记录时优先通过宿主支持的标准输入传递同一 JSON（`--state -`）；仅输入较短且可正确引用时用 `--json`。不要把长正文拼成多层 Shell 转义，不为调用强制新建记录文件。工具拒绝时说明实际限制，不更换写法绕过；调用方式不改变 `next`、`final`、`begin` 的原有执行时点和失败关闭要求。
 
+### 复用已有状态
+
+恢复时已有同一任务在本次变化前的最后一份有效完整状态，可让 `check`、`next`、`begin` 或 `final` 用它作为 `previous`，只传实际变化。有获准保存的完整状态文件时，用 `--previous-state` 读取文件。已有快照对象时也可在输入中提供 `previous`。增量输入使用 `changes`，与完整 `state` 二选一。下面的输入适用于 `wait_tool` 等待的唯一操作已成功返回的情况。
+
+```bash
+python3 /absolute/path/task-driver/scripts/workflow_control.py next \
+  --previous-state /absolute/path/verified-state.json --state -
+```
+
+```json
+{
+  "changes": [
+    {"path": ["operations", 0, "status"], "value": "succeeded"},
+    {"path": ["operations", 0, "evidence"], "value": "实际操作回执的位置"},
+    {"path": ["status"], "value": "continue"},
+    {"path": ["next_action"], "value": "核对原操作返回的结果"},
+    {"path": ["wait_reason"], "remove": true}
+  ]
+}
+```
+
+`path` 从顶层开始，使用字段名和从 0 开始的列表下标。先核对下标对应的实际步骤或操作 ID。`value` 设置字段或替换该位置的值，`remove:true` 删除已存在的对象字段，列表增删用整段替换。变化按顺序应用，中间路径须已存在。`final` 仍在输入外层带 `draft_reply` 和 `discussion_handoff`。
+
+脚本先验证旧快照结构，再用合成后的完整状态执行原来的跨轮、执行回执和回复检查。复用仍有效的来源和观察，据实更新受影响的来源、旧等待依据或失效回执，该移除的字段显式移除。需要读取合成结果时加 `--emit-state`，成功输出的 `state` 仍由调用方按原规则处理。`begin` 的 `state` 为检查所用的执行前状态，新回执另行返回，按原入口规则记录。脚本不写文件。缺少有效快照时走完整状态输入，不为使用增量模式重造一份“已验证”快照。
+
 ### 首次从讨论转入计划
 
 1. 覆盖未核对或还有会影响方案的待决项时，先补查可核实事项，再就当前仍需用户决定的内容交接 `decision`。用户明确要求草案且正文确有缺口时，仍可按当前计划请求交付标明缺口的讨论稿。
