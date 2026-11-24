@@ -586,6 +586,15 @@ def validate_execution_entry(s):
         if (not isinstance(scope.get('source'), str) or
                 not scope['source'].strip()):
             errors.append('execution_scope.source required')
+        if 'subagent_policy' in scope:
+            policy = scope['subagent_policy']
+            if (not isinstance(policy, dict) or
+                    policy.get('execution') not in ('as_needed', 'disabled') or
+                    policy.get('review') not in ('enabled', 'disabled')):
+                errors.append('execution_scope.subagent_policy requires execution and review modes')
+            elif ('restriction' in policy and
+                  (not isinstance(policy['restriction'], str) or not policy['restriction'].strip())):
+                errors.append('execution_scope.subagent_policy.restriction must be nonempty text')
 
     if s.get('execution_begun') is True:
         receipt = s.get('execution_receipt')
@@ -1279,9 +1288,22 @@ def validate_transition(previous, current):
             errors.append('changed execution_scope requires execution_reset_source')
         if old_execution_begun and new_execution_begun:
             errors.append('changed execution_scope requires stopping and a new begin')
-        if (isinstance(old_scope, dict) and isinstance(new_scope, dict) and
-                old_scope.get('source') == new_scope.get('source')):
-            errors.append('changed execution_scope requires a new source')
+        if isinstance(old_scope, dict) and isinstance(new_scope, dict):
+            old_boundary = {key: value for key, value in old_scope.items() if key != 'subagent_policy'}
+            new_boundary = {key: value for key, value in new_scope.items() if key != 'subagent_policy'}
+            old_policy, new_policy = old_scope.get('subagent_policy'), new_scope.get('subagent_policy')
+            if old_boundary != new_boundary and old_scope.get('source') == new_scope.get('source'):
+                errors.append('changed execution_scope requires a new source')
+            if isinstance(old_policy, dict) and isinstance(new_policy, dict):
+                if any(old_policy.get(key) != new_policy.get(key) for key in ('execution', 'restriction')):
+                    if not has_new_source(new_scope.get('source'), old_scope.get('source')):
+                        errors.append('changed execution delegation requires a new execution scope source')
+                if old_policy.get('review') != new_policy.get('review'):
+                    old_gates, new_gates = previous.get('gates'), current.get('gates')
+                    old_review_source = old_gates.get('subagents') if isinstance(old_gates, dict) else None
+                    new_review_source = new_gates.get('subagents') if isinstance(new_gates, dict) else None
+                    if not has_new_source(new_review_source, old_review_source):
+                        errors.append('changed independent review requires a new review source')
         if old_execution_begun and current.get('execution_receipt') == previous.get('execution_receipt'):
             errors.append('changed execution_scope requires a new execution_receipt')
     old_tracking = (
@@ -1645,6 +1667,9 @@ def begin_execution(s, previous=None):
     if not isinstance(s, dict):
         return {'ok': False, 'errors': ['checkpoint must be an object']}
     errors = validate(s)
+    scope = s.get('execution_scope')
+    if isinstance(scope, dict) and 'subagent_policy' not in scope:
+        errors.append('begin requires execution_scope.subagent_policy')
     if previous is None:
         errors.append('previous state required for execution begin')
     if previous is not None:

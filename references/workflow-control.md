@@ -79,7 +79,7 @@ python3 /absolute/path/task-driver/scripts/workflow_control.py next \
 
 全部步骤为 `done` 时，`next` 返回 `steps_complete`。主控必须进入验证与审查，禁止继续用 `next_action` 做未列入计划的新业务动作。
 
-业务执行入口还必须有 `analysis_complete`、`analysis_evidence`、`discussion_closed`、`discussion_closure_source`、`execution_scope`、`execution_begun` 和 `execution_receipt`。`execution_scope` 必须记录 `allowed_paths`、`allowed_actions` 和授权来源。`allowed_actions` 必须精确覆盖所有 `plan.steps.action`。`execution_receipt` 必须等于当前结构授权哈希。目标、计划、执行授权、执行范围、子代理设置或目标跟踪方式变化时，旧回执失效，必须用对应的实际 `previous` 重新运行 `begin`。
+业务执行入口还必须有 `analysis_complete`、`analysis_evidence`、`discussion_closed`、`discussion_closure_source`、`execution_scope`、`execution_begun` 和 `execution_receipt`。新建或更新的 `execution_scope` 必须记录 `allowed_paths`、`allowed_actions`、授权来源及 `subagent_policy`。后者包括执行分派（`execution: as_needed | disabled`）与独立复核（`review: enabled | disabled`）；另有明确的代理用途限制时写入 `restriction`，并以权限范围及原来源共同约束分派。App、H5 的 `execution` 必须为 `disabled`。这两个决定随 `execution_scope` 一起进入执行回执。仅调整独立复核时，更新 `gates.subagents` 并重新检查执行入口，保留原业务执行范围、确认来源和已完成步骤。执行分派的实际权限变化时，按执行范围的新授权处理。`allowed_actions` 必须精确覆盖所有 `plan.steps.action`。`execution_receipt` 必须等于当前结构授权哈希。目标、计划、执行授权、执行范围、独立复核设置或目标跟踪方式变化时，旧回执失效，必须用对应的实际 `previous` 重新运行 `begin`。
 
 计划步骤新增、删除、重排或动作变化时，必须记录 `plan_revision_source`。开始执行后改变执行范围或目标跟踪方式时，还必须记录 `execution_reset_source` 并将 `execution_begun` 恢复为 `false`，随后重新运行 `begin`。
 
@@ -125,7 +125,7 @@ python3 /absolute/path/task-driver/scripts/workflow_control.py next \
 
 以下是结构示意，必须按实际对话填写。禁止把示例当作已有决定。
 
-必须在 `gates.execution` 记录执行范围依据，在 `gates.subagents` 记录用户选择开启、不启用、限定用途或明确委托模型决定子代理设置的实际消息来源。旧状态缺字段时，必须先从可用对话或记录补查，禁止从执行授权推定子代理设置。仍无法确认时必须保持缺失，执行前必须按主控询问。对运行中或结果未知的原操作进行只读核实时，可在缺少这两项依据的情况下继续。来源内容是否支持设置必须由主控核对。
+必须在 `gates.execution` 记录执行范围依据，在既有 `gates.subagents` 记录用户选择开启、不启用、限定用途或明确委托模型决定独立复核的实际消息来源。旧状态必须核对原话及当时选项的实际范围。旧选项「不开启子代理」按执行分派与独立复核均关闭承接；「仅允许执行代理」保留原工作边界并关闭独立复核；「仅审查」关闭执行分派并按原范围复核。旧版普通开启按当时实际说明承接，再应用当前任务类型的限制。旧回执缺 `subagent_policy` 且原权限未变时可续用，必须先按原话还原限制，禁止套用新默认而扩权。需要改变实际权限时，按本节保留原证据并重新取得有效回执。缺字段时，必须先从可用对话或记录补查，禁止从执行授权推定独立复核设置。仍无法确认时必须保持缺失，执行前必须按主控询问。对运行中或结果未知的原操作进行只读核实时，可在缺少这两项依据的情况下继续。来源内容是否支持设置必须由主控核对。
 
 ```json
 {"task_id":"当前任务","phase":"analysis","status":"continue","next_action":"分析当前请求","decisions":[],"plan":{"presented":false},"coverage_checked":false,"plan_requested":false,"gates":{"plan":null,"goals":null,"execution":null,"subagents":null}}

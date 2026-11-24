@@ -91,6 +91,10 @@ def state(**updates):
             'allowed_actions': ['测试计划步骤'],
             'source': '测试执行授权',
         })
+        if isinstance(value['execution_scope'], dict):
+            value['execution_scope'].setdefault('subagent_policy', {
+                'execution': 'disabled', 'review': 'disabled',
+            })
         value.setdefault('execution_begun', True)
         value.setdefault('execution_receipt', 'test-execution-receipt')
         value.setdefault('goal_tracking_mode', 'plan')
@@ -212,6 +216,32 @@ def interruption(**updates):
 
 
 class ControlTests(unittest.TestCase):
+    def test_subagent_policy_modes_are_distinct_and_bound_to_execution_receipt(self):
+        s = state(phase='execution', decisions=[],
+                  plan={'presented': True, 'evidence': '计划消息'},
+                  goals={'presented': True, 'evidence': '目标消息'},
+                  gates={'plan': '计划确认', 'goals': '目标确认', 'execution': '执行确认'})
+        scope = s['execution_scope']
+        scope.pop('subagent_policy')
+        refresh_execution(s)
+        self.assertFalse(controller.validate(s))
+        missing = copy.deepcopy(s)
+        missing['execution_begun'] = False
+        missing.pop('execution_receipt')
+        result = controller.begin_execution(missing, before_execution_confirmation(missing))
+        self.assertIn('begin requires execution_scope.subagent_policy', result['errors'])
+        scope['subagent_policy'] = {'execution': 'as_needed', 'review': 'disabled'}
+        self.assertIn('execution_receipt does not match current authorization', controller.validate(s))
+        refresh_execution(s)
+        self.assertFalse(controller.validate(s))
+        scope['subagent_policy']['review'] = 'enabled'
+        self.assertIn('execution_receipt does not match current authorization', controller.validate(s))
+        refresh_execution(s)
+        self.assertFalse(controller.validate(s))
+        scope['subagent_policy']['execution'] = 'invalid'
+        self.assertIn('execution_scope.subagent_policy requires execution and review modes',
+                      controller.validate(s))
+
     def test_execution_requires_scope_and_subagent_evidence(self):
         s = state(phase='execution', decisions=[], plan={'presented': True, 'evidence': '计划消息'},
                   goals={'presented': True, 'evidence': '目标消息'},
@@ -3634,6 +3664,21 @@ class RecoveryAndToolWaitTests(unittest.TestCase):
         current.update(execution_begun=True, execution_receipt=result['execution_receipt'])
         self.assertEqual('continue_step', controller.route(current)['action'])
         self.assertEqual('S2', controller.route(current)['step_id'])
+
+    def test_review_change_preserves_execution_scope_and_progress(self):
+        old = self.execution()
+        current = copy.deepcopy(old)
+        current.update(execution_begun=False, execution_reset_source='用户改为开启独立复审')
+        current.pop('execution_receipt')
+        current['execution_scope']['subagent_policy']['review'] = 'enabled'
+        result = controller.begin_execution(current, old)
+        self.assertIn('changed independent review requires a new review source', result['errors'])
+        current['gates']['subagents'] = '用户改为开启独立复审'
+        result = controller.begin_execution(current, old)
+        self.assertTrue(result['ok'], result)
+        self.assertNotEqual(old['execution_receipt'], result['execution_receipt'])
+        self.assertEqual(old['plan']['steps'], current['plan']['steps'])
+        self.assertEqual(old['execution_scope']['source'], current['execution_scope']['source'])
 
     def test_revised_remaining_plan_renews_without_resetting_completed_step(self):
         old = self.execution()

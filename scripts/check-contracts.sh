@@ -54,15 +54,15 @@ check_patterns SKILL.md '^## 状态与主控职责' '^## 阶段转换' '^## 展�
   '正式计划与验收目标必须同轮展示' '等待用户调整限定' \
   '讨论中的局部请求完成后' '仅有阶段标记、总结或继续的承诺不算续接' '必须调用\[轻量检查\]' \
   '用户要求单独处理另一件事' '局部调整，默认只展示新增、修改或删除条目' \
-  '用户只授权审查子代理时，禁止扩为执行分派' '先核实结果未知的副作用操作' \
-  '执行，开启子代理' '执行，不开启子代理' '不执行，继续讨论' 'references/subagents.md' \
+  '两项执行选项只区分收尾复审' '先核实结果未知的副作用操作' \
+  '执行，开启独立复审' '执行，不开启独立复审' '不执行，继续讨论' 'references/subagents.md' \
   '进度锚点' '只读检查代理' '禁止把锚点结论写成已经独立检查或独立审查' \
   '四项可追溯证据' '四项引证' '必须具备四项证据' '禁止把只表达.*的执行意图记作内容确认' \
   '必须在对话中实际展示或摘要展示计划和目标' '必须有用户针对该计划的内容确认' '必须有用户对最终验收目标的确认' \
   '必须在正式计划和验收目标送达后，取得用户对该版本和范围的明确执行同意' '确认与授权必须能回溯到实际用户消息' \
   '明确的范围内委托' '明确的内容确认豁免' '明确的目标确认豁免' \
   '请求中可直接判断的最终结果或通过条件' '禁止把笼统的.*当作可直接判断的条件' \
-  '子代理设置必须采用用户明确选择' '用户明确委托模型决定，模型必须' \
+  '独立复核必须采用用户明确选择' '用户明确委托模型决定时，模型必须' \
   '用户明确限定本轮只交付指定内容' 'superseded' 'goals.included' 'evidence_map' \
   'completion_basis' 'unverified_goals' '^## 不可短路主控' 'plan.steps' 'execution begin' \
   '已确认的条件有记录来源且未变化时必须复用' '推进必须遵守\[固定链路\]'
@@ -89,7 +89,7 @@ check_patterns references/subagents.md '^## 选择执行方式' '^## 并发准�
   '^## 分派与交接' '^## 运行调度与异常接管' '^## 整合与审查交接' \
   '必须先满足下述安全条件' '禁止仅因满足安全条件而强制分派' '当前就绪任务' \
   '禁止同时修改同一内容或争用会相互干扰的运行资源' '禁止假定前序结果' \
-  '执行或审查代理必须取得对应授权' '禁止把其中一种授权扩大到另一种' '明确委托模型决定执行设置' \
+  '执行分派前必须核对当前任务类型、执行入口和用户限制' '禁止为主控可以决定的分派另问一次' '明确委托模型决定调查代理' \
   '执行入口' '禁止借分派增加最终验收目标或创建额外宿主验收任务' '禁止另建管理代理' \
   '禁止重复代理正在做的任务' '禁止用停止请求证明已停止' '结果未知' \
   '禁止让参与实现的代理独立复核自身产物' '次数必须遵守\[审查模块\]'
@@ -97,7 +97,7 @@ check_patterns references/verification.md '静态检查可以直接证明文本�
   '实际输入' '观察结果' '禁止将旧快照结果拼成新版本通过' \
   '判据必须留在测试侧' '验收未通过' '受阻' '当前有效目标' 'semantic_review' \
   'goals.included' 'goals.evidence_map' 'goals.excluded' 'completion_basis:user_requested' 'unverified_goals'
-check_patterns references/review.md '无论是否开启子代理' '主模型审查实际交付' \
+check_patterns references/review.md '无论是否开启独立复核' '主模型审查实际交付' \
   '禁止新增标准或扩大检查范围' '需要用户验收' '需要用户授权或决定' \
   '同一最终目标的修复次数禁止超过 8 次' '最后一次允许的修复后仍必须完成复验' \
   '用户明确指定本任务循环上限' '首审和复审均必须使用独立上下文' '禁止把预审通过写成整项目标达成' \
@@ -125,7 +125,7 @@ check_patterns references/workflow-control.md 'interruptions' 'reconcile_interru
 check_patterns references/workflow-control.md 'continue_analysis' 'local_only_read_only' \
   '^### 首次从讨论转入计划' '^## 讨论最终回复' 'discussion_closure_question_source' \
   '^### 首次执行的确认顺序' '禁止用同一个当前状态填写'
-check_patterns references/subagents.md '^## 只读检查代理' '^## 提问语义复核代理' '禁止静默省略或冒称已检查' \
+check_patterns references/subagents.md 'App、H5 任务由主控分支实施' '独立复核开关仅控制收尾审查' '^## 只读检查代理' '^## 提问语义复核代理' '禁止静默省略或冒称已检查' \
   '禁止把增加次数当成授权' '与主控使用同一模型时仍可能有共同偏差' '计数的限制必须遵守\[进度锚点规则\]' '明确委托模型决定调查代理' \
   'reviewer: independent' 'reviewer: main'
 check_patterns references/review.md '用于执行途中的只读路线复查'
@@ -136,7 +136,7 @@ check_patterns tests/dialogue-contracts/review-authority-summary.md '无关旧�
 check_patterns references/review.md '^## 完成后汇总范围外问题'
 check_patterns SKILL.md 'references/review.md#完成后汇总范围外问题'
 check_patterns SKILL.md 'references/review.md#结论承接'
-check_patterns references/verification.md '^## 验证前限定范围'
+check_patterns references/verification.md '^## 验证前限定范围' '谁启动、谁操作、谁确认' '禁止代点、输入、复现'
 check_patterns SKILL.md 'references/verification.md#验证前限定范围'
 check_patterns references/templates.md '进度锚点交接模板' '引用与展开' '四项引证' \
   '\| 编号（如 F1） \|' '\| 编号（如 D1） \|' '\| 编号（如 G1） \|' \
