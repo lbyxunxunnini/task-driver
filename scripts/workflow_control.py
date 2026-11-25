@@ -72,7 +72,7 @@ GUIDANCE = {
     ),
     'handle_interruption': '必须优先处理当前临时请求，处理前必须核对用户与宿主授权。业务执行仍必须满足原有执行门槛。禁止扩大原任务授权。',
     'ask_return_to_main': '先交付临时结果，再单独询问返回问题，发出后等待明示。',
-    'reconcile_interruption': '必须核对临时结果、恢复点、最新用户要求和实际现场，正文必须先交付临时结果，再接回对应事项。用户明确暂停时必须保持暂停。',
+    'reconcile_interruption': '必须核对临时结果、恢复点和最新要求。消息定位无法判序时，须从实际对话核实同意晚于拒绝。hold_main 为真时只交付插问结果，保留主任务的暂停或本轮限定并停止；其余情况按恢复点续接。',
     'begin_execution': (
         '执行入口尚未通过。必须核对分析闭合、讨论闭合、编号步骤、计划与目标确认、执行授权、子代理设置和目标跟踪回执。'
         '开始业务动作前必须运行 begin 并取得 execution_receipt。'
@@ -143,17 +143,38 @@ def unrelated_closed(frame):
             frame.get('branch', {}).get('relation') == 'unrelated')
 
 
-def has_return_consent(frame):
-    return (frame.get('return_answer') == 'yes' or
-            isinstance(frame.get('return_instruction_source'), str)
-            and bool(frame['return_instruction_source'].strip())
-            and frame.get('return_answer') is None)
+def return_consent_source(frame):
+    if frame.get('return_answer') == 'yes':
+        return frame.get('return_answer_source')
+    return frame.get('return_instruction_source')
+
+
+def return_source_is_eligible(source, previous_source):
+    """Reject a reused or out-of-order message. Opaque references still need semantic review."""
+    if not has_new_source(source, previous_source, normalize_spacing=True):
+        return False
+    locator = r'^\s*(用户|助手)?\s*(?:消息\s*)?第\s*(\d+)\s*条'
+    old = re.match(locator, previous_source) if isinstance(previous_source, str) else None
+    new = re.match(locator, source)
+    if old and new and (not old[1] or not new[1] or old[1] == new[1]):
+        return int(new[2]) > int(old[2])
+    return True
+
+
+def interruption_holds_main(state):
+    if state.get('status') == 'paused' or (state.get('local_only') and state.get('local_done')):
+        return True
+    # A request limited to a pending formal plan still has its own delivery gate.
+    return (state.get('scope_limited') is True and
+            not (state.get('plan_requested') is True and
+                 state.get('scope_limited_source') == state.get('plan_request_source')))
 
 
 def branch_record(frame):
     record = {**frame['branch'], 'id': frame['id'], 'request': frame['request']}
-    if 'branch_revision_source' in frame:
-        record['branch_revision_source'] = frame['branch_revision_source']
+    for key in ('branch_revision_source', 'revoked_return_sources'):
+        if key in frame:
+            record[key] = frame[key]
     return record
 
 
@@ -204,11 +225,21 @@ def validate_interruptions(s):
                 errors.append('return instruction requires an unrelated branch and replaces return question/answer fields')
         question = frame.get('return_question_source')
         answer = frame.get('return_answer')
+        consent = return_consent_source(frame)
+        revoked = frame.get('revoked_return_sources', [])
+        if (not isinstance(revoked, list) or
+                not all(isinstance(source, str) and source.strip() for source in revoked)):
+            errors.append('revoked_return_sources must contain actual superseded return sources')
+        elif consent and any(not return_source_is_eligible(consent, source) for source in revoked):
+            errors.append('revoked return consent cannot be reused')
         if any(k in frame for k in ('return_question_source', 'return_answer', 'return_answer_source')):
-            if not unrelated_closed(frame) or not isinstance(question, str) or not question.strip():
+            unsolicited_refusal = (question is None and answer == 'no' and
+                                    frame.get('branch', {}).get('relation') == 'unrelated')
+            if not unsolicited_refusal and (not unrelated_closed(frame) or
+                                           not isinstance(question, str) or not question.strip()):
                 errors.append('return confirmation requires a closed unrelated branch and presented question')
             if 'return_answer' in frame or 'return_answer_source' in frame:
-                if answer not in ('yes', 'no') or not has_new_source(frame.get('return_answer_source'), question):
+                if answer not in ('yes', 'no') or not return_source_is_eligible(frame.get('return_answer_source'), question):
                     errors.append('return answer requires an explicit user response source')
         if 'allow_while_paused' in frame and not isinstance(frame['allow_while_paused'], bool):
             errors.append('interruption allow_while_paused must be boolean')
@@ -821,6 +852,21 @@ def validate(s):
         if status == 'pending' and (item.get('blocks_plan') is False or item.get('blocks_completion') is False):
             if not isinstance(item.get('nonblocking_reason'), str) or not item['nonblocking_reason'].strip():
                 errors.append('nonblocking pending decision requires reason')
+    requirements = s.get('confirmed_requirements', [])
+    if not isinstance(requirements, list):
+        errors.append('confirmed_requirements must be a list of records')
+    else:
+        for row in requirements:
+            if not isinstance(row, dict):
+                errors.append('confirmed requirement must be an object')
+                continue
+            ident = row.get('id')
+            if not isinstance(ident, str) or not ident.strip() or ident in ids:
+                errors.append('confirmed requirement id missing or duplicated')
+            else:
+                ids.add(ident)
+            if not all(isinstance(row.get(k), str) and row[k].strip() for k in ('value', 'source')):
+                errors.append('confirmed requirement needs its value and source')
     plan = s.get('plan')
     if not isinstance(plan, dict) or not isinstance(plan.get('presented'), bool):
         errors.append('plan.presented must be true or false')
@@ -1214,11 +1260,22 @@ def validate_transition(previous, current, *, verified_corrections=()):
                 history.append(branch_record(closed))
             if unrelated_closed(closed):
                 parent = new_frames[-1] if new_frames else current
-                if not has_return_consent(closed) or make_resume_point(parent) != closed['resume_point']:
+                if interruption_holds_main(previous):
+                    prior_parent = old_frames[-2] if new_frames else previous
+                    held_fields = ('scope_limited', 'scope_limited_source', 'local_only', 'local_only_source',
+                                   'local_done', 'discussion_question_waiver_source', 'gates', 'execution_scope',
+                                   'plan', 'goals', 'decisions', 'confirmed_requirements')
+                    if (make_resume_point(previous) != make_resume_point(current) or
+                            make_resume_point(prior_parent) != make_resume_point(parent) or
+                            any(previous.get(key) != current.get(key) for key in held_fields)):
+                        errors.append('archiving a held interruption must preserve the main task and its scope')
+                elif not return_consent_source(closed) or make_resume_point(parent) != closed['resume_point']:
                     errors.append('return requires explicit agreement and the original pending point')
         if current.get('branch_history', []) != history:
             errors.append('preserve branch history and archive the reconciled branch')
-        if any('return_answer' in frame for frame in new_frames[common:]):
+        if any('return_answer' in frame and not (
+                frame['return_answer'] == 'no' and 'return_question_source' not in frame)
+                for frame in new_frames[common:]):
             errors.append('return answer requires a preceding interruption with a presented question')
         for old, new in zip(old_frames[:common], new_frames[:common]):
             if old['id'] != new['id']:
@@ -1237,17 +1294,34 @@ def validate_transition(previous, current, *, verified_corrections=()):
                     errors.append('preserve the recorded branch revision source')
             instruction_changed = (new.get('return_instruction_source') is not None and
                                    new.get('return_instruction_source') != old.get('return_instruction_source'))
-            if instruction_changed and not all(has_new_source(new.get('return_instruction_source'), source)
-                                               for source in (old.get('return_instruction_source'),
-                                                              old.get('return_answer_source'))):
-                errors.append('return instruction requires a fresh user source')
+            old_consent = return_consent_source(old)
+            newly_held = not interruption_holds_main(previous) and interruption_holds_main(current)
+            if newly_held and old_consent and old_consent == return_consent_source(new):
+                errors.append('a new pause or turn limit invalidates earlier return consent')
+            revoked = list(old.get('revoked_return_sources', []))
+            if old_consent and old_consent != return_consent_source(new) and old_consent not in revoked:
+                revoked.append(old_consent)
+            if new.get('revoked_return_sources', []) != revoked:
+                errors.append('preserve superseded return consent in revoked_return_sources')
+            if instruction_changed:
+                if old.get('return_answer') == 'no' and old.get('return_question_source'):
+                    errors.append('after a refusal, update the answer to the original return question')
+                if not all(return_source_is_eligible(new['return_instruction_source'], source)
+                           for source in (old_consent, old.get('return_answer_source'))):
+                    errors.append('return instruction requires a fresh user source')
             clearing_return = (new.get('return_answer') is None and
-                               (instruction_changed or branch_changed and
+                               (instruction_changed or newly_held and old_consent or branch_changed and
                                 new.get('branch', {}).get('relation') == 'related'))
-            if new.get('return_answer') != old.get('return_answer') and not clearing_return:
-                if (not old.get('return_question_source') or
-                        old['return_question_source'] != new.get('return_question_source') or
-                        not has_new_source(new.get('return_answer_source'), old.get('return_answer_source'))):
+            answer_changed = any(old.get(key) != new.get(key) for key in ('return_answer', 'return_answer_source'))
+            if (old.get('return_answer') and not clearing_return and
+                    old.get('return_question_source') != new.get('return_question_source')):
+                errors.append('preserve the original return question when updating its answer')
+            if answer_changed and not clearing_return:
+                unsolicited_no = new.get('return_answer') == 'no' and not old.get('return_question_source')
+                if ((not old.get('return_question_source') and not unsolicited_no) or
+                        old.get('return_question_source') != new.get('return_question_source') or
+                        not return_source_is_eligible(new.get('return_answer_source'), old.get('return_answer_source')) or
+                        not return_source_is_eligible(new.get('return_answer_source'), old_consent)):
                     errors.append('return answer requires the preceding question and a fresh reply')
             if old['request'] != new['request'] and old['source'] == new['source']:
                 errors.append('changed interruption request requires new source')
@@ -1323,7 +1397,7 @@ def validate_transition(previous, current, *, verified_corrections=()):
         errors.append('discussion question waiver cannot persist across resume')
     scope_state_changed = any(
         previous.get(key) != current.get(key)
-        for key in ('status', 'next_action', 'decisions', 'plan', 'goals', 'operations')
+        for key in ('status', 'next_action', 'decisions', 'confirmed_requirements', 'plan', 'goals', 'operations')
     )
     pending_scoped_plan = (old_plan_unshown and previous.get('plan_requested') is True and
                            previous.get('phase') in ('discussion', 'planning') and
@@ -1335,38 +1409,55 @@ def validate_transition(previous, current, *, verified_corrections=()):
             not pending_scoped_plan and
             current.get('scope_limited_source') == previous.get('scope_limited_source')):
         errors.append('scope limited waiver cannot persist across resume')
-    old_decisions = previous.get('decisions', [])
-    new_decisions = current.get('decisions', [])
-    if not isinstance(old_decisions, list) or not isinstance(new_decisions, list):
-        return errors + ['decisions must be lists for comparison']
-    old_items = {item.get('id'): item for item in old_decisions
-                 if isinstance(item, dict) and isinstance(item.get('id'), str)}
-    new_items = {item.get('id'): item for item in new_decisions
-                 if isinstance(item, dict) and isinstance(item.get('id'), str)}
     changed = False
     removals = current.get('removed_decisions', {})
-    if not isinstance(removals, dict):
+    previous_removals = previous.get('removed_decisions', {})
+    if not isinstance(removals, dict) or not isinstance(previous_removals, dict):
         return errors + ['removed decisions must be an object']
-    for ident, old in old_items.items():
-        if old.get('status') not in ('decided', 'delegated', 'excluded'):
-            continue
-        item = new_items.get(ident)
-        if item is None:
-            changed = True
-            source = removals.get(ident)
-            if not isinstance(source, str) or not source.strip():
-                errors.append('removed decision requires source')
-        elif any(old.get(key) != item.get(key) for key in ('subject', 'value', 'status')):
-            changed = True
-            if item.get('status') != 'pending' and (not item.get('source') or item.get('source') == old.get('source')):
-                review = current.get('impact_review')
-                within_delegation = (old.get('status') == item.get('status') == 'delegated' and
-                                     old.get('subject') == item.get('subject') and
-                                     bool(item.get('source')) and
-                                     isinstance(review, dict) and isinstance(review.get('reason'), str) and
-                                     bool(review['reason'].strip()))
-                if not within_delegation and ident not in verified_corrections:
-                    errors.append('changed decision requires new source')
+    for group in ('decisions', 'confirmed_requirements'):
+        before, after = previous.get(group, []), current.get(group, [])
+        if not isinstance(before, list) or not isinstance(after, list):
+            return errors + [group + ' must be lists for comparison']
+        by_id = {row['id']: row for row in after if isinstance(row, dict) and isinstance(row.get('id'), str)}
+        if group == 'confirmed_requirements':
+            prior_ids = {row['id'] for row in before if isinstance(row, dict) and isinstance(row.get('id'), str)}
+            changed |= bool(by_id.keys() - prior_ids)
+        for old in before:
+            if not isinstance(old, dict) or not isinstance(old.get('id'), str):
+                continue
+            if group == 'decisions' and old.get('status') not in ('decided', 'delegated', 'excluded'):
+                continue
+            ident = old['id']
+            item = by_id.get(ident)
+            if item is None:
+                changed = True
+                withdrawal = removals.get(ident)
+                if not (has_new_source(withdrawal, old.get('source')) and
+                        has_new_source(withdrawal, previous_removals.get(ident))):
+                    errors.append('removed decision requires source' if group == 'decisions'
+                                  else 'removed confirmed requirement requires withdrawal source: ' + ident)
+                continue
+            if group == 'confirmed_requirements':
+                # The result, constrained method and acceptance evidence have different owners.
+                for field, sources in (('value', ('source',)), ('implementation', ('constraint_source',)),
+                                       ('verification', ('detail_source', 'constraint_source', 'source'))):
+                    if old.get(field) == item.get(field):
+                        continue
+                    changed = True
+                    if not any(has_new_source(item.get(k), old.get(k)) for k in sources):
+                        errors.append(f'changed confirmed requirement {ident}.{field} requires fresh supporting evidence')
+                continue
+            if any(old.get(key) != item.get(key) for key in ('subject', 'value', 'status')):
+                changed = True
+                if item.get('status') != 'pending' and not has_new_source(item.get('source'), old.get('source')):
+                    review = current.get('impact_review')
+                    within_delegation = (old.get('status') == item.get('status') == 'delegated' and
+                                         old.get('subject') == item.get('subject') and
+                                         bool(item.get('source')) and
+                                         isinstance(review, dict) and isinstance(review.get('reason'), str) and
+                                         bool(review['reason'].strip()))
+                    if not within_delegation and ident not in verified_corrections:
+                        errors.append('changed decision requires new source')
     old_plan, new_plan = previous.get('plan'), current.get('plan')
     if isinstance(old_plan, dict) and isinstance(new_plan, dict) and old_plan.get('presented') is True and new_plan.get('presented') is True and old_plan.get('evidence') != new_plan.get('evidence'):
         changed = True
@@ -1598,6 +1689,31 @@ def discussion_ready(s):
             not any(decision[1] == 'pending' for decision in discussion_decisions(s).values()))
 
 
+def ready_discussion_questions(state):
+    """Find unanswered prerequisites of blocking questions, in stable record order."""
+    decisions = state.get('decisions', [])
+    by_id = {row['id']: row for row in decisions}
+    confirmed = {row['id'] for row in state.get('confirmed_requirements', [])}
+    needed = [row['id'] for row in decisions
+              if row['status'] == 'pending' and row.get('blocks_plan') is not False]
+    visited, ready = set(), set()
+    while needed:
+        ident = needed.pop()
+        if ident in visited:
+            continue
+        visited.add(ident)
+        dependencies = by_id[ident].get('depends_on', [])
+        if not isinstance(dependencies, list) or any(
+                not isinstance(key, str) or (key not in by_id and key not in confirmed) for key in dependencies):
+            raise ValueError('depends_on must reference existing discussion records: ' + ident)
+        waiting = [key for key in dependencies if key in by_id and by_id[key]['status'] == 'pending']
+        if waiting:
+            needed.extend(waiting)
+        else:
+            ready.add(ident)
+    return [row for row in decisions if row['id'] in ready]
+
+
 def discussion_transition_waiting(s):
     source = s.get('discussion_closure_question_source')
     return (s.get('status') == 'wait_user' and
@@ -1653,9 +1769,9 @@ def route(s):
             parent = frames[-2] if len(frames) > 1 else s
             result.update(action='handle_interruption', next_action=frame['next_action'],
                           resume_point=frame.get('resume_point', make_resume_point(parent)))
-        elif unrelated_closed(frame) and not has_return_consent(frame):
+        elif unrelated_closed(frame) and not interruption_holds_main(s) and not return_consent_source(frame):
             point = frame['resume_point']
-            if frame.get('return_question_source'):
+            if frame.get('return_question_source') or frame.get('return_answer') == 'no':
                 result.update(action='wait_interruption', status='wait_user',
                               reason='等待用户明确同意返回，保留原待答点')
             else:
@@ -1671,6 +1787,8 @@ def route(s):
                           result_evidence=frame['result_evidence'],
                           resume_to=frames[-2]['id'] if len(frames) > 1 else s.get('task_id'),
                           resume_point=frame['resume_point'])
+            if unrelated_closed(frame) and interruption_holds_main(s):
+                result['hold_main'] = True
         else:
             result.update(action='wait_interruption', status=frame['status'], reason=frame['wait_reason'])
         original_errors = validate(dict(s, interruptions=[]))
@@ -2064,7 +2182,8 @@ def closure_overview(rows, decisions, history=()):
     return graph + table
 
 
-def validate_closure_reply(reply, handoff, state, recorded_graph=None, *, verified_sources=None):
+def validate_closure_reply(reply, handoff, state, recorded_graph=None, *, verified_sources=None,
+                           recorded_table=None):
     """Bind every visible requirement to its confirmed wording and approach evidence."""
     review = handoff.get('semantic_review')
     if not isinstance(review, dict):
@@ -2147,13 +2266,20 @@ def validate_closure_reply(reply, handoff, state, recorded_graph=None, *, verifi
         graph_nodes = {row['id'] for row in resolved} | {'discuss', 'review'}
         if any(entry['origin'] not in graph_nodes or entry.get('target', 'review') not in graph_nodes
                for entry in history):
-            return ['branch history must reference displayed discussion nodes']
+            if recorded_graph is None:
+                return ['branch history must reference displayed discussion nodes']
+            try:
+                check_archived_branches(recorded_graph, history)
+            except ValueError as error:
+                return [str(error)]
         prefix = closure_overview(rows, resolved, history)
         table_start = prefix.index('要求表')
         table = prefix[table_start:]
         graph = prefix[:table_start]
         if recorded_graph is not None:
             graph = ['讨论图', '```mermaid', *(line.strip() for line in recorded_graph.splitlines() if line.strip()), '```']
+        if recorded_table is not None:
+            table = ['要求表', *recorded_table.splitlines()]
         # Locate each whole block rather than assuming the overview starts the reply.
         # Explanations remain in body for the full-draft semantic review below.
         spans = []
@@ -2227,7 +2353,8 @@ def validate_selected_approach(approach, decisions, *, verified_sources=None):
     return []
 
 
-def validate_discussion_final(s, reply, handoff, recorded_graph=None, *, verified_sources=None):
+def validate_discussion_final(s, reply, handoff, recorded_graph=None, *, verified_sources=None,
+                              recorded_table=None, previous=None):
     """Validate a discussion question, user-scoped stop, or actual tool wait."""
     if not isinstance(s, dict):
         return []
@@ -2236,6 +2363,23 @@ def validate_discussion_final(s, reply, handoff, recorded_graph=None, *, verifie
         if not isinstance(source, str) or not source.strip():
             return ['showing the discussion diagram or requirement table requires an explicit user request']
     frames = s.get('interruptions')
+    old_frames = previous.get('interruptions', []) if isinstance(previous, dict) else []
+    # The CLI validates the adjacent transition before accepting an archived result.
+    held_frame = frames[-1] if isinstance(frames, list) and frames else None
+    if old_frames and len(old_frames) == len(frames or []) + 1:
+        held_frame = old_frames[-1]
+    if isinstance(held_frame, dict) and unrelated_closed(held_frame) and interruption_holds_main(s):
+        body = [line for line in reply.splitlines() if line.strip() and line.strip() != '**任务驱动 · 讨论阶段**']
+        if not body or count_questions_outside_code(reply):
+            return ['deliver the interruption result without a question while the main task is held']
+        if s.get('phase') != 'discussion':
+            return []
+        if not isinstance(handoff, dict) or handoff.get('kind') != 'waived':
+            return ['held discussion requires the waived handoff for its interruption result']
+        if s.get('scope_limited') is not True and not s.get('discussion_question_waiver_source'):
+            return ['discussion question waiver requires source']
+        return validate_semantic_review(handoff.get('semantic_review'), 'waived',
+                                        extra_checks=('result_delivered',))
     if isinstance(frames, list) and frames and not validate_interruptions(s) and unrelated_closed(frames[-1]):
         action = route(s)
         if action['action'] == 'ask_return_to_main':
@@ -2276,7 +2420,12 @@ def validate_discussion_final(s, reply, handoff, recorded_graph=None, *, verifie
         return ['discussion final blocked by unresolved operation: ' + ', '.join(blocking_operations)]
     if kind not in ('decision', 'plan_transition', 'waived', 'tool_wait'):
         return ['discussion_handoff.kind must be decision, plan_transition, waived, or tool_wait']
-    question_count = count_questions_outside_code(reply)
+    # A requested generated table can quote several pending questions. Only
+    # count the surrounding reply after matching the complete, verified block.
+    question_body = reply
+    if recorded_table and handoff.get('overview_request_source'):
+        question_body = re.sub(r'(?m)^' + re.escape(recorded_table) + r'$', '', reply, count=1)
+    question_count = count_questions_outside_code(question_body)
     waiver = s.get('discussion_question_waiver_source')
     routed = route(s)
     route_action = routed.get('action')
@@ -2359,7 +2508,7 @@ def validate_discussion_final(s, reply, handoff, recorded_graph=None, *, verifie
     line = discussion_final_line(reply)
     trimmed = line.rstrip('*_` \t')
     errors = list(review_errors)
-    if count_questions_outside_code(reply) != 1 or not trimmed.endswith(('?', '？')):
+    if question_count != 1 or not trimmed.endswith(('?', '？')):
         errors.append('discussion final reply must end with exactly one question')
     if s.get('coverage_checked') is not True:
         errors.append('discussion final requires coverage_checked before handoff')
@@ -2379,7 +2528,11 @@ def validate_discussion_final(s, reply, handoff, recorded_graph=None, *, verifie
         if route_action not in ('resolve_pending', 'present_incomplete_plan', 'wait_user', 'wait_tool', 'blocked'):
             errors.append('discussion decision handoff conflicts with next action: ' + str(route_action))
         decision_id = handoff.get('decision_id')
-        decision = next((item for item in pending if item.get('id') == decision_id), None)
+        try:
+            candidates = ready_discussion_questions(s)
+        except ValueError as exc:
+            return errors + [str(exc)]
+        decision = next((item for item in candidates if item['id'] == decision_id), None)
         if decision is None:
             errors.append('discussion decision handoff requires a matching pending decision_id')
         else:
@@ -2392,7 +2545,7 @@ def validate_discussion_final(s, reply, handoff, recorded_graph=None, *, verifie
         waiting_for_answer = route_action == 'wait_user' and discussion_transition_waiting(s)
         if not waiting_for_answer:
             errors.extend(validate_closure_reply(reply, handoff, s, recorded_graph,
-                                                 verified_sources=verified_sources))
+                                                 verified_sources=verified_sources, recorded_table=recorded_table))
             errors.extend(validate_choice_basis(handoff.get('choice_basis'), s.get('decisions', [])))
         if waiting_for_answer and (routed.get('independent_action') or routed.get('independent_checks')):
             errors.append('discussion plan transition cannot bypass available independent work')
@@ -2709,7 +2862,8 @@ def check_archived_branches(graph, history):
         return
     node_label = re.compile(r'([\w-]+)\[("[^"]*"|[^\]]*)\]')
     connection = re.compile(
-        r'(?<![\w-])(?=([\w-]+)\s*(?:-->|-\.->)\s*(?:\|([^|]*)\|\s*)?([\w-]+))')
+        r'(?<![\w-])(?=([\w-]+)\s*(?:-->|-\.->|-\.[ \t]+[^<>\n|]+?[ \t]+\.->)'
+        r'\s*(?:\|([^|]*)\|\s*)?([\w-]+))')
     nodes = set()
     edges = {}
     neighbors = {}
@@ -2751,7 +2905,7 @@ def check_final_record(record, history=(), *, readback=None, decision_ids=()):
         source = record['read_only_source']
         if isinstance(source, str) and source.strip():
             return
-        raise ValueError('read_only_source requires an explicit user instruction')
+        raise ValueError('read_only_source requires the actual restriction or missing write permission')
     graph = read_discussion_record(record, readback=readback, decision_ids=decision_ids)
     check_archived_branches(graph, history)
     return graph
@@ -2857,7 +3011,8 @@ def main():
                     recorded_graph = check_final_record(payload.get('discussion_record'), state.get('branch_history', []),
                                                         readback=discussion_readback,
                                                         decision_ids=[item['id'] for item in state.get('decisions', [])])
-                errors.extend(validate_discussion_final(state, draft_reply, discussion_handoff, recorded_graph))
+                errors.extend(validate_discussion_final(state, draft_reply, discussion_handoff, recorded_graph,
+                                                       previous=previous))
             errors.extend(validate_plan_final(state, draft_reply, payload, routed))
             result = {'ok': not errors, 'errors': errors}
             if not errors and 'readback_ranges' in (payload.get('discussion_record') or {}):

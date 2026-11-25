@@ -867,6 +867,46 @@ class ControlTests(unittest.TestCase):
         self.assertIn('discussion transition must be reconfirmed after a material change',
                       controller.validate_transition(previous, confirmed))
 
+    def test_requirement_cannot_disappear_from_a_manual_closure_without_withdrawal(self):
+        retained = report_requirement()
+        withdrawn = dict(retained, id='D2', value='保留旧版', source='用户第3条：保留旧版')
+        before = state(decisions=[], plan_requested=False, confirmed_requirements=[retained, withdrawn])
+        after = dict(before, confirmed_requirements=[retained])
+        payload = dict(previous=before, state=after, draft_reply=REPORT_SUMMARY + '\n' + CLOSURE_QUESTION,
+                       discussion_handoff=handoff('plan_transition'),
+                       discussion_record={'read_only_source': '项目规则要求在对话中维护记录'})
+        for mode in ('check', 'next', 'final'):
+            for withdrawal, expected in [(None, 1), (withdrawn['source'], 1), ('用户第4条：无需保留旧版', 0)]:
+                with self.subTest(mode=mode, withdrawal=withdrawal):
+                    after['removed_decisions'] = {'D2': withdrawal} if withdrawal else {}
+                    result = subprocess.run([sys.executable, str(SCRIPT), mode, '--state', '-'],
+                                            input=json.dumps(payload), capture_output=True, text=True)
+                    self.assertEqual(expected, result.returncode, result.stdout)
+                    if expected:
+                        self.assertIn('withdrawal source: D2', result.stdout)
+
+    def test_requirement_change_preserves_its_own_evidence_and_reviews_retained_authorizations(self):
+        old = state(decisions=[], confirmed_requirements=[report_requirement()],
+                    gates={'plan': '确认计划', 'goals': '确认目标', 'execution': '允许执行'})
+        for field, evidence in [('value', 'source'), ('implementation', 'constraint_source'),
+                                ('verification', 'detail_source')]:
+            with self.subTest(field=field):
+                new = copy.deepcopy(old)
+                row = new['confirmed_requirements'][0]
+                row[field] = '调整后的要求、限定或验法'
+                self.assertIn(f'changed confirmed requirement R1.{field} requires fresh supporting evidence',
+                              controller.validate_transition(old, new))
+                row[evidence] = '本轮实际依据：' + row[field]
+                self.assertIn('changed scope requires reviewing retained authorizations',
+                              controller.validate_transition(old, new))
+                new['impact_review'] = {'reason': '复核保留范围', 'retained': list(controller.GATES)}
+                self.assertEqual([], controller.validate_transition(old, new))
+        new = copy.deepcopy(old)
+        new['confirmed_requirements'].append(dict(report_requirement(), id='D2'))
+        self.assertIn('changed scope requires reviewing retained authorizations', controller.validate_transition(old, new))
+        new['confirmed_requirements'][1]['id'] = 'R1'
+        self.assertIn('confirmed requirement id missing or duplicated', controller.validate(new))
+
     def test_single_body_closure_binds_graph_table_and_summary_to_same_records(self):
         delivery = {'id': 'D2', 'value': '离线取包', 'status': 'decided', 'subject': '取包',
                     'implementation': '本地保存', 'verification': '断网打开文件', 'depends_on': ['R1'],

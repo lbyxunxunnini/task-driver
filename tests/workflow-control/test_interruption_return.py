@@ -1,6 +1,9 @@
+import json
+import subprocess
+import sys
 import unittest
 
-from test_workflow_control import controller, interruption, state
+from test_workflow_control import READ_ONLY_RECORD, SCRIPT, controller, handoff, interruption, state
 
 
 class InterruptionReturnTests(unittest.TestCase):
@@ -119,7 +122,12 @@ class InterruptionReturnTests(unittest.TestCase):
         self.assertTrue(controller.validate(self.snapshot(stale)))
         self.assertEqual('wait_interruption', controller.route(self.snapshot(refused))['action'])
         fresh = dict(self.closed, return_instruction_source='第22条：现在继续原任务')
-        self.assertEqual([], controller.validate_transition(self.snapshot(refused), self.snapshot(fresh)))
+        self.assertTrue(controller.validate_transition(self.snapshot(refused), self.snapshot(fresh)))
+        answered = dict(refused, return_answer='yes', return_answer_source=fresh['return_instruction_source'])
+        self.assertEqual([], controller.validate_transition(self.snapshot(refused), self.snapshot(answered)))
+        for stale_source in ('第19条算完继续', '第21条：肯定'):
+            changed = dict(answered, return_answer_source=stale_source)
+            self.assertTrue(controller.validate_transition(self.snapshot(refused), self.snapshot(changed)))
         reused = dict(fresh, return_instruction_source=refused['return_answer_source'])
         self.assertTrue(controller.validate_transition(self.snapshot(refused), self.snapshot(reused)))
         paused = dict(self.parent, status='paused', wait_reason='用户暂停原任务')
@@ -130,3 +138,76 @@ class InterruptionReturnTests(unittest.TestCase):
         resumed = dict(restored, status='continue')
         self.assertIn('resuming paused task requires source',
                       controller.validate_transition(dict(paused, interruptions=[closed]), resumed))
+
+    def test_unsolicited_refusal_and_opaque_message_references(self):
+        earlier = '消息定位 kX：算完继续'
+        rejected = '确认卡 imZ：先别回原题'
+        directed = dict(self.frame, return_instruction_source=earlier)
+        refused = dict(self.frame, return_answer='no', return_answer_source=rejected,
+                       revoked_return_sources=[earlier])
+        closed = dict(refused, status='complete', result_evidence='323')
+        self.assertEqual([], controller.validate_transition(self.snapshot(directed), self.snapshot(refused)))
+        self.assertEqual([], controller.validate_transition(self.snapshot(refused), self.snapshot(closed)))
+        self.assertEqual('wait_interruption', controller.route(self.snapshot(closed))['action'])
+        fresh = dict(self.closed, return_instruction_source='新的用户消息 aB：现在继续', revoked_return_sources=[earlier])
+        self.assertEqual([], controller.validate_transition(self.snapshot(closed), self.snapshot(fresh)))
+        self.assertTrue(controller.validate(self.snapshot(dict(fresh, return_instruction_source=earlier))))
+        self.assertTrue(controller.validate_transition(self.snapshot(closed), self.snapshot(dict(fresh, revoked_return_sources=[]))))
+        # An older approval is equally stale when supplied as an answer to a real question.
+        asked = dict(self.closed, return_question_source='消息定位 h：是否返回')
+        approved = dict(asked, return_answer='yes', return_answer_source=earlier)
+        refused = dict(asked, return_answer='no', return_answer_source=rejected, revoked_return_sources=[earlier])
+        self.assertEqual([], controller.validate_transition(self.snapshot(approved), self.snapshot(refused)))
+        stale = dict(refused, return_answer='yes', return_answer_source=earlier)
+        self.assertTrue(controller.validate_transition(self.snapshot(refused), self.snapshot(stale)))
+        new = dict(refused, return_answer='yes', return_answer_source='新的用户消息 aB：现在继续')
+        self.assertEqual([], controller.validate_transition(self.snapshot(refused), self.snapshot(new)))
+
+    def test_message_locator_alias_cannot_reuse_withdrawn_consent_on_either_route(self):
+        old = '用户第19条：算完继续'
+        no = '用户第21条：先不要继续主任务'
+        for asked in (False, True):
+            refused = dict(self.closed, return_answer='no', return_answer_source=no, revoked_return_sources=[old])
+            if asked:
+                refused['return_question_source'] = '助手第20条：是否继续？'
+            for candidate, allowed in [('第19条：算完继续', False), ('消息第 21 条：继续', False),
+                                       ('第25条：算完继续', True)]:
+                with self.subTest(asked=asked, candidate=candidate):
+                    if asked:
+                        next_frame = dict(refused, return_answer='yes', return_answer_source=candidate)
+                    else:
+                        next_frame = dict(self.closed, return_instruction_source=candidate, revoked_return_sources=[old])
+                    errors = controller.validate_transition(self.snapshot(refused), self.snapshot(next_frame))
+                    self.assertEqual(allowed, not errors, errors)
+
+    def test_cli_delivers_and_archives_only_the_interruption_under_current_hold(self):
+        previous = self.snapshot(dict(self.frame, return_instruction_source='用户：做完继续'))
+        closed = dict(self.closed, revoked_return_sources=['用户：做完继续'])
+        for hold in [dict(status='paused', wait_reason='用户叫停原任务', discussion_question_waiver_source='用户：主任务暂停'),
+                     dict(scope_limited=True, scope_limited_source='用户：这轮只交付计算结果，不要再问')]:
+            with self.subTest(hold=hold):
+                active = dict(self.snapshot(closed), **hold)
+                self.assertEqual([], controller.validate_transition(previous, active))
+                stale = dict(active, interruptions=[dict(self.closed, return_instruction_source='用户：做完继续')])
+                self.assertTrue(controller.validate_transition(previous, stale))
+                archived = dict(active, interruptions=[], branch_history=[controller.branch_record(closed)])
+                routed = controller.route(active)
+                self.assertEqual('reconcile_interruption', routed['action'])
+                self.assertTrue(routed['hold_main'])
+                for old, new in ((previous, active), (active, archived)):
+                    waived = handoff('waived')
+                    self.assertTrue(controller.validate_discussion_final(
+                        new, '原任务已暂停。', waived, previous=old))
+                    waived['semantic_review']['checks']['result_delivered'] = True
+                    payload = {'previous': old, 'state': new, 'discussion_record': READ_ONLY_RECORD,
+                               'draft_reply': '17×19 等于 323。', 'discussion_handoff': waived}
+                    result = subprocess.run([sys.executable, str(SCRIPT), 'final', '--state', '-'],
+                                            input=json.dumps(payload), capture_output=True, text=True)
+                    self.assertTrue(json.loads(result.stdout)['ok'], result.stdout)
+                    self.assertTrue(controller.validate_discussion_final(
+                        new, '17×19 等于 323。是否回到原任务？', waived, previous=old))
+                lifted = dict(archived, status='continue', scope_limited=False)
+                for altered in (lifted, dict(archived, next_action='执行原任务'),
+                                dict(archived, gates=dict(archived['gates'], execution='插问返回指令')),
+                                dict(archived, branch_history=[])):
+                    self.assertTrue(controller.validate_transition(active, altered))

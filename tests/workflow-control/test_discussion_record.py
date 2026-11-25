@@ -235,6 +235,208 @@ flowchart TD
             self.prepare()
         self.assertEqual(self.summary.read_text(), self.original)
 
+    def next_message(self, preview, ident, message, patch):
+        path = self.root / (ident + '.txt')
+        path.write_text(message, encoding='utf-8')
+        ref = dict(source_id=ident, start=1, end=1)
+        self.request = dict(expected_summary_sha256=preview['record_sha256'],
+                            sources=[dict(id=ident, path=path.name, sha256=record.digest(path.read_bytes()))],
+                            turn=dict(id=ident, **ref), patch=patch)
+        return ref
+
+    def test_routes_ready_dependency_and_requires_a_choice_between_independent_questions(self):
+        self.request['patch']['decisions'] = [
+            dict(id='D1', depends_on=['D2']),
+            dict(id='D2', subject='读者', status='pending', question='周报给谁看？')]
+        self.request['patch']['next_action'] = '先确定读者，再讨论格式'
+        preview = self.prepare()
+        self.assertEqual('D2', preview['decision_id'])
+        self.assertTrue(preview['draft_reply'].endswith('周报给谁看？'))
+        self.request['expected_summary_sha256'] = preview['record_sha256']
+        self.request['decision_id'] = 'D1'
+        with self.assertRaisesRegex(ValueError, 'ready questions: D2'):
+            self.prepare()
+        self.request['patch']['decisions'][0]['depends_on'] = []
+        self.request['patch']['next_action'] = '先讨论影响最大的事项'
+        del self.request['decision_id']
+        with self.assertRaisesRegex(ValueError, 'choose decision_id'):
+            self.prepare()
+        self.request['decision_id'] = 'D1'
+        preview = self.prepare()
+        self.assertEqual('D1', preview['decision_id'])
+        self.request['expected_summary_sha256'] = preview['record_sha256']
+        self.request['patch'] = {}
+        del self.request['decision_id']
+        self.assertEqual('D1', self.prepare()['decision_id'])
+
+    def test_cyclic_dependencies_do_not_choose_the_first_question(self):
+        self.request['patch']['decisions'] = [
+            dict(id='D1', depends_on=['D2']),
+            dict(id='D2', subject='读者', status='pending', question='给谁看？', depends_on=['D1'])]
+        with self.assertRaisesRegex(ValueError, 'no blocking question is ready'):
+            self.prepare()
+        self.assertEqual(self.original, self.summary.read_text())
+
+    def test_old_draft_asking_a_blocked_question_requires_a_fresh_preview(self):
+        self.request['patch']['decisions'] = [
+            dict(id='D1', depends_on=['D2']),
+            dict(id='D2', subject='读者', status='pending', question='给谁看？')]
+        self.prepare()
+        old = record.parse_record(self.summary.read_text())
+        old.pop('view_version')
+        old.pop('decision_id')
+        sources = record.checked_sources(self.root, old['sources'], self.summary)
+        state = record.materialize(old, sources)
+        kind, target, _ = record.saved_route(old, state)
+        original, _ = record.render(old, state, kind, target, sources)
+        self.summary.write_text(original)
+        with self.assertRaisesRegex(ValueError, 'prepare the existing record again'):
+            record.finalize(self.root, self.summary, dict(record_sha256=record.digest(original)))
+        self.request = dict(expected_summary_sha256=record.digest(original), turn=old['turn'], patch={})
+        self.assertEqual('D2', self.prepare()['decision_id'])
+
+    def test_migrated_dependency_edge_tracks_the_record_and_keeps_other_paths(self):
+        graph = ' goal --> Reader["读者"]\n Reader -->|先确定读者| D1\n Reader -.-> probe["调查"]'
+        self.original = self.original.replace(' D1 --> review', graph + '\n D1 --> review')
+        self.summary.write_text(self.original)
+        self.state['decisions'][0]['depends_on'] = ['Reader']
+        self.state['decisions'].append(dict(id='Reader', subject='读者', status='pending', question='给谁看？'))
+        legacy = json.dumps(self.state, ensure_ascii=False)
+        (self.root / 'legacy.json').write_text(legacy)
+        self.request['legacy_state']['sha256'] = record.digest(legacy)
+        self.request['expected_summary_sha256'] = record.digest(self.original)
+        self.request['patch']['decisions'] = []
+        preview = self.prepare()
+        displayed_graph = record.GRAPH.search(preview['summary_readback'])[1]
+        self.assertIn('Reader -->|先确定读者| D1', displayed_graph)
+        self.assertNotIn('Reader --> D1', displayed_graph)
+        self.request.update(expected_summary_sha256=preview['record_sha256'], decision_id='D1')
+        self.request['patch']['decisions'] = [dict(id='D1', depends_on=[])]
+        preview = self.prepare()
+        graph = record.GRAPH.search(preview['summary_readback'])[1]
+        self.assertNotIn('Reader -->|先确定读者| D1', graph)
+        self.assertNotIn('Reader --> D1', graph)
+        self.assertIn('Reader -.-> probe["调查"]', graph)
+        self.assertIn('D1 --> review["逐项核对"] --> close["讨论收口"]', graph)
+
+    def test_pending_prerequisite_can_be_asked_and_confirmed_requirement_is_already_satisfied(self):
+        self.request['patch']['confirmed_requirements'] = [
+            dict(id='R1', value='只要一页', source_ref=self.ref, constraint_source_ref=self.ref,
+                 implementation='限制为一页', verification='检查页数')]
+        self.request['patch']['decisions'] = [
+            dict(id='D1', depends_on=['D2']),
+            dict(id='D2', subject='读者', status='pending', question='周报给谁看？', depends_on=['R1'],
+                 blocks_plan=False, nonblocking_reason='读者本身不阻塞交付，只影响格式决定'),
+            dict(id='D3', subject='可选封面', status='pending', question='需要封面吗？',
+                 blocks_plan=False, nonblocking_reason='可以以后再决定')]
+        preview = self.prepare()
+        self.assertEqual('D2', preview['decision_id'])
+        self.assertIn('R1 --> D2', preview['summary_readback'])
+        self.assertIn('R1["', preview['summary_readback'])
+        review = self.review(preview)
+        review['semantic_review'].update(target='decision', decision_id='D2', checks={key: True for key in
+            record.workflow.DECISION_REVIEW_CHECKS + record.workflow.GENERATED_RECORD_REVIEW_CHECKS})
+        self.assertTrue(record.finalize(self.root, self.summary, review)['ok'])
+
+    def test_retrying_a_later_message_cannot_reinterpret_a_different_decisions_source(self):
+        preview = self.prepare()
+        self.next_message(preview, 'turn6', '标题就用周报。', {})
+        preview = self.prepare()
+        self.request.update(expected_summary_sha256=preview['record_sha256'],
+                            interpretation_corrections=[dict(id='D1', reason='修正格式归纳')])
+        self.request['patch']['decisions'] = [dict(id='D1', value='PDF 格式', source_ref=self.ref)]
+        with self.assertRaisesRegex(ValueError, 'inside the same actual message'):
+            self.prepare()
+        self.assertEqual(preview['record_sha256'], record.digest(self.summary.read_bytes()))
+
+    def test_correction_source_can_be_one_line_in_a_multiline_user_turn(self):
+        message = '先看我这条补充。\nPDF。只要一页。\n标题稍后再定。'
+        (self.root / 'user.txt').write_text(message)
+        self.request['sources'][0]['sha256'] = record.digest(message)
+        self.request['turn']['end'] = 3
+        decision = self.request['patch']['decisions'][0]
+        decision['source_ref'] = dict(self.ref, start=2, end=2)
+        preview = self.prepare()
+        self.request['expected_summary_sha256'] = preview['record_sha256']
+        self.request['interpretation_corrections'] = [dict(id='D1', reason='修正格式归纳')]
+        decision['value'] = 'PDF 格式'
+        corrected = self.prepare()
+        self.assertTrue(record.finalize(self.root, self.summary, self.review(corrected))['ok'])
+
+    def test_old_current_fields_are_historical_and_real_revisions_keep_both_sources(self):
+        self.original += '\n## 当前状态\n- 当前事项及未答部分 / 下一动作 / 所缺条件：待选周报格式\n'
+        self.original += '\n| 编号 | 事项 | 状态 |\n|---|---|---|\n| D1 | 周报格式 | 待答 |\n'
+        self.summary.write_text(self.original)
+        self.request['expected_summary_sha256'] = record.digest(self.original)
+        preview = self.prepare()
+        current, history = preview['summary_readback'].split('## 迁移时的历史记录')
+        self.assertNotIn('待选周报格式', current)
+        self.assertNotIn('| 待答 |', current)
+        self.assertIn('准备询问是否结束讨论', current)
+        self.assertIn('待选周报格式', history)
+        next_ref = self.next_message(preview, 'turn6', '改成 Markdown。', {})
+        self.request['patch']['decisions'] = [dict(id='D1', value='Markdown', source_ref=next_ref,
+                                                  implementation='保存为 Markdown', verification='核对扩展名')]
+        preview = self.prepare()
+        self.assertTrue(record.finalize(self.root, self.summary, self.review(preview))['ok'])
+        change, = record.parse_record(self.summary.read_text())['decision_history']
+        self.assertEqual(('D1', 'PDF', self.ref), (change['id'], change['previous']['value'], change['previous']['source_ref']))
+        self.assertEqual(('Markdown', next_ref), (change['replacement']['value'], change['replacement']['source_ref']))
+
+    def test_previous_projection_is_checked_before_upgrading_its_saved_record(self):
+        preview = self.prepare()
+        old = record.parse_record(self.summary.read_text())
+        old.pop('view_version')
+        sources = record.checked_sources(self.root, old['sources'], self.summary)
+        state = record.materialize(old, sources)
+        kind, target, _ = record.saved_route(old, state)
+        original, _ = record.render(old, state, kind, target, sources)
+        self.summary.write_text(original)
+        old_preview = dict(preview, record_sha256=record.digest(original))
+        self.assertTrue(record.finalize(self.root, self.summary, self.review(old_preview))['ok'])
+        self.request = dict(expected_summary_sha256=record.digest(original), turn=old['turn'], patch={})
+        upgraded = self.prepare()
+        self.assertIn('## 当前讨论状态', upgraded['summary_readback'])
+        self.assertEqual(old['state'], record.parse_record(self.summary.read_text())['state'])
+        self.assertEqual(preview['draft_reply'], upgraded['draft_reply'])
+
+    def test_revised_requirement_keeps_old_action_check_and_constraint_reference(self):
+        self.request['patch']['confirmed_requirements'] = [
+            dict(id='R1', value='一页', source_ref=self.ref, constraint_source_ref=self.ref,
+                 implementation='排为一页', verification='核对页数为一')]
+        preview = self.prepare()
+        ref = self.next_message(preview, 'turn6', '改成两页，把目录单独排在第一页。', {})
+        self.request['patch']['confirmed_requirements'] = [
+            dict(id='R1', value='两页', source_ref=ref, constraint_source_ref=ref,
+                 implementation='目录单独一页', verification='核对两页并检查目录')]
+        preview = self.prepare()
+        self.assertTrue(record.finalize(self.root, self.summary, self.review(preview))['ok'])
+        change, = record.parse_record(self.summary.read_text())['decision_history']
+        self.assertEqual(change['previous']['constraint_source_ref'], self.ref)
+        self.assertEqual(change['previous']['verification'], '核对页数为一')
+        self.assertEqual(change['replacement']['constraint_source_ref'], ref)
+        self.assertEqual(change['replacement']['implementation'], '目录单独一页')
+
+    def test_paused_discussion_resumes_only_on_a_fresh_instruction(self):
+        preview = self.prepare()
+        ref = self.next_message(preview, 'pause', '先暂停。', dict(status='paused', wait_reason='用户暂停'))
+        self.request['patch']['discussion_question_waiver_source_ref'] = ref
+        self.request['introduction'] = '已暂停。'
+        paused = self.prepare()
+        self.assertEqual('waived', paused['kind'])
+        ref = self.next_message(paused, 'resume', '继续讨论。', dict(status='continue'))
+        with self.assertRaisesRegex(ValueError, 'resuming paused task requires source'):
+            self.prepare()
+        self.request['patch']['resume_source_ref'] = self.ref
+        with self.assertRaisesRegex(ValueError, 'inside the current user message'):
+            self.prepare()
+        self.request['patch']['resume_source_ref'] = ref
+        resumed = self.prepare()
+        self.assertTrue(record.finalize(self.root, self.summary, self.review(resumed))['ok'])
+        state = record.parse_record(self.summary.read_text())['state']
+        self.assertNotIn('discussion_question_waiver_source_ref', state)
+        self.assertEqual(ref, state['resume_source_ref'])
+
     def test_path_escape_and_generated_source_rejected(self):
         for path in ('../outside.txt', 'summary.md'):
             with self.subTest(path=path):
