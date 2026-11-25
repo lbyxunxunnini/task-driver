@@ -79,6 +79,7 @@ tdr- 先和我讨论登录页按钮错位的修复范围，再形成计划并执
 - [业务场景最佳实践](references/scenarios.md)：需要示例时按需读取，覆盖已有改造、新增诉求、空项目和业务场景。
 - [模板参考](references/templates.md)：计划摘要、计划草案、异常通知和用户验收通知的展示模板。
 - [主控协议](SKILL.md)：状态、路由、授权、展示策略与完成门槛。
+- [单一记录生成](references/workflow-control.md#单一记录生成)：正常讨论中从同一记录生成图、表及回复摘要，保留原话引用和模型语义复核；来源真实性依赖宿主。
 - [轻量状态检查](references/workflow-control.md)：按主控指定时点只读检查状态结构；不会创建任务记录或验证消息来源。
 - 职责模块：[调查分析](references/analysis.md)、[逐项讨论](references/discussion.md)、[计划](references/planning.md)、[目标](references/goals.md)、[子代理管理](references/subagents.md)、[执行](references/execution.md)、[验证](references/verification.md)、[审查](references/review.md)、[记录恢复](references/state-recovery.md)。各模块分别维护对应方法，必须按主控路由读取。
 

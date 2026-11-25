@@ -4,9 +4,63 @@
 
 ## 强制入口与失败关闭
 
-`workflow_control.py` 为主控提供只读结构检查，流程动作由主控决定。主控每完成一个阶段结果，以及准备提问、展示计划或目标、启动子代理或开始执行前，必须调用 `next` 并执行返回动作。讨论最终回复和正式计划正文必须调用 `final`。准备业务执行时还必须调用 `begin`，并取得 `ok:true` 与 `execution_receipt` 后再启动第一项。
+`workflow_control.py` 为主控提供只读结构检查，流程动作由主控决定。主控每完成一个阶段结果，以及准备提问、展示计划或目标、启动子代理或开始执行前，必须调用 `next` 并执行返回动作。讨论最终回复和正式计划正文必须调用 `final`；符合下节生成模式时，用封装同一检查的 `prepare` / `finalize` 替代本轮手工调用。准备业务执行时还必须调用 `begin`，并取得 `ok:true` 与 `execution_receipt` 后再启动第一项。
 
 脚本读取标准输入或指定 JSON；讨论阶段的 `final` 还读取指定任务摘要。`next --state -` 从标准输入读取状态。`begin` 只返回一次性结构回执。讨论阶段的 `final` 从 `{"state":{...},"draft_reply":"最终回复草稿","discussion_handoff":{...},"discussion_record":{...}}` 读取状态、正文和唯一交接对象。`check` 只检查结构。
+
+### 单一记录生成
+
+已有获准更新的任务摘要、原始消息/资料文件可访问、当前仍为正常讨论且无活动插问时，优先调用 `scripts/discussion_record.py`。其职责是生成记录视图，不是判断用户意思。模型只提交本轮变化和真实来源引用；图、表、来源摘录、收口摘要及检查输入由脚本派生，不再另写完整状态、正文和最终输入副本。其他情况继续下文既有入口。
+
+先读取实际对话和原摘要，使用 Skill 的绝对路径调用（示例路径需替换）：
+
+```bash
+python3 /absolute/path/task-driver/scripts/discussion_record.py inspect --project /project --summary .task-driver/summary.md --source conversation.md --source current-message.txt --source state.json
+python3 /absolute/path/task-driver/scripts/discussion_record.py prepare --project /project --summary .task-driver/summary.md --request request.json
+python3 /absolute/path/task-driver/scripts/discussion_record.py finalize --project /project --summary .task-driver/summary.md --review review.json
+```
+
+`inspect` 返回当前摘要哈希、已有受控记录、指定文件哈希与行数。`request.json` / `review.json` 只是可覆盖复用的调用输入，不是另一套持久任务状态；仅在获准写这些辅助输入时使用。来源必须是宿主提供且可核对的原始消息或资料，禁止自行编造文件代替消息。宿主应禁止模型改写这些来源；脚本只验证所引用字节及范围，不证明作者、语义或授权真实。
+
+`prepare` 请求格式如下，首次迁移才需要 `legacy_state`。哈希取实际 `inspect` 结果；来源行从 1 起且含首尾，值必须来自实际材料。下例仅展示结构，不能照抄为真实决定：
+
+```json
+{
+  "expected_summary_sha256": "实际摘要哈希",
+  "legacy_state": {"path": "state.json", "sha256": "原状态哈希"},
+  "sources": [{"id": "current", "path": "current-message.txt", "sha256": "原文哈希"}],
+  "turn": {"id": "实际本轮消息标识", "source_id": "current", "start": 1, "end": 1},
+  "patch": {
+    "status": "continue", "next_action": "核对后收口", "coverage_checked": true,
+    "decisions": [{"id": "原编号", "status": "decided", "value": "实际选择",
+      "source_ref": {"source_id": "current", "start": 1, "end": 1},
+      "implementation": "拟采用做法", "verification": "如何核验"}]
+  },
+  "introduction": "必要的自然承接，可省略"
+}
+```
+
+首次迁移必须补齐旧摘要中不在旧状态文件里的历史限制、有效决定和未决事项；已有已定记录也需补齐原始 `source_ref`。不能只录本轮答复。决定按 `id` 合并，旧事项的 `subject` 不能更换；旧问题的答案只能解决该问题，本轮新增的独立要求须另建编号，不能保持 subject 不变却把新要求并入其 value。新事项必须填写 `subject`。`confirmed_requirements` 同样按 ID 合并，但其确定性做法还需 `constraint_source_ref` 指向唯一限定做法的原约束。其他 `*_source` 字段用同名 `*_source_ref` 引用，禁止重复手写来源字符串。模型提出的做法明确记为未执行方案，不能当作用户授权。
+
+同一条实际消息的归纳写错、但用户并没有改变决定时，可以在请求顶层附 `"interpretation_corrections":[{"id":"原编号","reason":"具体误读及修正依据"}]`，同时提交对应 patch。仅允许同一消息和同一冻结 source_ref，保留原 subject/status，且尚未进入计划或执行；前后值和理由留在原摘要。不能把新决定或授权变化伪装成归纳纠错。该入口只免除“必须有新用户来源”的误判，不免除最终语义审核与其他授权检查。
+
+`prepare` 检查旧新状态、原来源及实际路由，保留旧编号、流程节点和历史，只更新原摘要；并返回 `summary_readback`、`draft_reply`、`kind`、`record_sha256` 和 `draft_sha256`。必须审核实际读回与完整草稿：旧要求是否遗漏、原话限定是否保留、做法是否引入未授权取舍。失败须按实际原因修正同一请求，不能换案例、造原话或强行修改生成图表。当前版本只处理正常待决、收口和有明确依据的暂停；其他动作返回错误且不写入。
+
+审核后提交 `review.json`：
+
+```json
+{
+  "record_sha256": "prepare 返回值", "draft_sha256": "prepare 返回值",
+  "semantic_review": {"reviewer": "main", "status": "pass", "target": "plan_transition",
+    "source": "实际复核了哪些原话、历史限制和完整草稿",
+    "checks": {"transition_intent": true, "no_blocking_pending_decisions": true,
+      "single_question": true, "no_trailing_content": true, "no_new_material_choices": true,
+      "source_meaning_preserved": true, "record_identity_preserved": true,
+      "history_constraints_preserved": true}}
+}
+```
+
+上述为收口复核字段；有待决问题时按[提问语义复核](discussion.md#提问语义复核)填写 `target:decision`、实际 `decision_id` 及相应 checks，暂停时按下文 `waived` 规则填写。所有生成模式交接还必须实际核对四项：`source_meaning_preserved`（归纳保留原话含义与限定，已确认要求的做法确由原约束限定）、`record_identity_preserved`（旧编号只承接原事项，新要求独立记录）、`history_constraints_preserved`（历史有效限制未遗漏）、`no_new_material_choices`（未引入未决定的实质取舍）。有可靠原始引用和完整稿审核时，允许同义归纳，不再要求归纳和做法逐字出现在原话；文件引用匹配不替代这些语义判断。不能未审核就填 pass。脚本不会替模型填写通过项；它只将实际完整草稿哈希绑定到此次复核，并复用原 `final` 校验。通过后原样发送返回的 `draft_reply`；需要改措辞就在唯一记录中修改做法、验法或承接说明，再生成并审核，不再手改三份副本。`prepare` 和 `finalize` 均不登记消息已送达，实际送达后才可按记录规则保存待答依据。此路径不额外调用手工 `next`、`final` 或 `record-check`；结构通过不等于语义正确。
 
 ### 新任务开场 intake
 

@@ -103,6 +103,12 @@ TRANSITION_REVIEW_CHECKS = (
     'single_question',
     'no_trailing_content',
 )
+GENERATED_RECORD_REVIEW_CHECKS = (
+    'source_meaning_preserved',
+    'record_identity_preserved',
+    'history_constraints_preserved',
+    'no_new_material_choices',
+)
 WAIVER_REVIEW_CHECKS = (
     'waiver_source_is_explicit',
     'no_user_question',
@@ -1167,7 +1173,7 @@ def validate_operation_transition(previous, current, confirmed_scope_change):
     return errors
 
 
-def validate_transition(previous, current):
+def validate_transition(previous, current, *, verified_corrections=()):
     """Check explicit changes when both snapshots are available; never infer intent."""
     if not isinstance(previous, dict) or not isinstance(current, dict):
         return ['previous and current states must be objects']
@@ -1359,7 +1365,7 @@ def validate_transition(previous, current):
                                      bool(item.get('source')) and
                                      isinstance(review, dict) and isinstance(review.get('reason'), str) and
                                      bool(review['reason'].strip()))
-                if not within_delegation:
+                if not within_delegation and ident not in verified_corrections:
                     errors.append('changed decision requires new source')
     old_plan, new_plan = previous.get('plan'), current.get('plan')
     if isinstance(old_plan, dict) and isinstance(new_plan, dict) and old_plan.get('presented') is True and new_plan.get('presented') is True and old_plan.get('evidence') != new_plan.get('evidence'):
@@ -2058,7 +2064,7 @@ def closure_overview(rows, decisions, history=()):
     return graph + table
 
 
-def validate_closure_reply(reply, handoff, state, recorded_graph=None):
+def validate_closure_reply(reply, handoff, state, recorded_graph=None, *, verified_sources=None):
     """Bind every visible requirement to its confirmed wording and approach evidence."""
     review = handoff.get('semantic_review')
     if not isinstance(review, dict):
@@ -2094,10 +2100,18 @@ def validate_closure_reply(reply, handoff, state, recorded_graph=None):
             return ['closure record ids must be unique']
         identifiers.add(ident)
         sources = [item.get('source'), item.get('detail_source'), value]
+        # Only the file-backed renderer supplies this map, after resolving and
+        # checking immutable source references. CLI JSON cannot enable this path.
+        bound = verified_sources.get(ident) if verified_sources is not None else None
+        if verified_sources is not None and (
+                not isinstance(bound, dict) or bound.get('source') != item.get('source')):
+            return ['generated record requires verified original sources for every item']
         if status == 'confirmed':
             constraint = item.get('constraint_source')
-            if (not isinstance(item.get('source'), str) or value not in item['source']
-                    or not isinstance(constraint, str) or action not in constraint):
+            if bound is not None and bound.get('constraint_source') != constraint:
+                return ['generated requirement requires its verified original constraint']
+            if (not isinstance(item.get('source'), str) or not isinstance(constraint, str)
+                    or (bound is None and (value not in item['source'] or action not in constraint))):
                 return ['confirmed requirement needs its wording and unique implementation in their respective sources']
             sources.append(constraint)
         if strict or status == 'confirmed':
@@ -2190,10 +2204,11 @@ def validate_closure_reply(reply, handoff, state, recorded_graph=None):
     if review.get('reviewer') == 'independent' or (
             requirements and all(row['status'] == 'excluded' for row in resolved)):
         return []
-    return validate_selected_approach(handoff.get('approach_basis'), resolved)
+    return validate_selected_approach(handoff.get('approach_basis'), resolved,
+                                      verified_sources=verified_sources)
 
 
-def validate_selected_approach(approach, decisions):
+def validate_selected_approach(approach, decisions, *, verified_sources=None):
     """Verify a material choice against the original decision evidence."""
     if not isinstance(approach, dict):
         return ['self-reviewed closure requires approach_basis for the actual solution']
@@ -2204,12 +2219,15 @@ def validate_selected_approach(approach, decisions):
     if (not decision or not isinstance(quote, str) or not quote.strip()
             or not isinstance(decision.get('source'), str) or quote not in decision['source']):
         return ['approach_basis must cite the selected approach and its source quotation']
-    if decision['status'] == 'decided' and (not isinstance(decision.get('value'), str) or decision['value'] not in quote):
+    bound = verified_sources.get(decision['id']) if verified_sources is not None else None
+    source_verified = isinstance(bound, dict) and bound.get('source') == decision['source']
+    if (not source_verified and decision['status'] == 'decided'
+            and (not isinstance(decision.get('value'), str) or decision['value'] not in quote)):
         return ['selected approach must occur in the cited decision wording']
     return []
 
 
-def validate_discussion_final(s, reply, handoff, recorded_graph=None):
+def validate_discussion_final(s, reply, handoff, recorded_graph=None, *, verified_sources=None):
     """Validate a discussion question, user-scoped stop, or actual tool wait."""
     if not isinstance(s, dict):
         return []
@@ -2268,6 +2286,12 @@ def validate_discussion_final(s, reply, handoff, recorded_graph=None):
             not (isinstance(s.get('plan'), dict) and s['plan'].get('presented') is True))
         else ()
     )
+    if verified_sources is not None:
+        extra_review_checks += GENERATED_RECORD_REVIEW_CHECKS
+        if (not isinstance(handoff.get('semantic_review'), dict)
+                or handoff['semantic_review'].get('reviewed_reply_sha256')
+                != hashlib.sha256(reply.encode('utf-8')).hexdigest()):
+            return ['generated record review must bind the complete reply']
     review_errors = validate_semantic_review(
         handoff.get('semantic_review'), kind, handoff.get('decision_id'),
         extra_checks=extra_review_checks,
@@ -2367,7 +2391,8 @@ def validate_discussion_final(s, reply, handoff, recorded_graph=None):
             errors.append('discussion plan transition cannot bypass pending decisions')
         waiting_for_answer = route_action == 'wait_user' and discussion_transition_waiting(s)
         if not waiting_for_answer:
-            errors.extend(validate_closure_reply(reply, handoff, s, recorded_graph))
+            errors.extend(validate_closure_reply(reply, handoff, s, recorded_graph,
+                                                 verified_sources=verified_sources))
             errors.extend(validate_choice_basis(handoff.get('choice_basis'), s.get('decisions', [])))
         if waiting_for_answer and (routed.get('independent_action') or routed.get('independent_checks')):
             errors.append('discussion plan transition cannot bypass available independent work')
