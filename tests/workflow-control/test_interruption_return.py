@@ -1,3 +1,4 @@
+import hashlib
 import json
 import subprocess
 import sys
@@ -148,7 +149,7 @@ class InterruptionReturnTests(unittest.TestCase):
         closed = dict(refused, status='complete', result_evidence='323')
         self.assertEqual([], controller.validate_transition(self.snapshot(directed), self.snapshot(refused)))
         self.assertEqual([], controller.validate_transition(self.snapshot(refused), self.snapshot(closed)))
-        self.assertEqual('wait_interruption', controller.route(self.snapshot(closed))['action'])
+        self.assertEqual('deliver_interruption_result', controller.route(self.snapshot(closed))['action'])
         fresh = dict(self.closed, return_instruction_source='新的用户消息 aB：现在继续', revoked_return_sources=[earlier])
         self.assertEqual([], controller.validate_transition(self.snapshot(closed), self.snapshot(fresh)))
         self.assertTrue(controller.validate(self.snapshot(dict(fresh, return_instruction_source=earlier))))
@@ -179,6 +180,116 @@ class InterruptionReturnTests(unittest.TestCase):
                         next_frame = dict(self.closed, return_instruction_source=candidate, revoked_return_sources=[old])
                     errors = controller.validate_transition(self.snapshot(refused), self.snapshot(next_frame))
                     self.assertEqual(allowed, not errors, errors)
+
+    def test_cli_refusal_delivers_the_result_once_and_waits_for_real_return_consent(self):
+        def cli(mode, previous, current, **fields):
+            payload = dict(previous=previous, state=current, **fields)
+            result = subprocess.run([sys.executable, str(SCRIPT), mode, '--state', '-'],
+                                    input=json.dumps(payload), capture_output=True, text=True)
+            return json.loads(result.stdout)
+
+        refused = dict(self.frame, return_answer='no', return_answer_source='用户第19条：先别回原题')
+        for status, evidence, reply in [('complete', '计算明细\n计算结果是323', '17×19 等于 323。'),
+                                        ('cancelled', '用户撤回了临时计算', '本次计算已取消。')]:
+            with self.subTest(status=status):
+                closed = dict(refused, status=status, result_evidence=evidence)
+                previous, current = self.snapshot(refused), self.snapshot(closed)
+                result = cli('next', previous, current)
+                self.assertEqual(('deliver_interruption_result', status), (result['action'], result['outcome']))
+                waived = handoff('waived')
+                waived['semantic_review']['checks']['result_delivered'] = True
+                waived['semantic_review']['reviewed_reply_sha256'] = hashlib.sha256(reply.encode()).hexdigest()
+                final = dict(discussion_record=READ_ONLY_RECORD, discussion_handoff=waived, draft_reply=reply)
+                self.assertTrue(cli('final', previous, current, **final)['ok'])
+                for bad_reply in ('', reply + ' 回到原题吗？', reply + ' 现在开始执行原任务。'):
+                    self.assertFalse(cli('final', previous, current, **dict(final, draft_reply=bad_reply))['ok'])
+                self.assertFalse(cli('final', previous, current, **dict(final, discussion_handoff=None))['ok'])
+                self.assertNotIn('result_delivery_source', closed)
+                for altered in (dict(current, next_action='执行主线任务'),
+                                dict(current, gates=dict(current['gates'], execution='插问结果'))):
+                    self.assertEqual('repair_state', cli('next', previous, altered)['action'])
+                    self.assertFalse(cli('final', previous, altered, **final)['ok'])
+                decided = dict(current['decisions'][0], status='decided', value='PDF', source='用户第19条：格式选 PDF')
+                self.assertEqual('repair_state', cli('next', previous, dict(current, decisions=[decided]))['action'])
+                # Record a genuine main answer from the same message before registering its separate refusal.
+                active = self.snapshot(self.frame)
+                answered = dict(active, decisions=[decided])
+                self.assertTrue(cli('check', active, answered)['ok'])
+                rejected = dict(previous, decisions=[decided])
+                self.assertTrue(cli('check', answered, rejected)['ok'])
+                self.assertEqual('deliver_interruption_result',
+                                 cli('next', rejected, dict(current, decisions=[decided]))['action'])
+                self.assertFalse(cli('check', active, dict(previous, decisions=[decided]))['ok'])
+
+                sent = dict(closed, result_delivery_source='助手第20条：已送达当前结果')
+                waiting = self.snapshot(sent)
+                self.assertEqual('wait_interruption', cli('next', current, waiting)['action'])
+                self.assertFalse(cli('final', current, waiting, **final)['ok'])
+                self.assertEqual('repair_state', cli('next', waiting, current)['action'])
+                later = dict(READ_ONLY_RECORD, turn_id='用户第21条', answer='再补充，格式选 PDF。')
+                independent = dict(decided, source=later['turn_id'] + '：' + later['answer'])
+                updated = dict(waiting, decisions=[independent])
+                self.assertTrue(cli('check', waiting, updated, discussion_record=later)['ok'])
+                self.assertEqual('wait_interruption', cli('next', updated, updated)['action'])
+                self.assertEqual('repair_state', cli('next', waiting, updated)['action'])
+                self.assertFalse(cli('check', current, updated, discussion_record=later)['ok'])
+                fabricated = dict(waiting, decisions=[dict(independent, source='插问来信')])
+                self.assertFalse(cli('check', waiting, fabricated, discussion_record=later)['ok'])
+                self.assertFalse(cli('check', waiting, updated)['ok'])
+                self.assertFalse(cli('check', waiting, self.snapshot(dict(sent, result_evidence='结果已更改')))['ok'])
+                for field, value in [('confirmed_requirements', [dict(id='R1', value='覆盖全部页',
+                                      verification='核对文件名', source='插问来信')]),
+                                     ('removed_decisions', {'R1': '以插问为撤回依据'}),
+                                     ('execution_receipt', '随发送结果授予执行许可')]:
+                    self.assertFalse(cli('check', current, dict(waiting, **{field: value}))['ok'])
+                history = [controller.branch_record(sent)]
+                archived = dict(self.parent, branch_history=history)
+                self.assertEqual('repair_state', cli('next', waiting, archived)['action'])
+
+                resumed = dict(sent, return_instruction_source='用户第21条：现在可以回原题')
+                del resumed['return_answer'], resumed['return_answer_source']
+                approved = self.snapshot(resumed)
+                premature_gates = dict(self.parent['gates'], execution=resumed['return_instruction_source'])
+                self.assertFalse(cli('check', waiting, dict(approved, gates=premature_gates))['ok'])
+                action = cli('next', waiting, approved)
+                self.assertEqual('reconcile_interruption', action['action'])
+                self.assertEqual(sent['result_delivery_source'], action['result_delivery_source'])
+                self.assertEqual(self.frame['resume_point'], action['resume_point'])
+                self.assertEqual('wait_user', cli('next', approved, archived)['action'])
+                self.assertFalse(cli('check', approved, dict(archived, gates=premature_gates))['ok'])
+                paused = dict(waiting, status='paused', wait_reason='用户另行暂停主任务',
+                              discussion_question_waiver_source='用户第21条：请先暂停主任务')
+                self.assertTrue(cli('next', waiting, paused)['hold_main'])
+                self.assertFalse(cli('check', waiting, dict(paused, next_action='执行原计划'))['ok'])
+                paused_archive = dict(paused, interruptions=[], branch_history=history)
+                self.assertEqual('paused', cli('next', paused, paused_archive)['action'])
+                ack = dict(final, draft_reply='原任务已暂停。', discussion_handoff=handoff('waived'))
+                self.assertTrue(cli('final', paused, paused_archive, **ack)['ok'])
+                repeated = dict(ack, draft_reply=evidence)
+                self.assertFalse(cli('final', paused, paused_archive, **repeated)['ok'])
+
+        premature = self.snapshot(dict(refused, result_delivery_source='尚无已送达结果'))
+        self.assertEqual('repair_state', cli('next', self.snapshot(refused), premature)['action'])
+
+        outer = interruption(id='first', status='wait_user', next_action='等待第一项决定',
+                             wait_reason='等待用户', wait_evidence='助手第12条：请选格式')
+        nested = dict(refused, resume_point=controller.make_resume_point(outer))
+        before = dict(self.parent, interruptions=[outer, nested])
+        complete = dict(nested, status='complete', result_evidence='323')
+        self.assertEqual('deliver_interruption_result', cli('next', before,
+                         dict(self.parent, interruptions=[outer, complete]))['action'])
+        moved = dict(outer, next_action='开始执行第一项任务')
+        self.assertEqual('repair_state', cli('next', before,
+                         dict(self.parent, interruptions=[moved, complete]))['action'])
+
+        translation = '你今天过得好吗？'
+        translated = self.snapshot(dict(refused, status='complete', result_evidence=translation))
+        waived = handoff('waived')
+        waived['semantic_review']['checks']['result_delivered'] = True
+        self.assertTrue(cli('final', self.snapshot(refused), translated, discussion_record=READ_ONLY_RECORD,
+                            discussion_handoff=waived, draft_reply=translation)['ok'])
+        self.assertFalse(cli('final', self.snapshot(refused), translated, discussion_record=READ_ONLY_RECORD,
+                             discussion_handoff=waived, draft_reply=translation + ' 现在回到主线吗？')['ok'])
 
     def test_cli_delivers_and_archives_only_the_interruption_under_current_hold(self):
         previous = self.snapshot(dict(self.frame, return_instruction_source='用户：做完继续'))
@@ -211,3 +322,20 @@ class InterruptionReturnTests(unittest.TestCase):
                                 dict(archived, gates=dict(archived['gates'], execution='插问返回指令')),
                                 dict(archived, branch_history=[])):
                     self.assertTrue(controller.validate_transition(active, altered))
+
+    def test_existing_unrelated_and_nested_handoffs_preserve_independent_main_updates(self):
+        answer = dict(self.parent['decisions'][0], status='decided', value='PDF', source='用户另外确认 PDF')
+        asked = dict(self.closed, return_question_source='助手问是否返回')
+        agreed = dict(asked, return_answer='yes', return_answer_source='用户同意返回')
+        current = dict(self.snapshot(agreed), decisions=[answer])
+        self.assertEqual([], controller.validate_transition(self.snapshot(asked), current))
+        forged = dict(current, gates=dict(current['gates'], execution=agreed['return_answer_source']))
+        self.assertTrue(controller.validate_transition(self.snapshot(asked), forged))
+        outer = dict(self.closed, return_answer='no', return_answer_source='先不要回主线')
+        child = interruption(id='nested', request='补查影响范围的材料', branch={
+            'relation': 'related', 'origin': 'discuss', 'target': 'review', 'impact': '影响验收'},
+            resume_point=controller.make_resume_point(outer))
+        previous = dict(self.parent, interruptions=[outer, child])
+        closed = dict(child, status='complete', result_evidence='已核实该范围')
+        current = dict(previous, decisions=[answer], interruptions=[outer, closed])
+        self.assertEqual([], controller.validate_transition(previous, current))

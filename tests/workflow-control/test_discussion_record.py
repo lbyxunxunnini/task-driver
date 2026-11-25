@@ -417,6 +417,91 @@ flowchart TD
         self.assertEqual(change['replacement']['constraint_source_ref'], ref)
         self.assertEqual(change['replacement']['implementation'], '目录单独一页')
 
+    def test_migration_binding_old_citations_is_not_evidence_for_a_new_check(self):
+        source = '输出一份文件。'
+        policy = '导出为 CSV，核对文件数。'
+        new_policy = '今后必须核对印章颜色。'
+        for filename, content in [('old-msg', source), ('old-policy', policy), ('new-policy', new_policy)]:
+            (self.root / filename).write_text(content)
+            self.request['sources'].append(dict(id=filename, path=filename, sha256=record.digest(content)))
+        self.state['confirmed_requirements'] = [dict(
+            id='R1', value='输出一份文件', source='用户第1条：' + source, implementation='导出为 CSV',
+            verification='核对文件数', constraint_source='导出规范第1条：' + policy,
+            detail_source='导出规范第1条：' + policy)]
+        legacy = json.dumps(self.state, ensure_ascii=False)
+        (self.root / 'legacy.json').write_text(legacy)
+        self.request['legacy_state']['sha256'] = record.digest(legacy)
+        binding = dict(id='R1', source_ref=dict(self.ref, source_id='old-msg'),
+                       constraint_source_ref=dict(self.ref, source_id='old-policy'))
+        for change in ({'verification': '核对印章颜色'},
+                       {'verification': '核对印章颜色', 'detail_source_ref': binding['constraint_source_ref']}):
+            self.request['patch']['confirmed_requirements'] = [dict(binding, **change)]
+            with self.assertRaisesRegex(ValueError, 'R1.verification requires fresh supporting evidence'):
+                self.prepare()
+            self.assertEqual(self.original, self.summary.read_text())
+        for change, expected in [({}, '核对文件数'),
+                                 ({'verification': '核对印章颜色',
+                                   'detail_source_ref': dict(self.ref, source_id='new-policy')}, '核对印章颜色')]:
+            self.summary.write_text(self.original)
+            self.request['patch']['confirmed_requirements'] = [dict(binding, **change)]
+            preview = self.prepare()
+            self.assertIn(expected, preview['draft_reply'])
+            self.assertTrue(record.finalize(self.root, self.summary, self.review(preview))['ok'])
+
+    def test_generated_verification_revisions_need_an_independent_original_reference(self):
+        source = '一页 PDF。必须打开 PDF 核对页数。\n'
+        (self.root / 'user.txt').write_text(source)
+        self.request['sources'][0]['sha256'] = record.digest(source)
+        self.request['patch']['confirmed_requirements'] = [
+            dict(id='R1', value='一页 PDF', source_ref=self.ref, constraint_source_ref=self.ref,
+                 implementation='排为一页', verification='打开 PDF 核对页数')]
+        preview = self.prepare()
+        before = self.summary.read_bytes()
+        self.next_message(preview, 'greeting', '你好。', {})
+        self.request['sources'].append(dict(id='old-alias', path='./user.txt', sha256=record.digest(source)))
+        for evidence in ({}, {'detail_source_ref': self.ref},
+                         {'detail_source_ref': dict(self.ref, source_id='old-alias')}):
+            with self.subTest(evidence=evidence):
+                self.request['patch']['confirmed_requirements'] = [
+                    dict(id='R1', verification='只检查文件存在', **evidence)]
+                with self.assertRaisesRegex(ValueError, 'R1.verification requires fresh supporting evidence'):
+                    self.prepare()
+                self.assertEqual(before, self.summary.read_bytes())
+
+        updated = self.next_message(preview, 'restated', '仍然只交付一页 PDF。', {})
+        self.request['patch']['confirmed_requirements'] = [
+            dict(id='R1', source_ref=updated, constraint_source_ref=updated)]
+        preview = self.prepare()
+        self.next_message(preview, 'later', '稍后再看。', {})
+        self.request['patch']['confirmed_requirements'] = [
+            dict(id='R1', verification='只检查文件存在', detail_source_ref=self.ref)]
+        with self.assertRaisesRegex(ValueError, 'R1.verification requires fresh supporting evidence'):
+            self.prepare()
+
+        ref = self.next_message(preview, 'new-check', '改成同时核对一页和页码。', {})
+        self.request['patch']['confirmed_requirements'] = [
+            dict(id='R1', verification='打开 PDF 核对总页数和页码', detail_source_ref=ref)]
+        preview = self.prepare()
+        self.assertTrue(record.finalize(self.root, self.summary, self.review(preview))['ok'])
+        saved = record.parse_record(self.summary.read_text())
+        self.assertEqual(ref, saved['decision_history'][-1]['replacement']['detail_source_ref'])
+        row = saved['state']['confirmed_requirements'][0]
+        self.assertEqual(row['source_ref'], updated)
+        self.assertEqual(row['constraint_source_ref'], updated)
+        sources = record.checked_sources(self.root, saved['sources'], self.summary)
+        evidence = record.materialize(saved, sources)['confirmed_requirements'][0]['detail_source']
+        self.assertEqual(evidence, '改成同时核对一页和页码。')
+
+        second = self.next_message(preview, 'second-check', '之后同时核对页数和文件大小。', {})
+        self.request['patch']['confirmed_requirements'] = [
+            dict(id='R1', verification='核对页数和文件大小', detail_source_ref=second)]
+        preview = self.prepare()
+        self.next_message(preview, 'another-greeting', '我回来了。', {})
+        self.request['patch']['confirmed_requirements'] = [
+            dict(id='R1', verification='仅核对页码', detail_source_ref=ref)]
+        with self.assertRaisesRegex(ValueError, 'R1.verification requires fresh supporting evidence'):
+            self.prepare()
+
     def test_paused_discussion_resumes_only_on_a_fresh_instruction(self):
         preview = self.prepare()
         ref = self.next_message(preview, 'pause', '先暂停。', dict(status='paused', wait_reason='用户暂停'))
@@ -443,6 +528,46 @@ flowchart TD
                 self.request['sources'][0]['path'] = path
                 with self.assertRaises(ValueError):
                     self.prepare()
+
+    def test_repeated_resume_uses_distinct_messages_and_rejects_old_turns(self):
+        preview = self.prepare()
+        transcript = '先暂停。\n继续。\n先暂停。\n继续。\n先暂停。\n'
+        (self.root / 'chat.txt').write_text(transcript, encoding='utf-8')
+
+        def message(turn_id, line, *, pause=False, source='chat'):
+            ref = dict(source_id=source, start=line, end=line)
+            patch = (dict(status='paused', wait_reason='用户暂停', discussion_question_waiver_source_ref=ref)
+                     if pause else dict(status='continue', resume_source_ref=ref))
+            self.request = dict(expected_summary_sha256=preview['record_sha256'],
+                                sources=[dict(id=source, path='chat.txt', sha256=record.digest(transcript))],
+                                turn=dict(id=turn_id, **ref), patch=patch)
+            if pause:
+                self.request['introduction'] = '已暂停。'
+            return self.prepare()
+
+        preview = message('用户第6条', 1, pause=True)
+        preview = message('用户第7条', 2)
+        preview = message('用户第8条', 3, pause=True)
+        saved = self.summary.read_bytes()
+        with self.assertRaisesRegex(ValueError, 'new user message'):
+            message('another-id-for-old-message', 2, source='alias')
+        with self.assertRaisesRegex(ValueError, 'new user message'):
+            message('第 7 条', 4)
+        self.assertEqual(saved, self.summary.read_bytes())
+        preview = message('resume-two', 4)
+        self.assertTrue(record.finalize(self.root, self.summary, self.review(preview))['ok'])
+
+        preview = message('pause-three', 5, pause=True)
+        old_ref = dict(source_id='chat', start=2, end=2)
+        self.next_message(preview, 'fresh', '继续。', dict(status='continue', resume_source_ref=old_ref))
+        with self.assertRaisesRegex(ValueError, 'inside the current user message'):
+            self.prepare()
+        with self.assertRaisesRegex(ValueError, 'new user message'):
+            message('用户第7条', 2)
+        fresh_ref = self.next_message(preview, 'fresh', '继续。', dict(status='continue'))
+        self.request['patch']['resume_source_ref'] = fresh_ref
+        final = self.prepare()
+        self.assertTrue(record.finalize(self.root, self.summary, self.review(final))['ok'])
 
 
 if __name__ == '__main__':

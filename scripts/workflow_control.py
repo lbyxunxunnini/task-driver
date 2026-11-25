@@ -72,7 +72,8 @@ GUIDANCE = {
     ),
     'handle_interruption': '必须优先处理当前临时请求，处理前必须核对用户与宿主授权。业务执行仍必须满足原有执行门槛。禁止扩大原任务授权。',
     'ask_return_to_main': '先交付临时结果，再单独询问返回问题，发出后等待明示。',
-    'reconcile_interruption': '必须核对临时结果、恢复点和最新要求。消息定位无法判序时，须从实际对话核实同意晚于拒绝。hold_main 为真时只交付插问结果，保留主任务的暂停或本轮限定并停止；其余情况按恢复点续接。',
+    'deliver_interruption_result': '用户已拒绝返回。只交付当前插问的结果或取消说明，实际送达后记录 result_delivery_source，保留原待答点并等待。',
+    'reconcile_interruption': '必须核对临时结果、恢复点和最新要求。消息定位无法判序时，须从实际对话核实同意晚于拒绝。仅交付尚未送达的结果。hold_main 为真时保留主任务的暂停或本轮限定并停止；其余情况按恢复点续接。',
     'begin_execution': (
         '执行入口尚未通过。必须核对分析闭合、讨论闭合、编号步骤、计划与目标确认、执行授权、子代理设置和目标跟踪回执。'
         '开始业务动作前必须运行 begin 并取得 execution_receipt。'
@@ -149,6 +150,11 @@ def return_consent_source(frame):
     return frame.get('return_instruction_source')
 
 
+def interruption_delivery_source(frame):
+    # A presented return question already included the result under the original protocol.
+    return frame.get('result_delivery_source') or frame.get('return_question_source')
+
+
 def return_source_is_eligible(source, previous_source):
     """Reject a reused or out-of-order message. Opaque references still need semantic review."""
     if not has_new_source(source, previous_source, normalize_spacing=True):
@@ -172,7 +178,7 @@ def interruption_holds_main(state):
 
 def branch_record(frame):
     record = {**frame['branch'], 'id': frame['id'], 'request': frame['request']}
-    for key in ('branch_revision_source', 'revoked_return_sources'):
+    for key in ('branch_revision_source', 'revoked_return_sources', 'result_delivery_source'):
         if key in frame:
             record[key] = frame[key]
     return record
@@ -216,9 +222,11 @@ def validate_interruptions(s):
             errors.extend(issues)
             if issues:
                 continue
-        for source_key in ('branch_revision_source', 'return_instruction_source'):
+        for source_key in ('branch_revision_source', 'return_instruction_source', 'result_delivery_source'):
             if source_key in frame and (not isinstance(frame[source_key], str) or not frame[source_key].strip()):
                 errors.append(source_key + ' requires a nonempty source')
+        if 'result_delivery_source' in frame and status not in ('complete', 'cancelled'):
+            errors.append('result delivery source requires a completed or cancelled interruption')
         if 'return_instruction_source' in frame:
             if (frame.get('branch', {}).get('relation') != 'unrelated' or
                     any(key in frame for key in ('return_question_source', 'return_answer', 'return_answer_source'))):
@@ -1219,7 +1227,90 @@ def validate_operation_transition(previous, current, confirmed_scope_change):
     return errors
 
 
-def validate_transition(previous, current, *, verified_corrections=()):
+def separate_waiting_update(previous, current, frame, record):
+    """Bind a separate main-task fact update to a later user turn while return remains refused."""
+    if not isinstance(record, dict):
+        return False
+    turn, answer = record.get('turn_id'), record.get('answer')
+    if not all(isinstance(v, str) and v.strip() for v in (turn, answer)):
+        return False
+    for key in ('source', 'return_answer_source', 'return_question_source', 'result_delivery_source'):
+        prior = frame.get(key)
+        if prior and (prior.startswith((turn + '：', turn + ':')) or answer == prior
+                      or not return_source_is_eligible(turn, prior)):
+            return False
+    removed = current.get('removed_decisions', {})
+    if not isinstance(removed, dict):
+        return False
+    changes = []
+    for group in ('decisions', 'confirmed_requirements'):
+        for rows in (previous.get(group, []), current.get(group, [])):
+            if not isinstance(rows, list) or any(not isinstance(row, dict) or
+                                                 not isinstance(row.get('id'), str) for row in rows):
+                return False
+        old = {row['id']: row for row in previous.get(group, [])}
+        new = {row['id']: row for row in current.get(group, [])}
+        for ident in old.keys() | new.keys():
+            if old.get(ident) == new.get(ident):
+                continue
+            before = old.get(ident, {})
+            if ident not in new:
+                sources = [removed.get(ident)]
+            else:
+                sources = [new[ident].get(key) for key in ('source', 'constraint_source', 'detail_source')
+                           if new[ident].get(key) != before.get(key)]
+            changes.append(any(isinstance(source, str) and turn in source and answer in source for source in sources))
+    if not changes or not all(changes):
+        return False
+    # For a disk-backed main update, match the same turn and answer that normal final uses.
+    if 'read_only_source' in record:
+        check_final_record({'read_only_source': record['read_only_source']})
+    else:
+        check_final_record(record, current.get('branch_history', []))
+    return True
+
+
+def validate_branch_handoff(previous, current, old_frames, new_frames, main_record):
+    # Pushing or popping a child is that child's handoff. An inactive ancestor does not own it.
+    active = []
+    if old_frames and len(old_frames) >= len(new_frames):
+        active.append(old_frames[-1])
+    if new_frames and len(new_frames) >= len(old_frames):
+        active.append(new_frames[-1])
+    if not any(frame.get('branch', {}).get('relation') == 'unrelated' and
+               (frame.get('return_answer') == 'no' or frame.get('result_delivery_source')) for frame in active):
+        # Ordinary returns keep their prior behavior. Return consent alone cannot create an authorization.
+        consent = {return_consent_source(frame) for frame in active if unrelated_closed(frame)}
+        old_gates, new_gates = previous.get('gates'), current.get('gates')
+        if consent and isinstance(old_gates, dict) and isinstance(new_gates, dict):
+            for key, source in new_gates.items():
+                if isinstance(source, str) and source in consent and old_gates.get(key) != source:
+                    return ['interruption return consent cannot itself authorize the main task']
+        return []
+    changes = (previous.keys() ^ current.keys()) | {key for key in previous.keys() & current.keys()
+                                                    if previous[key] != current[key]}
+    changes -= {'interruptions', 'branch_history'}
+    if interruption_holds_main(previous) or interruption_holds_main(current):
+        changes -= {'scope_limited', 'scope_limited_source', 'local_only', 'local_only_source', 'local_done',
+                    'discussion_question_waiver_source'}
+        if 'paused' in (previous.get('status'), current.get('status')):
+            changes -= {'status', 'wait_reason', 'wait_evidence', 'resume_source'}
+    for before, after in zip(old_frames, new_frames[:-1]):
+        if make_resume_point(before) != make_resume_point(after):
+            return ['delivering an interruption result must preserve its parent interruption']
+    if not changes:
+        return []
+    if (changes <= {'decisions', 'confirmed_requirements', 'removed_decisions', 'impact_review'}
+            and old_frames == new_frames and new_frames and unrelated_closed(new_frames[-1])
+            and interruption_delivery_source(new_frames[-1]) and new_frames[-1].get('return_answer') == 'no'
+            and separate_waiting_update(previous, current, new_frames[-1], main_record)):
+        return []
+    return ['interruption handoff must preserve the main task; record independent user changes separately: '
+            + ', '.join(sorted(changes))]
+
+
+def validate_transition(previous, current, *, verified_corrections=(), verified_resume=False,
+                        verified_verifications=None, main_record=None):
     """Check explicit changes when both snapshots are available; never infer intent."""
     if not isinstance(previous, dict) or not isinstance(current, dict):
         return ['previous and current states must be objects']
@@ -1277,6 +1368,7 @@ def validate_transition(previous, current, *, verified_corrections=()):
                 frame['return_answer'] == 'no' and 'return_question_source' not in frame)
                 for frame in new_frames[common:]):
             errors.append('return answer requires a preceding interruption with a presented question')
+        errors.extend(validate_branch_handoff(previous, current, old_frames, new_frames, main_record))
         for old, new in zip(old_frames[:common], new_frames[:common]):
             if old['id'] != new['id']:
                 continue
@@ -1327,6 +1419,11 @@ def validate_transition(previous, current, *, verified_corrections=()):
                 errors.append('changed interruption request requires new source')
             if old.get('resume_point') is not None and old.get('resume_point') != new.get('resume_point'):
                 errors.append('saved interruption resume_point cannot change')
+            if old.get('result_delivery_source') and old['result_delivery_source'] != new.get('result_delivery_source'):
+                errors.append('preserve the actual interruption result delivery source')
+            if (interruption_delivery_source(new) and unrelated_closed(old)
+                    and old.get('result_evidence') != new.get('result_evidence')):
+                errors.append('a delivered interruption result must retain its result evidence')
             if old['status'] == 'paused' and new['status'] not in ('paused', 'cancelled'):
                 if not has_new_source(new.get('resume_source'), old.get('resume_source')):
                     errors.append('resuming paused interruption requires source')
@@ -1387,7 +1484,7 @@ def validate_transition(previous, current, *, verified_corrections=()):
         if not isinstance(source, str) or not source.strip():
             errors.append('withdrawing plan request requires source')
     if previous.get('status') == 'paused' and current.get('status') != 'paused':
-        if not has_new_source(current.get('resume_source'), previous.get('resume_source')):
+        if not verified_resume and not has_new_source(current.get('resume_source'), previous.get('resume_source')):
             errors.append('resuming paused task requires source')
     old_waiver = previous.get('discussion_question_waiver_source')
     new_waiver = current.get('discussion_question_waiver_source')
@@ -1444,7 +1541,18 @@ def validate_transition(previous, current, *, verified_corrections=()):
                     if old.get(field) == item.get(field):
                         continue
                     changed = True
-                    if not any(has_new_source(item.get(k), old.get(k)) for k in sources):
+                    if field == 'verification' and verified_verifications is not None:
+                        fresh = ident in verified_verifications
+                    elif field == 'verification':
+                        # Old generated snapshots can reach the manual entry point.
+                        # A projection of the proposal is never a new citation.
+                        excluded = {old[key].strip() for key in sources if isinstance(old.get(key), str)}
+                        excluded.add(f"模型方案（未执行）：{item.get('implementation')}；验法：{item.get(field)}")
+                        fresh = any(has_new_source(item.get(key), item.get(field) if key == 'detail_source' else None)
+                                    and item[key].strip() not in excluded for key in sources)
+                    else:
+                        fresh = any(has_new_source(item.get(k), old.get(k)) for k in sources)
+                    if not fresh:
                         errors.append(f'changed confirmed requirement {ident}.{field} requires fresh supporting evidence')
                 continue
             if any(old.get(key) != item.get(key) for key in ('subject', 'value', 'status')):
@@ -1771,7 +1879,10 @@ def route(s):
                           resume_point=frame.get('resume_point', make_resume_point(parent)))
         elif unrelated_closed(frame) and not interruption_holds_main(s) and not return_consent_source(frame):
             point = frame['resume_point']
-            if frame.get('return_question_source') or frame.get('return_answer') == 'no':
+            if frame.get('return_answer') == 'no' and not interruption_delivery_source(frame):
+                result.update(action='deliver_interruption_result', outcome=frame['status'],
+                              result_evidence=frame['result_evidence'])
+            elif frame.get('return_question_source') or frame.get('return_answer') == 'no':
                 result.update(action='wait_interruption', status='wait_user',
                               reason='等待用户明确同意返回，保留原待答点')
             else:
@@ -1787,6 +1898,8 @@ def route(s):
                           result_evidence=frame['result_evidence'],
                           resume_to=frames[-2]['id'] if len(frames) > 1 else s.get('task_id'),
                           resume_point=frame['resume_point'])
+            if interruption_delivery_source(frame):
+                result['result_delivery_source'] = interruption_delivery_source(frame)
             if unrelated_closed(frame) and interruption_holds_main(s):
                 result['hold_main'] = True
         else:
@@ -2233,7 +2346,11 @@ def validate_closure_reply(reply, handoff, state, recorded_graph=None, *, verifi
                     or (bound is None and (value not in item['source'] or action not in constraint))):
                 return ['confirmed requirement needs its wording and unique implementation in their respective sources']
             sources.append(constraint)
-        if strict or status == 'confirmed':
+        if bound is not None:
+            # File-backed drafts derive these proposals from the reviewed record.
+            # They can qualify a display label, never serve as new source evidence.
+            sources.extend((action, check))
+        elif strict or status == 'confirmed':
             if not all(any(isinstance(source, str) and part in source for source in sources)
                        for part in (action, check)):
                 return ['implementation and verification need supporting record excerpts']
@@ -2367,19 +2484,35 @@ def validate_discussion_final(s, reply, handoff, recorded_graph=None, *, verifie
     # The CLI validates the adjacent transition before accepting an archived result.
     held_frame = frames[-1] if isinstance(frames, list) and frames else None
     if old_frames and len(old_frames) == len(frames or []) + 1:
-        held_frame = old_frames[-1]
-    if isinstance(held_frame, dict) and unrelated_closed(held_frame) and interruption_holds_main(s):
-        body = [line for line in reply.splitlines() if line.strip() and line.strip() != '**任务驱动 · 讨论阶段**']
-        if not body or count_questions_outside_code(reply):
+        archived = old_frames[-1]
+        if (unrelated_closed(archived) and interruption_delivery_source(archived)
+                and re.search(r'(?m)^[ \t]*' + re.escape(archived['result_evidence'].strip()) + r'[ \t]*$', reply)):
+            return ['interruption result already delivered; do not repeat it in the main handoff']
+        if not interruption_delivery_source(archived):
+            held_frame = archived
+    if isinstance(held_frame, dict) and unrelated_closed(held_frame) and (
+            interruption_holds_main(s) or held_frame.get('return_answer') == 'no'):
+        if interruption_delivery_source(held_frame):
+            return ['interruption result already delivered; wait for explicit return consent']
+        body = reply.strip().removeprefix('**任务驱动 · 讨论阶段**').strip()
+        exact_refusal_result = (held_frame.get('return_answer') == 'no'
+                                and body == held_frame.get('result_evidence', '').strip())
+        if not body or (not exact_refusal_result and count_questions_outside_code(reply)):
             return ['deliver the interruption result without a question while the main task is held']
-        if s.get('phase') != 'discussion':
+        # A paraphrase can be reviewed, but that review must belong to this exact draft.
+        paraphrased_refusal_result = held_frame.get('return_answer') == 'no' and not exact_refusal_result
+        if s.get('phase') != 'discussion' and not paraphrased_refusal_result:
             return []
         if not isinstance(handoff, dict) or handoff.get('kind') != 'waived':
             return ['held discussion requires the waived handoff for its interruption result']
-        if s.get('scope_limited') is not True and not s.get('discussion_question_waiver_source'):
+        if (held_frame.get('return_answer') != 'no' and s.get('scope_limited') is not True
+                and not s.get('discussion_question_waiver_source')):
             return ['discussion question waiver requires source']
-        return validate_semantic_review(handoff.get('semantic_review'), 'waived',
-                                        extra_checks=('result_delivered',))
+        review = handoff.get('semantic_review')
+        if paraphrased_refusal_result and (not isinstance(review, dict) or
+                review.get('reviewed_reply_sha256') != hashlib.sha256(reply.encode('utf-8')).hexdigest()):
+            return ['interruption result review must bind the complete result-only reply']
+        return validate_semantic_review(review, 'waived', extra_checks=('result_delivered',))
     if isinstance(frames, list) and frames and not validate_interruptions(s) and unrelated_closed(frames[-1]):
         action = route(s)
         if action['action'] == 'ask_return_to_main':
@@ -2993,7 +3126,8 @@ def main():
             errors.append('previous state required for goal scope validation')
         transition_errors = []
         if previous is not None:
-            transition_errors = validate_transition(previous, state)
+            main_record = payload.get('discussion_record') if args.mode == 'check' else None
+            transition_errors = validate_transition(previous, state, main_record=main_record)
         routed = route(state) if args.mode in ('next', 'final') else None
         if not errors and routed is not None and routed.get('action') == 'present_plan':
             plan = state['plan']
@@ -3043,7 +3177,7 @@ def main():
         if args.emit_state and not errors and not result.get('original_state_errors'):
             result['state'] = state
         print(json.dumps(result, ensure_ascii=False))
-        safe_actions = ('paused', 'handle_interruption', 'wait_interruption', 'reconcile_interruption')
+        safe_actions = ('paused', 'handle_interruption', 'wait_interruption', 'deliver_interruption_result', 'reconcile_interruption')
         return bool(errors) and result.get('action') not in safe_actions
     except (OSError, RuntimeError, ValueError, TypeError) as exc:
         print(json.dumps({'ok': False, 'errors': [str(exc)]}, ensure_ascii=False))

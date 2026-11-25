@@ -907,6 +907,19 @@ class ControlTests(unittest.TestCase):
         new['confirmed_requirements'][1]['id'] = 'R1'
         self.assertIn('confirmed requirement id missing or duplicated', controller.validate(new))
 
+    def test_manual_verification_change_requires_a_citation_independent_of_the_new_proposal(self):
+        old = report_requirement()
+        previous = state(decisions=[], confirmed_requirements=[old])
+        check = '只看文件是否存在'
+        for evidence, valid in [(f"模型方案（未执行）：{old['implementation']}；验法：{check}", False),
+                                (old['constraint_source'], False), (check, False),
+                                ('用户第 8 条：本次验收改成只看文件是否存在。', True)]:
+            with self.subTest(evidence=evidence):
+                row = dict(old, verification=check, detail_source=evidence)
+                current = dict(previous, confirmed_requirements=[row])
+                errors = controller.validate_transition(previous, current)
+                self.assertEqual(valid, not errors, errors)
+
     def test_single_body_closure_binds_graph_table_and_summary_to_same_records(self):
         delivery = {'id': 'D2', 'value': '离线取包', 'status': 'decided', 'subject': '取包',
                     'implementation': '本地保存', 'verification': '断网打开文件', 'depends_on': ['R1'],

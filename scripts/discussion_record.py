@@ -23,6 +23,7 @@ BLOCK = re.compile(re.escape(START) + r'\n```json\n(.*?)\n```\n' + re.escape(END
 GRAPH = re.compile(r'```mermaid\n(.*?)\n```', re.S)
 TABLE = re.compile(r'^\| 你确认的要求 \| 当前做法或待决问题 \| 怎么验 \| 状态 \|\n(?:\|[^\n]*\|\n?)+', re.M)
 RESOLVED = {'decided', 'delegated', 'excluded'}
+REQUIREMENT_SOURCES = ('source_ref', 'constraint_source_ref', 'detail_source_ref')
 CLOSURE = '是否结束讨论并开始展示正式计划和验收目标？'
 
 
@@ -104,6 +105,40 @@ def belongs_to_turn(reference, turn):
             and turn['start'] <= reference['start'] <= reference['end'] <= turn['end'])
 
 
+def source_span(reference, paths):
+    return paths[reference['source_id']], reference['start'], reference['end']
+
+
+def verify_resume(record, previous, previous_turn, patch, paths, sources):
+    if previous.get('status') != 'paused' or record['state'].get('status') != 'continue':
+        return False
+    turn = record['turn']
+    reference = patch.get('resume_source_ref')
+    if reference is None:
+        raise ValueError('resuming paused task requires source from the current user message')
+    if not belongs_to_turn(reference, turn) or not excerpt(reference, sources):
+        raise ValueError('resuming paused task requires source inside the current user message')
+
+    # Keep the whole message range. Requoting a different line of an old
+    # message, or registering its file under a second id, is still a replay.
+    current = source_span(turn, paths)
+    if 'resume_turns' not in record:
+        # Older records retained only the last successful citation.
+        last = previous.get('resume_source_ref')
+        record['resume_turns'] = [deepcopy(last)] if last else []
+    history = record['resume_turns']
+    prior_messages = list(history)
+    if previous_turn:
+        prior_messages.append(previous_turn)
+    for prior in prior_messages:
+        position = source_span(prior, paths)
+        if (not workflow.return_source_is_eligible(turn['id'], prior.get('id'))
+                or position[0] == current[0] and current[1] <= position[2]):
+            raise ValueError('resuming paused task requires a new user message after the pause')
+    history.append(deepcopy(turn))
+    return True
+
+
 def materialize(record, sources):
     state = deepcopy(record['state'])
     for group in ('decisions', 'confirmed_requirements'):
@@ -114,10 +149,8 @@ def materialize(record, sources):
                 raise ValueError('resolved record requires original source_ref: ' + str(row.get('id')))
             if 'constraint_source_ref' in row:
                 row['constraint_source'] = excerpt(row.pop('constraint_source_ref'), sources)
-            if row.get('implementation') and row.get('verification'):
-                # These are explicitly model-proposed details, never user quotations.
-                row['detail_source'] = ('模型方案（未执行）：' + row['implementation']
-                                        + '；验法：' + row['verification'])
+            if 'detail_source_ref' in row:
+                row['detail_source'] = excerpt(row.pop('detail_source_ref'), sources)
     for key in list(state):
         if key.endswith('_source_ref'):
             state[key[:-4]] = excerpt(state.pop(key), sources)
@@ -451,20 +484,74 @@ def verify_interpretation_corrections(record, previous_raw, request, previous_tu
     return verified
 
 
+def verified_verification_changes(record, previous, paths, sources, *, migrating):
+    """Only independent original material can justify a different recorded check."""
+    old_rows = {row['id']: row for row in previous.get('confirmed_requirements', [])}
+    verified = set()
+    for row in record['state'].get('confirmed_requirements', []):
+        ident = row['id']
+        old = old_rows.get(ident)
+        if old is None or old.get('verification') == row.get('verification'):
+            continue
+        if not old.get('verification'):
+            # Initial model-proposed checks still undergo complete draft review.
+            verified.add(ident)
+            continue
+        prior_versions = [old]
+        for change in record.get('decision_history', []):
+            if change['group'] == 'confirmed_requirements' and change['id'] == ident:
+                prior_versions.extend((change['previous'], change['replacement']))
+        prior_spans = [source_span(version[key], paths) for version in prior_versions
+                       for key in REQUIREMENT_SOURCES if key in version]
+        if migrating:
+            # Attaching the original requirement or method for the first time
+            # does not supply new evidence for a different acceptance check.
+            for field, key in (('value', 'source_ref'), ('implementation', 'constraint_source_ref')):
+                if key in row and key not in old and old.get(field) == row.get(field):
+                    prior_spans.append(source_span(row[key], paths))
+        prior_quotes = set()
+        for version in prior_versions:
+            for key in REQUIREMENT_SOURCES:
+                description = version.get(key[:-4])
+                if key not in version and isinstance(description, str):
+                    # A manual citation can be "location: full quotation".
+                    prior_quotes.add(description.strip())
+                    prior_quotes.add(re.split(r'[:：]', description, maxsplit=1)[-1].strip())
+        for key in REQUIREMENT_SOURCES:
+            if key not in row:
+                continue
+            reference = row[key]
+            quote = excerpt(reference, sources)
+            if not quote or quote in prior_quotes:
+                continue
+            path, start, end = source_span(reference, paths)
+            lines = sources[reference['source_id']]
+            if any(lines[n - 1].strip() and
+                   not any(old_path == path and first <= n <= last for old_path, first, last in prior_spans)
+                   for n in range(start, end + 1)):
+                verified.add(ident)
+                break
+    return verified
+
+
 def retain_replaced_decisions(record, previous, corrections):
     for group in ('decisions', 'confirmed_requirements'):
         fields = ('value', 'status') if group == 'decisions' else ('value', 'implementation', 'verification')
         old_rows = {row['id']: row for row in previous.get(group, [])}
         for row in record['state'].get(group, []):
             old = old_rows.get(row['id'])
-            if not old or all(old.get(key) == row.get(key) for key in fields):
+            if not old:
+                continue
+            replaced_reference = group == 'confirmed_requirements' and any(
+                key in old and old[key] != row.get(key) for key in REQUIREMENT_SOURCES)
+            if not replaced_reference and all(old.get(key) == row.get(key) for key in fields):
                 continue
             if group == 'decisions' and (old.get('status') not in RESOLVED or row['id'] in corrections):
                 continue
             change = {'group': group, 'id': row['id'], 'turn': deepcopy(record['turn'])}
             for label, version in [('previous', old), ('replacement', row)]:
                 sources = [key if key in version else key.removesuffix('_ref')
-                           for key in ('source_ref', 'constraint_source_ref')]
+                           for key in REQUIREMENT_SOURCES]
                 change[label] = {key: deepcopy(version[key]) for key in (*fields, *sources) if key in version}
             record.setdefault('decision_history', []).append(change)
 
@@ -505,6 +592,7 @@ def prepare(project, summary, request):
         registered[source['id']] = source
     record['sources'] = list(registered.values())
     sources = checked_sources(project, record['sources'], summary)
+    source_paths = {ident: local_path(project, source['path']) for ident, source in registered.items()}
     previous = deepcopy(record['state']) if migrating else materialize(record, sources)
     previous_raw = deepcopy(record['state'])
     previous_turn = deepcopy(record.get('turn'))
@@ -527,14 +615,15 @@ def prepare(project, summary, request):
     else:
         record.pop('overview', None)
     corrections = verify_interpretation_corrections(record, previous_raw, request, previous_turn)
+    verified_checks = verified_verification_changes(record, previous_raw, source_paths, sources,
+                                                   migrating=migrating)
     retain_replaced_decisions(record, previous_raw, corrections)
     state = materialize(record, sources)
-    if (previous.get('status') == 'paused' and state.get('status') == 'continue'
-            and 'resume_source_ref' in request.get('patch', {})
-            and not belongs_to_turn(record['state']['resume_source_ref'], record['turn'])):
-        raise ValueError('resuming paused task requires source inside the current user message')
+    verified_resume = verify_resume(record, previous_raw, previous_turn, request.get('patch', {}),
+                                    source_paths, sources)
     issues = workflow.validate(state) + workflow.validate_transition(
-        previous, state, verified_corrections=corrections)
+        previous, state, verified_corrections=corrections, verified_resume=verified_resume,
+        verified_verifications=verified_checks)
     if issues:
         raise ValueError(json.dumps(issues, ensure_ascii=False))
     previous_id = record.get('decision_id') if state['next_action'] == previous.get('next_action') else None
