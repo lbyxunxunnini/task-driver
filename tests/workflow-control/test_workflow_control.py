@@ -640,6 +640,32 @@ class ControlTests(unittest.TestCase):
         final['approach_basis']['source_quote'] = item['source']
         self.assertTrue(controller.validate_discussion_final(s, recap + question, final))
 
+    def test_closure_extra_explanation_requires_review_of_the_actual_draft(self):
+        s = state(decisions=[], confirmed_requirements=[report_requirement()], plan_requested=False)
+        recap = REPORT_SUMMARY + '\n' + CLOSURE_QUESTION
+        reply = '整体思路是按既定规范交付周报。\n' + recap
+        for reviewer in ('main', 'independent'):
+            final = handoff('plan_transition', reviewer=reviewer)
+            self.assertTrue(controller.validate_discussion_final(s, reply, final))
+            review = final['semantic_review']
+            review['reviewed_reply_sha256'] = controller.hashlib.sha256(reply.encode('utf-8')).hexdigest()
+            review['checks']['no_new_material_choices'] = True
+            self.assertEqual([], controller.validate_discussion_final(s, reply, final))
+            self.assert_closure_cli(s, final, reply, True)
+            changed = '另将报告上传公有云。\n' + reply
+            self.assertTrue(controller.validate_discussion_final(s, changed, final))
+            review['reviewed_reply_sha256'] = controller.hashlib.sha256(changed.encode('utf-8')).hexdigest()
+            review['checks']['no_new_material_choices'] = False
+            self.assertTrue(controller.validate_discussion_final(s, changed, final))
+            review['checks']['no_new_material_choices'] = True
+            review['status'] = 'fail'
+            self.assertTrue(controller.validate_discussion_final(s, changed, final))
+            # A draft hash does not substitute for a missing required summary.
+            missing = '整体思路已经明确。\n' + CLOSURE_QUESTION
+            review['status'] = 'pass'
+            review['reviewed_reply_sha256'] = controller.hashlib.sha256(missing.encode('utf-8')).hexdigest()
+            self.assertTrue(controller.validate_discussion_final(s, missing, final))
+
     def test_first_closure_cli_binds_each_visible_check_to_its_record(self):
         decisions = [
             {'id': 'pdf', 'subject': '格式', 'status': 'decided', 'value': '生成 PDF',
@@ -680,6 +706,26 @@ class ControlTests(unittest.TestCase):
                                  input=json.dumps(payload), capture_output=True, text=True)
         self.assertEqual(0 if valid else 1, process.returncode, process.stdout)
         self.assertEqual(valid, json.loads(process.stdout)['ok'])
+
+    def test_summary_table_decision_reference_requires_its_graph_node(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'summary.md'
+            record = {'project': directory, 'summary': path.name,
+                      'turn_id': '用户第5条', 'answer': '选择报告格式'}
+            template = ('```mermaid\nflowchart TD\n goal[目标] --> %s[格式]'
+                        ' --> current[当前位置：等待回答]\n```\n'
+                        '| 你确认的要求 | 当前做法或待决问题 | 怎么验 | 状态 |\n'
+                        '| --- | --- | --- | --- |\n'
+                        '| D1 交付格式 | 导出报告 | 打开检查 | 已定 |\n'
+                        '本轮消息：用户第5条\n本轮答复：选择报告格式\n')
+            path.write_text(template % 'format')
+            with self.assertRaisesRegex(ValueError, 'missing graph decision nodes: D1'):
+                controller.check_final_record(record, decision_ids=['D1'])
+            path.write_text(template % 'D1')
+            self.assertIn('D1[格式]', controller.check_final_record(record, decision_ids=['D1']))
+            # An unnumbered legacy table is not forced to migrate unrelated records.
+            path.write_text((template % 'format').replace('D1 交付格式', '交付格式'))
+            self.assertIn('format[格式]', controller.check_final_record(record, decision_ids=['D1']))
 
     def test_record_check_and_final_read_the_current_file(self):
         graph = '\n'.join(DISCUSSION_GRAPH[1:] + ['```'])
@@ -738,6 +784,53 @@ class ControlTests(unittest.TestCase):
             run(final, False)
             payload['discussion_record'] = READ_ONLY_RECORD
             run(final, True)
+
+    def test_final_returns_requested_ranges_from_the_same_summary_read(self):
+        from unittest.mock import patch
+        graph = '\n'.join(DISCUSSION_GRAPH[1:] + ['```'])
+        table = ('| 你确认的要求 | 当前做法或待决问题 | 怎么验 | 状态 |\n'
+                 '|---|---|---|---|\n| 周报 | 导出 PDF | 打开文件 | 已定 |')
+        summary = f'{graph}\n{table}\n本轮消息：用户第 3 条\n本轮答复：先导出 PDF。'
+        lines = summary.splitlines()
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / '周报.md'
+            path.write_text(summary, encoding='utf-8')
+            record = dict(project=directory, summary=path.name, turn_id='用户第 3 条', answer='先导出 PDF。')
+            payload = {'state': state(decisions=[], plan_requested=False, confirmed_requirements=[report_requirement()]),
+                       'discussion_handoff': handoff('plan_transition', reviewer='main'),
+                       'draft_reply': REPORT_SUMMARY + '\n' + CLOSURE_QUESTION,
+                       'discussion_record': record}
+
+            def run():
+                proc = subprocess.run([sys.executable, str(SCRIPT), 'final', '--state', '-'],
+                                      input=json.dumps(payload), text=True, capture_output=True)
+                return proc.returncode, json.loads(proc.stdout)
+
+            code, result = run()
+            self.assertEqual(0, code, result)
+            self.assertNotIn('discussion_readback', result)
+            record['readback_ranges'] = [[1, 3], [len(lines) - 1, len(lines)]]
+            expected = [{'start': start, 'end': end, 'text': '\n'.join(lines[start - 1:end])}
+                        for start, end in record['readback_ranges']]
+            code, result = run()
+            self.assertEqual(0, code, result)
+            self.assertEqual(expected, result['discussion_readback'])
+            readback = []
+            with patch.object(Path, 'read_text', autospec=True, return_value=summary) as read:
+                controller.check_final_record(record, readback=readback)
+                self.assertEqual(1, read.call_count)
+            self.assertEqual(expected, readback)
+            for invalid in ([[0, 1]], [[1, len(lines) + 1]], [[3, 2]], [[True, 2]], [[1.0, 2]], [[1]], 'all'):
+                record['readback_ranges'] = invalid
+                code, result = run()
+                self.assertEqual(1, code, result)
+                self.assertFalse(result['ok'])
+                self.assertNotIn('discussion_readback', result)
+            record['readback_ranges'] = [[1, 1]]
+            path.write_text(summary.replace('用户第 3 条', '用户第 2 条'), encoding='utf-8')
+            self.assertEqual(1, run()[0])  # Unrequested lines still receive the full record checks.
+            payload['discussion_record'] = dict(READ_ONLY_RECORD, readback_ranges=[[1, 1]])
+            self.assertEqual(1, run()[0])
 
     def test_discussion_only_blocks_internal_visuals_without_a_user_request(self):
         s = state(plan_requested=False, decisions=[
@@ -801,6 +894,38 @@ class ControlTests(unittest.TestCase):
                                  ('| 本地保存 |', '| 导出 PDF |'), ('| 已确认 |', '| 已决定 |'),
                                  (REPORT_SUMMARY, ''), ('要求表', '也提供云存储。\n要求表')]:
                     self.assert_closure_cli(s, final, reply.replace(old, new), False)
+
+    def test_overview_blocks_allow_reviewed_explanations_around_and_between_them(self):
+        checkpoint = state(decisions=[], confirmed_requirements=[report_requirement()], plan_requested=False)
+        graph = '\n'.join([*DISCUSSION_GRAPH, '```'])
+        table = '\n'.join([
+            '要求表', '| 你确认的要求 | 当前做法或待决问题 | 怎么验 | 状态 |',
+            '| --- | --- | --- | --- |',
+            '| 交付周报 | 导出 PDF | 打开文件核对页数 | 已确认 |'])
+        for reviewer in ('main', 'independent'):
+            final = handoff('plan_transition', reviewer=reviewer)
+            final['overview_request_source'] = '用户要求查看讨论图和要求表'
+            for before, between, after in (
+                    ('整体思路沿用已确认规范。', '', ''),
+                    ('', '下面逐项说明交付和验收。', ''),
+                    ('', '', '上述内容覆盖本次要求。'),
+                    ('整体思路沿用已确认规范。', '下面逐项说明交付和验收。', '上述内容覆盖本次要求。')):
+                reply = '\n'.join([before, graph, between, table, after, REPORT_SUMMARY, CLOSURE_QUESTION])
+                review = final['semantic_review']
+                review['reviewed_reply_sha256'] = controller.hashlib.sha256(reply.encode('utf-8')).hexdigest()
+                review['checks']['no_new_material_choices'] = True
+                self.assert_closure_cli(checkpoint, final, reply, True)
+            for bad in (
+                    reply.replace('逐项核对', '开始执行'),
+                    reply.replace('| 导出 PDF |', '| 上传公有云 |'),
+                    reply.replace(graph, graph + '\n' + graph),
+                    reply.replace(graph, graph + '\n' + '\n'.join('> ' + line for line in graph.splitlines())),
+                    reply.replace(table, table + '\n' + table),
+                    reply.replace('| 已确认 |', '| 已确认 |\n| 额外要求 | 上传 | 打开 | 已确认 |'),
+                    reply.replace('```mermaid', '```text')):
+                # Re-reviewing cannot legitimize a tampered or duplicate structured block.
+                final['semantic_review']['reviewed_reply_sha256'] = controller.hashlib.sha256(bad.encode('utf-8')).hexdigest()
+                self.assert_closure_cli(checkpoint, final, bad, False)
 
     def test_discussion_graph_orders_and_escapes_resolved_decision_subjects(self):
         decisions = [{'subject': '格式"A"', 'status': 'delegated'},
@@ -1343,46 +1468,16 @@ class ControlTests(unittest.TestCase):
                 final,
             ),
         )
-        self.assertEqual(
-            [],
-            controller.validate_discussion_final(
-                s,
-                REPORT_SUMMARY + '\n' + '资料链接：https://example.com/?id=1\n\n是否结束讨论并开始展示正式计划与目标？',
-                final,
-            ),
-        )
-        self.assertEqual(
-            [],
-            controller.validate_discussion_final(
-                s,
-                REPORT_SUMMARY + '\n' + '资料链接：[页面](docs/page?id=1&view=full)\n\n是否结束讨论并开始展示正式计划与目标？',
-                final,
-            ),
-        )
-        self.assertEqual(
-            [],
-            controller.validate_discussion_final(
-                s,
-                REPORT_SUMMARY + '\n' + '[doc]: docs/page?id=1&view=full\n\n是否结束讨论并开始展示正式计划与目标？',
-                final,
-            ),
-        )
-        self.assertEqual(
-            [],
-            controller.validate_discussion_final(
-                s,
-                REPORT_SUMMARY + '\n' + '页面 docs/page?id=1，用户问“要不要做？”\n\n是否结束讨论并开始展示正式计划与目标？',
-                final,
-            ),
-        )
-        self.assertEqual(
-            [],
-            controller.validate_discussion_final(
-                s,
-                REPORT_SUMMARY + '\n' + '用户问「要不要做？」\n\n是否结束讨论并开始展示正式计划与目标？',
-                final,
-            ),
-        )
+        for explanation in (
+                '资料链接：https://example.com/?id=1',
+                '资料链接：[页面](docs/page?id=1&view=full)',
+                '[doc]: docs/page?id=1&view=full',
+                '页面 docs/page?id=1，用户问“要不要做？”',
+                '用户问「要不要做？」'):
+            reply = REPORT_SUMMARY + '\n' + explanation + '\n\n是否结束讨论并开始展示正式计划与目标？'
+            final['semantic_review']['reviewed_reply_sha256'] = controller.hashlib.sha256(reply.encode('utf-8')).hexdigest()
+            final['semantic_review']['checks']['no_new_material_choices'] = True
+            self.assertEqual([], controller.validate_discussion_final(s, reply, final))
         self.assertEqual(1, controller.count_questions_outside_code('是否采用 API?'))
         self.assertEqual(2, controller.count_questions_outside_code('先确认 API?, 还是直接继续？'))
         self.assertEqual(0, controller.count_questions_outside_code('接口 /api?page=2'))
@@ -3006,6 +3101,64 @@ class ControlTests(unittest.TestCase):
         goal_diagnostic = next(item for item in response['diagnostics'] if item['field'] == 'goals')
         self.assertEqual(['G1'], goal_diagnostic['changed_goal_ids'])
         self.assertIn('evidence_map', goal_diagnostic['hint'])
+
+    def test_closure_excerpt_diagnostics_locate_fields_without_changing_validation(self):
+        decision = {'id': 'format', 'subject': '格式', 'status': 'decided',
+                    'value': 'PDF', 'source': '用户选择 PDF，导出报告',
+                    'implementation': '导出报告', 'verification': '打开文件检查页码'}
+        checkpoint = state(decisions=[decision], plan_requested=False)
+        original = copy.deepcopy(checkpoint)
+        final = handoff('plan_transition', reviewer='main')
+        final['choice_basis'] = [{'decision_id': 'format', 'choice': 'PDF'}]
+        final['approach_basis'] = {'decision_id': 'format', 'source_quote': '用户选择 PDF'}
+        payload = {'state': checkpoint, 'discussion_handoff': final,
+                   'discussion_record': READ_ONLY_RECORD,
+                   'draft_reply': 'PDF：导出报告，核验时打开文件检查页码。\n' + CLOSURE_QUESTION}
+        process = subprocess.run([sys.executable, str(SCRIPT), 'final', '--state', '-'],
+                                 input=json.dumps(payload), capture_output=True, text=True)
+        response = json.loads(process.stdout)
+        self.assertEqual(1, process.returncode)
+        self.assertFalse(response['ok'])
+        self.assertIn('implementation and verification need supporting record excerpts', response['errors'])
+        detail = next(d for d in response['diagnostics'] if d['field'] == 'closure_records')
+        self.assertEqual([{'field': 'decisions[0].verification', 'record_id': 'format',
+                           'actual': '打开文件检查页码'}], detail['missing_excerpts'])
+        self.assertEqual(original, checkpoint)
+
+        decision['detail_source'] = '验收约定：打开文件检查页码'
+        process = subprocess.run([sys.executable, str(SCRIPT), 'final', '--state', '-'],
+                                 input=json.dumps(payload), capture_output=True, text=True)
+        self.assertEqual(0, process.returncode, process.stdout)
+        self.assertNotIn('diagnostics', json.loads(process.stdout))
+
+    def test_approach_diagnostic_distinguishes_object_from_choice_array(self):
+        result = {'ok': False, 'errors': ['self-reviewed closure requires approach_basis for the actual solution']}
+        original = copy.deepcopy(result)
+        controller.add_error_diagnostics(result, state())
+        detail = result.pop('diagnostics')[0]
+        self.assertEqual(original, result)
+        self.assertIn('单个对象', detail['hint'])
+        self.assertIn('不是数组', detail['hint'])
+        self.assertIn('choice_basis', detail['hint'])
+
+        result = {'ok': False, 'errors': ['approach_basis must cite the selected approach and its source quotation']}
+        original = copy.deepcopy(result)
+        controller.add_error_diagnostics(result, state())
+        detail = result.pop('diagnostics')[0]
+        self.assertEqual(original, result)
+        self.assertEqual('discussion_handoff.approach_basis.source_quote', detail['field'])
+        self.assertIn('逐字摘自', detail['hint'])
+
+    def test_full_draft_diagnostic_explains_nested_review_fields_without_waiver(self):
+        result = {'ok': False, 'errors': [
+            'additional closure prose requires a full-draft semantic review with no new material choices']}
+        original = copy.deepcopy(result)
+        controller.add_error_diagnostics(result, state())
+        detail = result.pop('diagnostics')[0]
+        self.assertEqual(original, result)
+        self.assertEqual('discussion_handoff.semantic_review', detail['field'])
+        self.assertIn('semantic_review.checks', detail['hint'])
+        self.assertIn('reviewed_reply_sha256', detail['hint'])
 
     def test_diagnostics_explain_wait_without_replacing_the_error(self):
         s = state(status='wait_user', wait_reason='等待回答')
