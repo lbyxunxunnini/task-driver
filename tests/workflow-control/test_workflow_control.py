@@ -13,6 +13,30 @@ controller = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(controller)
 
 
+def report_requirement():
+    return {'id': 'R1', 'value': '交付周报', 'source': '用户第 2 条：交付周报',
+            'implementation': '导出 PDF', 'constraint_source': '归档规范第 4 条：只能导出 PDF',
+            'verification': '打开文件核对页数', 'detail_source': '归档检查第 2 项：打开文件核对页数'}
+
+
+REPORT_SUMMARY = '交付周报：导出 PDF，核验时打开文件核对页数。'
+CLOSURE_QUESTION = '是否结束讨论并开始展示正式计划和验收目标？'
+
+
+DISCUSSION_GRAPH = [
+    '讨论图',
+    '```mermaid',
+    'flowchart TD',
+    'goal["目标确认"] --> discuss["讨论取舍"]',
+    'discuss --> review["逐项核对"]',
+    'review --> wait["等待收口（当前位置：等待用户同意）"]',
+    'wait -->|用户同意后| plan["计划目标"]',
+]
+
+
+READ_ONLY_RECORD = {'read_only_source': '用户要求本次只读，不写任务摘要'}
+
+
 def observed_evidence(source='测试工具原始输出'):
     return {'kind': 'tool', 'source': source, 'subject': '样例构建 1',
             'observed': '样例输入返回了约定结果'}
@@ -204,6 +228,10 @@ def handoff(kind, decision_id=None, review=None, **review_updates):
     value = {'kind': kind}
     if decision_id is not None:
         value['decision_id'] = decision_id
+    if kind == 'plan_transition':
+        value['choice_basis'] = {'no_material_choice_reason': '此用例的交付和执行方式均已限定'}
+    if kind == 'plan_transition':
+        review_updates.setdefault('reviewer', 'independent')
     value['semantic_review'] = review or semantic_review(kind, decision_id, **review_updates)
     return value
 
@@ -409,10 +437,10 @@ class ControlTests(unittest.TestCase):
         self.assertEqual('wait_user', controller.route(s)['action'])
 
     def test_first_plan_requires_distinct_question_and_answer_sources(self):
-        s = state(decisions=[], plan_request_source='尽可能优化整个项目')
+        s = state(decisions=[], confirmed_requirements=[report_requirement()], plan_request_source='尽可能优化整个项目')
         self.assertEqual('request_plan_transition', controller.route(s)['action'])
         self.assertEqual([], controller.validate_discussion_final(
-            s, '是否结束讨论并展示计划和目标？', handoff('plan_transition')))
+            s, REPORT_SUMMARY + '\n' + CLOSURE_QUESTION, handoff('plan_transition')))
 
         s['discussion_closure_question_source'] = '助手已发出的收口问题'
         s.update(status='wait_user', wait_reason='等待收口答复',
@@ -567,8 +595,288 @@ class ControlTests(unittest.TestCase):
             ),
         )
 
+    def test_intake_cli_routes_before_analysis_without_discussion_state(self):
+        goal = '导出可阅读的报告'
+        for payload, action in [
+                ({}, 'ask_goal'), ({'goal': goal}, 'confirm_understanding'),
+                ({'goal': goal, 'confirmation_source': '用户第 3 条确认报告目标'}, 'continue_analysis'),
+                ({'confirmation_source': '孤立的答复'}, None), ({'goal': '   '}, None),
+                (state(phase='execution'), None)]:
+            with self.subTest(payload=payload):
+                process = subprocess.run([sys.executable, str(SCRIPT), 'intake', '--state', '-'],
+                                         input=json.dumps(payload), capture_output=True, text=True)
+                result = json.loads(process.stdout)
+                self.assertEqual(0 if action else 1, process.returncode)
+                self.assertEqual(action, result.get('action'))
+                if action in ('ask_goal', 'confirm_understanding'):
+                    self.assertTrue(result['question'].endswith('？'))
+                if action == 'confirm_understanding':
+                    self.assertIn(goal, result['question'])
+
+    def test_main_closure_cannot_hide_unregistered_proposal(self):
+        final = handoff('plan_transition', reviewer='main')
+        question = '是否结束讨论并开始展示正式计划和验收目标？'
+        s = state(decisions=[])
+        self.assertTrue(controller.validate_discussion_final(s, '建议采用托管服务。' + question, final))
+        self.assertTrue(controller.validate_discussion_final(s, question, final))
+        item = {'id': 'format', 'subject': '格式', 'status': 'decided', 'value': '交付 PDF',
+                'source': '用户指定交付 PDF'}
+        s['decisions'] = [item]
+        final['choice_basis'] = [{'decision_id': 'format', 'choice': '交付 PDF'}]
+        item.update(implementation='导出定稿', verification='打开文件比对页数',
+                    detail_source='已确认的交付说明：导出定稿，打开文件比对页数')
+        recap = '- 交付 PDF：导出定稿，核验时打开文件比对页数。\n'
+        self.assertTrue(controller.validate_discussion_final(s, recap + question, final))
+        final['approach_basis'] = {'decision_id': 'format', 'source_quote': '用户指定交付 PDF'}
+        self.assertEqual([], controller.validate_discussion_final(s, recap + question, final))
+        self.assertTrue(controller.validate_discussion_final(s, recap + '部署到云端。\n' + question, final))
+        self.assertTrue(controller.validate_discussion_final(s, recap + '改为云端并结束讨论吗？', final))
+        self.assertTrue(controller.validate_discussion_final(s, '- 交付 PDF\n' + question, final))
+        item['implementation'] = '上传到公有云'
+        self.assertTrue(controller.validate_discussion_final(
+            s, recap.replace('导出定稿', '上传到公有云') + question, final))
+        item['implementation'] = '导出定稿'
+        item['source'] = '查一下已有方案'
+        final['approach_basis']['source_quote'] = item['source']
+        self.assertTrue(controller.validate_discussion_final(s, recap + question, final))
+
+    def test_first_closure_cli_binds_each_visible_check_to_its_record(self):
+        decisions = [
+            {'id': 'pdf', 'subject': '格式', 'status': 'decided', 'value': '生成 PDF',
+             'source': '用户要求生成 PDF，导出报告，打开文件检查页码',
+             'implementation': '导出报告', 'verification': '打开文件检查页码'},
+            {'id': 'network', 'subject': '离线', 'status': 'excluded', 'value': '排除联网',
+             'source': '用户要求排除联网，本地生成，断网后重试',
+             'implementation': '本地生成', 'verification': '断网后重试'},
+        ]
+        checkpoint = state(decisions=decisions, plan_requested=False)
+        final = handoff('plan_transition', reviewer='main')
+        final['choice_basis'] = [{'decision_id': d['id'], 'choice': d['value']} for d in decisions]
+        final['approach_basis'] = {'decision_id': 'pdf', 'source_quote': '用户要求生成 PDF'}
+        pdf = '生成 PDF：导出报告，核验时打开文件检查页码。'
+        offline = '排除联网：本地生成，核验时断网后重试。'
+        for lines, valid in [([pdf, offline], True), ([pdf], False), ([pdf, pdf], False),
+                             ([pdf.replace('打开文件检查页码', '断网后重试'), offline], False)]:
+            with self.subTest(lines=lines):
+                reply = '\n'.join([*lines, '是否结束讨论并开始展示正式计划和验收目标？'])
+                payload = {'state': checkpoint, 'draft_reply': reply, 'discussion_handoff': final,
+                           'discussion_record': READ_ONLY_RECORD}
+                process = subprocess.run([sys.executable, str(SCRIPT), 'final', '--state', '-'],
+                                         input=json.dumps(payload), capture_output=True, text=True)
+                self.assertEqual(0 if valid else 1, process.returncode, process.stdout)
+                self.assertEqual(valid, json.loads(process.stdout)['ok'])
+
+        previous = wait_for_discussion_transition(copy.deepcopy(checkpoint))
+        confirmed = confirm_discussion_transition(checkpoint)
+        self.assertEqual([], controller.validate_transition(previous, confirmed))
+        confirmed['decisions'][0]['verification'] = '只检查文件名'
+        self.assertIn('discussion transition must be reconfirmed after a material change',
+                      controller.validate_transition(previous, confirmed))
+
+    def assert_closure_cli(self, state, handoff, body, valid):
+        payload = {'state': state, 'discussion_handoff': handoff, 'draft_reply': body,
+                   'discussion_record': READ_ONLY_RECORD}
+        process = subprocess.run([sys.executable, str(SCRIPT), 'final', '--state', '-'],
+                                 input=json.dumps(payload), capture_output=True, text=True)
+        self.assertEqual(0 if valid else 1, process.returncode, process.stdout)
+        self.assertEqual(valid, json.loads(process.stdout)['ok'])
+
+    def test_record_check_and_final_read_the_current_file(self):
+        graph = '\n'.join(DISCUSSION_GRAPH[1:] + ['```'])
+        table = ('| 你确认的要求 | 当前做法或待决问题 | 怎么验 | 状态 |\n'
+                 '|---|---|---|---|\n| 周报 | 导出 PDF | 打开文件 | 已定 |')
+        summary = f'{graph}\n{table}\n本轮消息：用户第 3 条\n本轮答复：先导出 PDF。'
+        with tempfile.TemporaryDirectory() as directory:
+            project = Path(directory) / 'project'
+            project.mkdir()
+            path = project / '周报.md'
+            record = dict(project=str(project), summary=path.name, turn_id='用户第 3 条', answer='先导出 PDF。')
+            payload = {'state': state(decisions=[], plan_requested=False, confirmed_requirements=[report_requirement()]),
+                       'discussion_handoff': handoff('plan_transition', reviewer='main'),
+                       'draft_reply': REPORT_SUMMARY + '\n' + CLOSURE_QUESTION}
+            cli = [sys.executable, str(SCRIPT)]
+
+            def run(args, expected):
+                proc = subprocess.run(cli + args, input=json.dumps(payload), text=True, capture_output=True)
+                self.assertEqual((0 if expected else 1, expected),
+                                 (proc.returncode, json.loads(proc.stdout)['ok']), proc.stdout)
+
+            final = ['final', '--state', '-']
+            check = ['record-check', '--project', str(project), '--summary', path.name,
+                     '--turn-id', record['turn_id'], '--answer', record['answer']]
+            payload['state']['task_overview_delivery'] = {'task_id': 'task-a', 'graph_turn': 2, 'table_turn': 2}
+            run(final, False)
+            payload['discussion_record'] = record
+            run(final, False)
+            for content, valid in [
+                (summary, True), (summary.replace('用户第 3 条', '用户第 2 条'), False),
+                (summary.replace(record['answer'], '旧答案'), False), (summary + '\n' + graph, False),
+                (summary.replace(graph, '```mermaid\nflowchart TD\na["当前位置：a --> b"]\n```'), False),
+                (summary.replace('当前位置', '之前位置'), False), (summary.replace('目标确认', '当前位置'), False),
+                (summary.replace('| 怎么验 |', '| 方法 |'), False), (summary.replace('打开文件', ''), False),
+                (summary + '\n本轮答复：旧答案', False),
+            ]:
+                with self.subTest(content=content):
+                    path.write_text(content, encoding='utf-8')
+                    run(check, valid)
+                    run(final, valid)
+            custom_graph = graph.replace('目标确认', '用户已确认交付周报')
+            path.write_text(summary.replace(graph, custom_graph), encoding='utf-8')
+            recap = payload['draft_reply']
+            payload['draft_reply'] = custom_graph + '\n' + recap
+            run(final, False)
+            payload['discussion_handoff']['overview_request_source'] = '请把当前讨论树给我看'
+            run(final, True)
+            payload['draft_reply'] = graph + '\n' + recap
+            run(final, False)
+            payload['draft_reply'] = recap
+            other = project.parent / 'other.md'
+            other.write_text(summary, encoding='utf-8')
+            path.unlink()
+            path.symlink_to(other)
+            run(check, False)
+            run(final, False)
+            payload['discussion_record'] = READ_ONLY_RECORD
+            run(final, True)
+
+    def test_discussion_only_blocks_internal_visuals_without_a_user_request(self):
+        s = state(plan_requested=False, decisions=[
+            {'id': 'd1', 'status': 'pending', 'subject': '范围', 'question': '先做哪个？'}])
+        h = handoff('decision', 'd1')
+        graph = '\n'.join(DISCUSSION_GRAPH[1:] + ['```'])
+        table = '> > | 你确认的要求 | 当前做法或待决问题 | 怎么验 | 状态 |'
+        for excerpt in (graph, table, '\n'.join('> ' + line for line in graph.splitlines())):
+            reply = excerpt + '\n先做哪个？'
+            self.assertTrue(controller.validate_discussion_final(s, reply, h))
+            allowed = dict(h, overview_request_source='请展示内部讨论图表')
+            self.assertEqual([], controller.validate_discussion_final(s, reply, allowed))
+        business = '```mermaid\nstateDiagram-v2\n待付款 --> 已付款\n```\n先做哪个？'
+        self.assertEqual([], controller.validate_discussion_final(s, business, h))
+
+    def test_unique_approach_uses_requirement_and_constraint_without_a_decision(self):
+        record = report_requirement()
+        s = state(decisions=[], confirmed_requirements=[record], plan_requested=False)
+        reply = REPORT_SUMMARY + '\n' + CLOSURE_QUESTION
+        for reviewer in ('main', 'independent'):
+            final = handoff('plan_transition', reviewer=reviewer)
+            with self.subTest(reviewer=reviewer):
+                self.assert_closure_cli(s, final, reply, True)
+                self.assert_closure_cli(s, final, '建议上传网盘。\n' + reply, False)
+                self.assert_closure_cli(dict(s, confirmed_requirements=[]), final,
+                                        '建议上传网盘。\n' + CLOSURE_QUESTION, False)
+                for field, wrong in [('constraint_source', '用户仅要求比较 PDF 与 HTML'),
+                                     ('source', '用户只确认了日期'), ('detail_source', '')]:
+                    bad = dict(s, confirmed_requirements=[dict(record, **{field: wrong})])
+                    self.assert_closure_cli(bad, final, reply, False)
+        previous = wait_for_discussion_transition(copy.deepcopy(s))
+        confirmed = confirm_discussion_transition(s)
+        confirmed['confirmed_requirements'][0]['implementation'] = '改发邮件'
+        self.assertIn('discussion transition must be reconfirmed after a material change',
+                      controller.validate_transition(previous, confirmed))
+
+    def test_single_body_closure_binds_graph_table_and_summary_to_same_records(self):
+        delivery = {'id': 'D2', 'value': '离线取包', 'status': 'decided', 'subject': '取包',
+                    'implementation': '本地保存', 'verification': '断网打开文件', 'depends_on': ['R1'],
+                    'source': '用户选离线取包，本地保存，断网打开文件'}
+        s = state(decisions=[delivery], confirmed_requirements=[report_requirement()], plan_requested=False)
+        reply = '\n'.join([
+            '**任务驱动 · 讨论阶段**', *DISCUSSION_GRAPH[:4], 'discuss --> q1["取包（已决定）"]',
+            'q1 --> review["逐项核对"]', *DISCUSSION_GRAPH[5:], '```',
+            '要求表', '| 你确认的要求 | 当前做法或待决问题 | 怎么验 | 状态 |', '| --- | --- | --- | --- |',
+            '| 交付周报 | 导出 PDF | 打开文件核对页数 | 已确认 |',
+            '| 离线取包 | 本地保存 | 断网打开文件 | 已决定 |',
+            REPORT_SUMMARY, '离线取包：本地保存，核验时断网打开文件。', CLOSURE_QUESTION])
+        for reviewer in ('main', 'independent'):
+            final = handoff('plan_transition', reviewer=reviewer)
+            self.assert_closure_cli(s, final, reply, False)
+            final.update(overview_request_source='请展示讨论图和要求表', choice_basis=[{'decision_id': 'D2', 'choice': '离线取包'}],
+                         approach_basis={'decision_id': 'D2', 'source_quote': delivery['source']})
+            with self.subTest(reviewer=reviewer):
+                self.assert_closure_cli(s, final, reply, True)
+                for old, new in [('```mermaid', '```text'), ('```mermaid', '    ```mermaid'), ('flowchart TD', '交付周报 → 导出 PDF'),
+                                 ('q1["取包（已决定）"]', 'q1["虚构问题（已决定）"]'),
+                                 ('discuss --> q1', 'goal --> q1'), ('discuss --> q1["取包（已决定）"]', ''),
+                                 ('计划目标', '当前位置：计划目标'), ('当前位置：等待用户同意', '已同意'),
+                                 ('逐项核对', '开始执行'), ('```\n要求表', 'click plan "url"\n```\n要求表'),
+                                 ('| 本地保存 |', '| 导出 PDF |'), ('| 已确认 |', '| 已决定 |'),
+                                 (REPORT_SUMMARY, ''), ('要求表', '也提供云存储。\n要求表')]:
+                    self.assert_closure_cli(s, final, reply.replace(old, new), False)
+
+    def test_discussion_graph_orders_and_escapes_resolved_decision_subjects(self):
+        decisions = [{'subject': '格式"A"', 'status': 'delegated'},
+                     {'subject': '共享[文件]', 'status': 'excluded'}]
+        graph = controller.closure_overview([], decisions)
+        self.assertEqual(graph[:graph.index('要求表')], [
+            *DISCUSSION_GRAPH[:4], 'discuss --> q1["格式#34;A#34;（已落实委托）"]',
+            'q1 --> q2["共享#91;文件#93;（已排除）"]', 'q2 --> review["逐项核对"]', *DISCUSSION_GRAPH[5:], '```'])
+
+    def test_closure_defaults_to_plain_recap_including_legacy_snapshots(self):
+        checkpoint = state(decisions=[], confirmed_requirements=[report_requirement()], plan_requested=False)
+        recap = REPORT_SUMMARY + '\n' + CLOSURE_QUESTION
+        for reviewer in ('main', 'independent'):
+            final = handoff('plan_transition', reviewer=reviewer)
+            with self.subTest(reviewer=reviewer):
+                self.assert_closure_cli(checkpoint, final, recap, True)
+                legacy = dict(checkpoint, task_overview_delivery={'task_id': 'task-a', 'graph_turn': 2, 'table_turn': 2})
+                self.assert_closure_cli(legacy, final, recap, True)
+                self.assert_closure_cli(legacy, final, CLOSURE_QUESTION, False)
+                self.assert_closure_cli(wait_for_discussion_transition(checkpoint), final, CLOSURE_QUESTION, True)
+                shown = state(decisions=[], plan={'presented': True, 'evidence': '助手第 6 条展示的计划'},
+                              goals={'presented': True, 'evidence': '同条消息的验收目标'})
+                self.assert_closure_cli(shown, handoff('plan_transition'), CLOSURE_QUESTION, True)
+
+    def test_same_name_dependencies_use_unique_sourced_business_labels(self):
+        first = dict(report_requirement(), business_context='财务', source='财务要求交付周报')
+        second = dict(first, id='R2', business_context='运营', source='运营要求交付周报', depends_on=['R1'])
+        checkpoint = state(decisions=[], confirmed_requirements=[first, second], plan_requested=False)
+        final = handoff('plan_transition', reviewer='main')
+        final['overview_request_source'] = '请展示讨论图和要求表'
+        body = '\n'.join([
+            *DISCUSSION_GRAPH, '```',
+            '要求表', '| 你确认的要求 | 当前做法或待决问题 | 怎么验 | 状态 |', '| --- | --- | --- | --- |',
+            '| 交付周报（财务） | 导出 PDF | 打开文件核对页数 | 已确认 |',
+            '| 交付周报（运营） | 导出 PDF | 打开文件核对页数 | 已确认 |',
+            '交付周报（财务）：导出 PDF，核验时打开文件核对页数。',
+            '交付周报（运营）：导出 PDF，核验时打开文件核对页数。', CLOSURE_QUESTION])
+        self.assert_closure_cli(checkpoint, final, body, True)
+        self.assert_closure_cli(checkpoint, final, body.replace('要求表', 'discuss --> q1["交付周报"]\n要求表'), False)
+        second['depends_on'] = ['财务']
+        self.assert_closure_cli(checkpoint, final, body, False)
+        second['depends_on'] = ['R1']
+        second['business_context'] = '销售'
+        self.assert_closure_cli(checkpoint, final, body.replace('运营', '销售'), False)
+        del first['business_context'], second['business_context']
+        self.assert_closure_cli(checkpoint, final, body.replace('（财务）', '').replace('（运营）', ''), False)
+
+    def test_transition_self_review_alone_cannot_establish_choice_coverage(self):
+        s = state(decisions=[])
+        reply = '建议采用托管服务。是否结束讨论并展示计划和目标？'
+        final = handoff('plan_transition')
+        del final['choice_basis']
+        self.assertTrue(controller.validate_discussion_final(s, reply, final))
+        final['choice_basis'] = [{'choice': '采用托管服务', 'decision_id': 'hosting'}]
+        self.assertTrue(controller.validate_discussion_final(s, reply, final))
+        s['decisions'] = [{'id': 'hosting', 'status': 'decided', 'subject': '部署',
+                           'value': '采用托管服务', 'source': '用户明确选择托管部署'}]
+        s['decisions'][0].update(implementation='部署到选定服务', verification='访问部署地址')
+        hosting = '采用托管服务：部署到选定服务，核验时访问部署地址。'
+        question = '是否结束讨论并展示计划和目标？'
+        reply = hosting + '\n' + question
+        self.assertEqual([], controller.validate_discussion_final(s, reply, final))
+        s['decisions'].append({'id': 'cloud', 'subject': '排除境外存储', 'status': 'excluded',
+                               'source': '用户限定存储位置'})
+        self.assertTrue(controller.validate_discussion_final(s, reply, final))
+        self.assertTrue(controller.validate_discussion_final(s, reply, handoff('plan_transition')))
+        final['choice_basis'].append({'choice': '排除境外存储', 'decision_id': 'cloud'})
+        s['decisions'][1].update(implementation='限定境内区域', verification='检查存储区域')
+        self.assertTrue(controller.validate_discussion_final(s, reply, final))
+        reply = hosting + '\n排除境外存储：限定境内区域，核验时检查存储区域。\n' + question
+        self.assertEqual([], controller.validate_discussion_final(s, reply, final))
+        s['decisions'][0]['value'] = '只要求比较方案'
+        self.assertTrue(controller.validate_discussion_final(s, reply, final))
+
     def test_discussion_final_without_pending_asks_to_end_and_present_plan(self):
-        s = state(plan_requested=False, decisions=[])
+        s = state(plan_requested=False, decisions=[], confirmed_requirements=[report_requirement()])
         final_handoff = handoff('plan_transition')
         self.assertIn(
             'discussion semantic review did not pass',
@@ -582,7 +890,7 @@ class ControlTests(unittest.TestCase):
             [],
             controller.validate_discussion_final(
                 s,
-                '分析已经完成。\n\n现在结束讨论，让我一起展示正式计划和目标吗？',
+                REPORT_SUMMARY + '\n' + CLOSURE_QUESTION,
                 final_handoff,
             ),
         )
@@ -1023,53 +1331,56 @@ class ControlTests(unittest.TestCase):
         )
 
     def test_discussion_final_rejects_earlier_questions(self):
-        s = state(plan_requested=False, decisions=[])
+        record = dict(report_requirement(), status='decided', subject='交付')
+        s = state(plan_requested=False, decisions=[record])
+        final = handoff('plan_transition')
+        final['choice_basis'] = [{'decision_id': 'R1', 'choice': '交付周报'}]
         self.assertIn(
             'discussion final reply must end with exactly one question',
             controller.validate_discussion_final(
                 s,
-                '方案 A 可以吗？方案 B 可以吗？\n\n是否结束讨论并开始展示正式计划与目标？',
-                handoff('plan_transition'),
+                REPORT_SUMMARY + '\n' + '方案 A 可以吗？方案 B 可以吗？\n\n是否结束讨论并开始展示正式计划与目标？',
+                final,
             ),
         )
         self.assertEqual(
             [],
             controller.validate_discussion_final(
                 s,
-                '资料链接：https://example.com/?id=1\n\n是否结束讨论并开始展示正式计划与目标？',
-                handoff('plan_transition'),
+                REPORT_SUMMARY + '\n' + '资料链接：https://example.com/?id=1\n\n是否结束讨论并开始展示正式计划与目标？',
+                final,
             ),
         )
         self.assertEqual(
             [],
             controller.validate_discussion_final(
                 s,
-                '资料链接：[页面](docs/page?id=1&view=full)\n\n是否结束讨论并开始展示正式计划与目标？',
-                handoff('plan_transition'),
+                REPORT_SUMMARY + '\n' + '资料链接：[页面](docs/page?id=1&view=full)\n\n是否结束讨论并开始展示正式计划与目标？',
+                final,
             ),
         )
         self.assertEqual(
             [],
             controller.validate_discussion_final(
                 s,
-                '[doc]: docs/page?id=1&view=full\n\n是否结束讨论并开始展示正式计划与目标？',
-                handoff('plan_transition'),
+                REPORT_SUMMARY + '\n' + '[doc]: docs/page?id=1&view=full\n\n是否结束讨论并开始展示正式计划与目标？',
+                final,
             ),
         )
         self.assertEqual(
             [],
             controller.validate_discussion_final(
                 s,
-                '页面 docs/page?id=1，用户问“要不要做？”\n\n是否结束讨论并开始展示正式计划与目标？',
-                handoff('plan_transition'),
+                REPORT_SUMMARY + '\n' + '页面 docs/page?id=1，用户问“要不要做？”\n\n是否结束讨论并开始展示正式计划与目标？',
+                final,
             ),
         )
         self.assertEqual(
             [],
             controller.validate_discussion_final(
                 s,
-                '用户问「要不要做？」\n\n是否结束讨论并开始展示正式计划与目标？',
-                handoff('plan_transition'),
+                REPORT_SUMMARY + '\n' + '用户问「要不要做？」\n\n是否结束讨论并开始展示正式计划与目标？',
+                final,
             ),
         )
         self.assertEqual(1, controller.count_questions_outside_code('是否采用 API?'))
@@ -1081,7 +1392,7 @@ class ControlTests(unittest.TestCase):
             'discussion semantic review did not pass',
             controller.validate_discussion_final(
                 s,
-                '分析完成。\n\n❌是否结束讨论并开始展示正式计划与目标？',
+                REPORT_SUMMARY + '\n' + '分析完成。\n\n❌是否结束讨论并开始展示正式计划与目标？',
                 handoff('plan_transition', status='fail'),
             ),
         )
@@ -1136,6 +1447,7 @@ class ControlTests(unittest.TestCase):
         }])
         valid = {
             'state': s,
+            'discussion_record': READ_ONLY_RECORD,
             'draft_reply': '分析结果如下。\n\n范围上你希望采用方案 A 还是方案 B？',
             'discussion_handoff': handoff('decision', 'd1'),
         }
@@ -1144,6 +1456,7 @@ class ControlTests(unittest.TestCase):
         self.assertTrue(json.loads(p.stdout)['ok'])
         invalid = {
             'state': s,
+            'discussion_record': READ_ONLY_RECORD,
             'draft_reply': '分析结果如下。',
             'discussion_handoff': handoff('decision', 'd1'),
         }
@@ -1967,6 +2280,24 @@ class ControlTests(unittest.TestCase):
         result = controller.route(s)
         self.assertEqual('repair_state', result['action'])
         self.assertIn('interruption resume_point required before reconciliation', result['errors'])
+
+    def test_unrelated_result_waits_for_permission_and_keeps_its_own_graph_node(self):
+        parent = state(status='wait_user', wait_reason='原问题未答', wait_evidence='选哪份帮助？',
+                       next_action='等用户选择帮助内容')
+        frame = interruption()
+        frame.update(status='complete', result_evidence='323', branch={'relation': 'unrelated', 'origin': 'discuss'},
+                     resume_point=controller.make_resume_point(parent))
+        closed = dict(parent, interruptions=[frame])
+        self.assertEqual('ask_return_to_main', controller.route(closed)['action'])
+        frame.update(return_question_source='刚才询问是否返回')
+        self.assertEqual('wait_interruption', controller.route(closed)['action'])
+        frame.update(return_answer='no', return_answer_source='用户暂时不返回')
+        self.assertEqual('wait_interruption', controller.route(closed)['action'])
+        frame.update(return_answer='yes', return_answer_source='用户随后同意返回')
+        self.assertEqual('reconcile_interruption', controller.route(closed)['action'])
+        graph = controller.closure_overview([], [], [controller.branch_record(frame)])
+        self.assertEqual(1, sum('b1' in line for line in graph))
+        self.assertTrue(next(line for line in graph if 'b1' in line).startswith('b1['))
 
     def test_interruption_cli_lifecycle_reconciles_before_original_wait(self):
         parent = state(status='wait_user', wait_reason='原问题未答', wait_evidence='原问题已展示',
@@ -3488,7 +3819,7 @@ class RecoveryAndToolWaitTests(unittest.TestCase):
     def test_incremental_final_validates_handoff_as_in_full_input(self):
         old = self.waiting()
         current = dict(old, next_action='核实原查询')
-        metadata = {'draft_reply': '查询仍在运行，保留原作业等待结果。',
+        metadata = {'discussion_record': READ_ONLY_RECORD, 'draft_reply': '查询仍在运行，保留原作业等待结果。',
                     'discussion_handoff': handoff('tool_wait')}
         payload = {'previous': old, 'changes': [{'path': ['next_action'], 'value': '核实原查询'}]}
         code, result = self.cli('final', {**payload, **metadata})
@@ -3804,7 +4135,7 @@ class RecoveryAndToolWaitTests(unittest.TestCase):
     def test_tool_wait_final_reports_wait_without_question_then_resumes(self):
         waiting = self.waiting(operations=[dict(id='op1', reference='原查询作业', status='running',
                                               side_effect=False, blocks_next=True)])
-        payload = {'state': waiting, 'draft_reply': '查询仍在运行，当前没有需要你决定的事项；保留原作业等待结果。',
+        payload = {'state': waiting, 'discussion_record': READ_ONLY_RECORD, 'draft_reply': '查询仍在运行，当前没有需要你决定的事项；保留原作业等待结果。',
                    'discussion_handoff': handoff('tool_wait')}
         result = subprocess.run(
             [sys.executable, str(SCRIPT), 'final', '--state', '-'],
@@ -3840,7 +4171,7 @@ class RecoveryAndToolWaitTests(unittest.TestCase):
             with self.subTest(changes=changes):
                 s = self.waiting()
                 s.update(changes)
-                payload = {'state': s, 'draft_reply': '等待工具结果。',
+                payload = {'state': s, 'discussion_record': READ_ONLY_RECORD, 'draft_reply': '等待工具结果。',
                            'discussion_handoff': handoff('tool_wait')}
                 result = subprocess.run(
                     [sys.executable, str(SCRIPT), 'final', '--state', '-'],

@@ -12,6 +12,7 @@ from copy import deepcopy
 import hashlib
 import json
 import re
+from pathlib import Path
 
 PHASES = {'analysis', 'discussion', 'planning', 'goals', 'execution', 'verification', 'review'}
 STATUSES = {'continue', 'wait_user', 'wait_tool', 'blocked', 'paused', 'complete'}
@@ -40,7 +41,7 @@ GUIDANCE = {
         '开始执行前，必须另行取得用户对已展示内容的明确执行授权。用户后续明确授权时，必须沿用有效确认继续，禁止重复询问。'
     ),
     'request_plan_transition': (
-        '调查分析完成且没有待决项时，必须保持讨论阶段并总结有效决定。完成 semantic_review 后，'
+        '调查分析完成且没有待决项时，必须保持讨论阶段，先更新并读回当前任务摘要，当前位置为等待用户同意。逐条说明已确认要求怎么做、怎么验。完成 semantic_review 后，'
         '必须以一个实际发出的收口问题结束回复，询问用户是否结束讨论并开始展示正式计划与验收目标。'
         '发出问题后必须等待用户答复。进入计划阶段前，必须取得用户针对该问题的明确肯定答复。'
         '即使用户已经给出完整方案、要求直接执行或要求展示计划，也必须完成这次收口问答。'
@@ -70,6 +71,7 @@ GUIDANCE = {
         '禁止将用户结束要求视为验收或宣称未验证项已经验证。'
     ),
     'handle_interruption': '必须优先处理当前临时请求，处理前必须核对用户与宿主授权。业务执行仍必须满足原有执行门槛。禁止扩大原任务授权。',
+    'ask_return_to_main': '先交付临时结果，再单独询问返回问题，发出后等待明示。',
     'reconcile_interruption': '必须核对临时结果、恢复点、最新用户要求和实际现场，正文必须先交付临时结果，再接回对应事项。用户明确暂停时必须保持暂停。',
     'begin_execution': (
         '执行入口尚未通过。必须核对分析闭合、讨论闭合、编号步骤、计划与目标确认、执行授权、子代理设置和目标跟踪回执。'
@@ -118,11 +120,44 @@ def make_resume_point(parent):
     return {key: parent[key] for key in keys if key in parent}
 
 
+def branch_errors(branch):
+    if not isinstance(branch, dict) or branch.get('relation') not in ('related', 'unrelated'):
+        return ['branch requires a related or unrelated relation']
+    fields = ['origin']
+    if branch['relation'] == 'related':
+        fields.extend(('target', 'impact'))
+    elif 'target' in branch or 'impact' in branch:
+        return ['unrelated branch cannot have a merge target or impact']
+    return ['branch requires ' + key for key in fields
+            if not isinstance(branch.get(key), str) or not branch[key].strip()]
+
+
+def unrelated_closed(frame):
+    return (frame.get('status') in ('complete', 'cancelled') and
+            frame.get('branch', {}).get('relation') == 'unrelated')
+
+
+def branch_record(frame):
+    return {**frame['branch'], 'id': frame['id'], 'request': frame['request']}
+
+
 def validate_interruptions(s):
     frames = s.get('interruptions', [])
     if not isinstance(frames, list):
         return ['interruptions must be a list']
     errors, ids = [], set()
+    history = s.get('branch_history', [])
+    if not isinstance(history, list):
+        return ['branch_history must be a list']
+    for entry in history:
+        errors.extend(branch_errors(entry))
+        if not isinstance(entry, dict) or not all(isinstance(entry.get(k), str) and entry[k].strip()
+                                                  for k in ('id', 'request')):
+            errors.append('branch history requires id and request')
+        elif entry['id'] in ids:
+            errors.append('duplicate branch history id')
+        else:
+            ids.add(entry['id'])
     for frame in frames:
         if not isinstance(frame, dict):
             errors.append('interruption must be an object')
@@ -139,6 +174,19 @@ def validate_interruptions(s):
         status = frame.get('status')
         if not isinstance(status, str) or status not in INTERRUPTION_STATUSES:
             errors.append('invalid interruption status')
+        if 'branch' in frame:
+            issues = branch_errors(frame['branch'])
+            errors.extend(issues)
+            if issues:
+                continue
+        question = frame.get('return_question_source')
+        answer = frame.get('return_answer')
+        if any(k in frame for k in ('return_question_source', 'return_answer', 'return_answer_source')):
+            if not unrelated_closed(frame) or not isinstance(question, str) or not question.strip():
+                errors.append('return confirmation requires a closed unrelated branch and presented question')
+            if 'return_answer' in frame or 'return_answer_source' in frame:
+                if answer not in ('yes', 'no') or not has_new_source(frame.get('return_answer_source'), question):
+                    errors.append('return answer requires an explicit user response source')
         if 'allow_while_paused' in frame and not isinstance(frame['allow_while_paused'], bool):
             errors.append('interruption allow_while_paused must be boolean')
         if frame.get('allow_while_paused') is True and (not isinstance(frame.get('allow_while_paused_source'), str) or not frame['allow_while_paused_source'].strip()):
@@ -1136,9 +1184,31 @@ def validate_transition(previous, current):
                 errors.append('resume one interruption at a time')
             elif old_frames[-1]['status'] not in ('complete', 'cancelled'):
                 errors.append('cannot resume before interruption completes or is cancelled')
+        history = list(previous.get('branch_history', []))
+        if len(new_ids) + 1 == len(old_ids):
+            closed = old_frames[-1]
+            if 'branch' in closed:
+                history.append(branch_record(closed))
+            if unrelated_closed(closed):
+                parent = new_frames[-1] if new_frames else current
+                if closed.get('return_answer') != 'yes' or make_resume_point(parent) != closed['resume_point']:
+                    errors.append('return requires explicit agreement and the original pending point')
+        if current.get('branch_history', []) != history:
+            errors.append('preserve branch history and archive the reconciled branch')
+        if any('return_answer' in frame for frame in new_frames[common:]):
+            errors.append('return answer requires a preceding interruption with a presented question')
         for old, new in zip(old_frames[:common], new_frames[:common]):
             if old['id'] != new['id']:
                 continue
+            if 'branch' in old:
+                branch = new.get('branch', {})
+                if any(old['branch'][key] != branch.get(key) for key in ('origin', 'relation')):
+                    errors.append('recorded branch must retain its relation and origin')
+            if new.get('return_answer') != old.get('return_answer'):
+                if (not old.get('return_question_source') or
+                        old['return_question_source'] != new.get('return_question_source') or
+                        not has_new_source(new.get('return_answer_source'), old.get('return_answer_source'))):
+                    errors.append('return answer requires the preceding question and a fresh reply')
             if old['request'] != new['request'] and old['source'] == new['source']:
                 errors.append('changed interruption request requires new source')
             if old.get('resume_point') is not None and old.get('resume_point') != new.get('resume_point'):
@@ -1189,7 +1259,8 @@ def validate_transition(previous, current):
         if not (same_closure or waiting_for_question):
             errors.append('discussion transition answer must match the preceding question')
         if (not discussion_ready(previous) or not discussion_ready(current) or
-                discussion_decisions(previous) != discussion_decisions(current)):
+                discussion_decisions(previous) != discussion_decisions(current) or
+                previous.get('confirmed_requirements', []) != current.get('confirmed_requirements', [])):
             errors.append('discussion transition must be reconfirmed after a material change')
     delivered = (isinstance(new_plan, dict) and new_plan.get('presented') is True and
                  (not isinstance(old_plan, dict) or old_plan.get('presented') is not True or
@@ -1473,7 +1544,7 @@ def discussion_decisions(s):
     decisions = s.get('decisions')
     if not isinstance(decisions, list):
         return {}
-    fields = ('subject', 'status', 'value', 'source')
+    fields = ('subject', 'status', 'value', 'source', 'implementation', 'verification', 'depends_on', 'business_context')
     return {
         item['id']: tuple(item.get(field) for field in fields)
         for item in decisions
@@ -1542,6 +1613,19 @@ def route(s):
             parent = frames[-2] if len(frames) > 1 else s
             result.update(action='handle_interruption', next_action=frame['next_action'],
                           resume_point=frame.get('resume_point', make_resume_point(parent)))
+        elif unrelated_closed(frame) and frame.get('return_answer') != 'yes':
+            point = frame['resume_point']
+            if frame.get('return_question_source'):
+                result.update(action='wait_interruption', status='wait_user',
+                              reason='等待用户明确同意返回，保留原待答点')
+            else:
+                pending = point['next_action']
+                evidence = point.get('wait_evidence')
+                if point['status'] == 'wait_user' and evidence.strip().endswith(('？', '?')):
+                    pending = evidence.strip().rstrip('？?')
+                destination = frames[-2]['request'] if len(frames) > 1 else '原任务'
+                result.update(action='ask_return_to_main',
+                              question=f'是否回到{destination}，继续「{pending}」？')
         elif frame['status'] in ('complete', 'cancelled'):
             result.update(action='reconcile_interruption', outcome=frame['status'],
                           result_evidence=frame['result_evidence'],
@@ -1880,10 +1964,213 @@ def count_questions_outside_code(reply):
     return count
 
 
-def validate_discussion_final(s, reply, handoff):
+def validate_choice_basis(basis, decisions):
+    resolved = {item['id']: item.get('value') or item.get('subject') for item in decisions
+                if isinstance(item, dict) and isinstance(item.get('id'), str)
+                and item.get('status') in ('decided', 'delegated', 'excluded') and item.get('source')}
+    if not resolved and isinstance(basis, dict) and set(basis) == {'no_material_choice_reason'}:
+        reason = basis['no_material_choice_reason']
+        if isinstance(reason, str) and reason.strip():
+            return []
+    if not isinstance(basis, list) or not basis:
+        return ['plan transition requires choice_basis for material choices or a reason none exist']
+    cited = set()
+    for item in basis:
+        if not isinstance(item, dict) or not isinstance(item.get('choice'), str) or not item['choice'].strip():
+            return ['choice_basis requires a specific choice']
+        ident = item.get('decision_id')
+        if not isinstance(ident, str) or resolved.get(ident) != item['choice']:
+            return ['choice_basis requires a resolved decision with a source']
+        cited.add(ident)
+    if cited != resolved.keys():
+        return ['choice_basis must cover all resolved decisions']
+    return []
+
+
+def mermaid_text(value):
+    return ''.join(char if char.isalnum() or char == ' ' else f'#{ord(char)};' for char in value)
+
+
+def closure_overview(rows, decisions, history=()):
+    """Render the discussion path, its resolved questions, and the requirement table."""
+    graph = ['讨论图', '```mermaid', 'flowchart TD',
+             'goal["目标确认"] --> discuss["讨论取舍"]']
+    table = ['要求表', '| 你确认的要求 | 当前做法或待决问题 | 怎么验 | 状态 |',
+             '| --- | --- | --- | --- |']
+    statuses = {'confirmed': '已确认', 'decided': '已决定', 'delegated': '已落实委托', 'excluded': '已排除'}
+    nodes = {row['id']: f'q{i}' for i, row in enumerate(decisions, 1) if 'id' in row}
+    parent = 'discuss'
+    for index, decision in enumerate(decisions, 1):
+        subject = mermaid_text(decision['subject'])
+        graph.append(f'{parent} --> q{index}["{subject}（{statuses[decision["status"]]}）"]')
+        parent = f'q{index}'
+    graph.extend([f'{parent} --> review["逐项核对"]',
+                  'review --> wait["等待收口（当前位置：等待用户同意）"]',
+                  'wait -->|用户同意后| plan["计划目标"]'])
+    for index, entry in enumerate(history, 1):
+        origin = nodes.get(entry['origin'], entry['origin'])
+        label = mermaid_text(entry['request'])
+        if entry['relation'] == 'unrelated':
+            label += '（无意义分支（与当前目标无关））'
+            graph.append(f'b{index}["{label}"]')
+        else:
+            graph.append(f'{origin} -.-> b{index}["{label}"]')
+            target = nodes.get(entry['target'], entry['target'])
+            graph.append(f'b{index} -->|"{mermaid_text(entry["impact"])}"| {target}')
+    graph.append('```')
+    for _, label, action, check, status, _ in rows:
+        cells = [label, action, check, statuses[status]]
+        table.append('| ' + ' | '.join(cell.replace('|', r'\|') for cell in cells) + ' |')
+    return graph + table
+
+
+def validate_closure_reply(reply, handoff, state, recorded_graph=None):
+    """Bind every visible requirement to its confirmed wording and approach evidence."""
+    review = handoff.get('semantic_review')
+    if not isinstance(review, dict):
+        return ['closure requires a semantic review']
+    decisions = state.get('decisions', [])
+    requirements = state.get('confirmed_requirements', [])
+    if not isinstance(requirements, list) or not all(isinstance(row, dict) for row in requirements):
+        return ['confirmed_requirements must be a list of records']
+    resolved = [row for row in decisions if isinstance(row, dict)
+                and row.get('status') in ('decided', 'delegated', 'excluded')]
+    items = [(row, 'confirmed') for row in requirements] + [(row, row['status']) for row in resolved]
+    lines = [line.strip() for line in reply.splitlines() if line.strip()]
+    if lines and lines[0] == '**任务驱动 · 讨论阶段**':
+        lines.pop(0)
+    plan = state.get('plan')
+    plan_presented = isinstance(plan, dict) and plan.get('presented') is True
+    overview = contains_internal_overview(reply)
+    strict = review.get('reviewer') == 'main' or overview or bool(requirements and not resolved)
+    if not items and (strict or not plan_presented):
+        return ['first closure requires sourced confirmed requirements or resolved decisions']
+
+    rows = []
+    identifiers = set()
+    expected = []
+    for item, status in items:
+        ident = item.get('id')
+        value = item.get('value') or item.get('subject')
+        action, check = item.get('implementation'), item.get('verification')
+        if not all(isinstance(part, str) and part.strip() and len(part.splitlines()) == 1
+                   for part in (ident, value, action, check)):
+            return ['closure requires an id, requirement, implementation and verification on each record']
+        if ident in identifiers:
+            return ['closure record ids must be unique']
+        identifiers.add(ident)
+        sources = [item.get('source'), item.get('detail_source'), value]
+        if status == 'confirmed':
+            constraint = item.get('constraint_source')
+            if (not isinstance(item.get('source'), str) or value not in item['source']
+                    or not isinstance(constraint, str) or action not in constraint):
+                return ['confirmed requirement needs its wording and unique implementation in their respective sources']
+            sources.append(constraint)
+        if strict or status == 'confirmed':
+            if not all(any(isinstance(source, str) and part in source for source in sources)
+                       for part in (action, check)):
+                return ['implementation and verification need supporting record excerpts']
+        dependencies = item.get('depends_on', [])
+        if overview and (not re.fullmatch(r'[\w.-]+', ident) or not isinstance(dependencies, list)
+                         or not all(isinstance(key, str) and key != ident for key in dependencies)):
+            return ['overview needs stable ids and a list of prerequisite record ids']
+        label = value
+        if 'business_context' in item:
+            context = item['business_context']
+            if (not isinstance(context, str) or not context.strip() or len(context.splitlines()) != 1
+                    or not any(isinstance(source, str) and context in source for source in sources)):
+                return ['business_context must quote a distinguishing context from the same record']
+            label = f'{value}（{context}）'
+        rows.append((ident, label, action, check, status, dependencies))
+        expected.append(f'{label}：{action}，核验时{check}。')
+
+    body = lines[:-1]
+    if overview:
+        if any(key not in identifiers for row in rows for key in row[-1]):
+            return ['overview dependency must reference a displayed requirement']
+        if len({' '.join(row[1].split()) for row in rows}) != len(rows):
+            return ['overview needs distinct business labels; qualify matching names with business_context']
+        if any(not isinstance(row.get('subject'), str) or not row['subject'].strip() for row in resolved):
+            return ['discussion graph branches require a decision subject']
+        if any(not re.fullmatch(r' {0,3}```(?:mermaid)?[ \t]*', line)
+               for line in reply.splitlines() if line.strip() in ('```mermaid', '```')):
+            return ['discussion graph requires a Markdown fenced Mermaid block']
+        history = state.get('branch_history', [])
+        graph_nodes = {row['id'] for row in resolved} | {'discuss', 'review'}
+        if any(entry['origin'] not in graph_nodes or entry.get('target', 'review') not in graph_nodes
+               for entry in history):
+            return ['branch history must reference displayed discussion nodes']
+        prefix = closure_overview(rows, resolved, history)
+        table_start = prefix.index('要求表')
+        table = prefix[table_start:]
+        graph = prefix[:table_start]
+        if recorded_graph is not None:
+            graph = ['讨论图', '```mermaid', *(line.strip() for line in recorded_graph.splitlines() if line.strip()), '```']
+        if '讨论图' not in body:
+            graph = graph[1:]
+        if '要求表' not in body:
+            table = table[1:]
+        prefix = (graph if '```mermaid' in body else []) + (table if any(
+            table_cells(line) == REQUIREMENT_COLUMNS for line in body) else [])
+        if body[:len(prefix)] != prefix:
+            return ['task overview must show the graph and table from the same closure records']
+        body = body[len(prefix):]
+    body = [line.removeprefix('- ') for line in body]
+    if strict:
+        if not lines or lines[-1] != '是否结束讨论并开始展示正式计划和验收目标？':
+            return ['self-reviewed closure requires a separate closure question']
+        if sorted(body) != sorted(expected):
+            return ['closure must contain exactly the recorded requirement summaries']
+    else:
+        for line in expected:
+            if line not in body:
+                return ['closure must show each recorded implementation and verification']
+            body.remove(line)
+    if review.get('reviewer') == 'independent' or (
+            requirements and all(row['status'] == 'excluded' for row in resolved)):
+        return []
+    return validate_selected_approach(handoff.get('approach_basis'), resolved)
+
+
+def validate_selected_approach(approach, decisions):
+    """Verify a material choice against the original decision evidence."""
+    if not isinstance(approach, dict):
+        return ['self-reviewed closure requires approach_basis for the actual solution']
+    decision = next((item for item in decisions if isinstance(item, dict)
+                     and item.get('id') == approach.get('decision_id')
+                     and item.get('status') in ('decided', 'delegated')), None)
+    quote = approach.get('source_quote')
+    if (not decision or not isinstance(quote, str) or not quote.strip()
+            or not isinstance(decision.get('source'), str) or quote not in decision['source']):
+        return ['approach_basis must cite the selected approach and its source quotation']
+    if decision['status'] == 'decided' and (not isinstance(decision.get('value'), str) or decision['value'] not in quote):
+        return ['selected approach must occur in the cited decision wording']
+    return []
+
+
+def validate_discussion_final(s, reply, handoff, recorded_graph=None):
     """Validate a discussion question, user-scoped stop, or actual tool wait."""
     if not isinstance(s, dict):
         return []
+    if s.get('phase') == 'discussion' and isinstance(reply, str) and contains_internal_overview(reply):
+        source = handoff.get('overview_request_source') if isinstance(handoff, dict) else None
+        if not isinstance(source, str) or not source.strip():
+            return ['showing the discussion diagram or requirement table requires an explicit user request']
+    frames = s.get('interruptions')
+    if isinstance(frames, list) and frames and not validate_interruptions(s) and unrelated_closed(frames[-1]):
+        action = route(s)
+        if action['action'] == 'ask_return_to_main':
+            lines = reply.rstrip().splitlines()
+            body = [line.strip() for line in lines[:-1] if line.strip()]
+            if body[:1] == ['**任务驱动 · 讨论阶段**']:
+                body.pop(0)
+            if (not body or
+                    discussion_final_line(reply) != action['question'] or
+                    count_questions_outside_code(reply) != 1):
+                return ['closed unrelated branch requires only the return question after its result']
+            return []
+        if action['action'] == 'wait_interruption':
+            return ['wait for explicit return consent before a main-task handoff']
     if s.get('phase') == 'planning' and discussion_transition_waiting(s):
         return ['first formal plan presentation requires confirmed discussion transition']
     if (s.get('phase') == 'planning' and s.get('plan_required', True) and
@@ -2018,6 +2305,9 @@ def validate_discussion_final(s, reply, handoff):
         if pending:
             errors.append('discussion plan transition cannot bypass pending decisions')
         waiting_for_answer = route_action == 'wait_user' and discussion_transition_waiting(s)
+        if not waiting_for_answer:
+            errors.extend(validate_closure_reply(reply, handoff, s, recorded_graph))
+            errors.extend(validate_choice_basis(handoff.get('choice_basis'), s.get('decisions', [])))
         if waiting_for_answer and (routed.get('independent_action') or routed.get('independent_checks')):
             errors.append('discussion plan transition cannot bypass available independent work')
         if route_action != 'request_plan_transition' and not waiting_for_answer:
@@ -2167,9 +2457,169 @@ def apply_state_changes(previous, changes):
     return state
 
 
+def intake(payload):
+    """Route a new request before a workflow checkpoint exists."""
+    if not isinstance(payload, dict) or payload.keys() - {'goal', 'confirmation_source'}:
+        raise ValueError('intake accepts only goal and confirmation_source for a new task')
+    for field, value in payload.items():
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError('intake requires nonempty text for ' + field)
+    if 'goal' not in payload:
+        if 'confirmation_source' in payload:
+            raise ValueError('intake confirmation requires the goal it confirms')
+        return {'action': 'ask_goal', 'question': '你想完成什么，做到什么程度算成功？'}
+    if 'confirmation_source' not in payload:
+        return {'action': 'confirm_understanding', 'question': f"我理解你的目标是「{payload['goal']}」，对吗？"}
+    return {'action': 'continue_analysis', 'instruction': '按已确认目标进入 analysis 开展调查。'}
+
+
+REQUIREMENT_COLUMNS = ['你确认的要求', '当前做法或待决问题', '怎么验', '状态']
+
+
+def contains_internal_overview(reply):
+    # Markdown quote prefixes change presentation, not the content of a pasted table or graph.
+    text = re.sub(r'(?m)^[ \t]*(?:>[ \t]*)+', '', reply)
+    if any(table_cells(line) == REQUIREMENT_COLUMNS for line in text.splitlines()):
+        return True
+    return bool(re.search(r'(?im)^[ \t]*(?:flowchart|graph)\s+(?:TD|TB|LR|RL|BT)\b', text)
+                and any(marker in text for marker in ('当前位置', '讨论取舍', '讨论推进图', '等待收口')))
+
+
+def has_main_edge(graph):
+    # Remove labels before matching endpoints so arrows in business wording are never edges.
+    syntax = re.sub(r'"[^"\n]*"', '', graph)
+    syntax = re.sub(r'\[[^\]\n]*\]|\([^()\n]*\)|\{[^}\n]*\}|\|[^|\n]*\|', '', syntax)
+    return any(edge[1] != edge[2] for edge in re.finditer(
+        r'([\w-]+)[ \t]*-->[ \t]*([\w-]+)', syntax))
+
+
+def table_cells(line):
+    return [cell.strip() for cell in re.split(r'(?<!\\)\|', line.strip().strip('|'))]
+
+
+def read_discussion_record(record):
+    fields = ('project', 'summary', 'turn_id', 'answer')
+    if not isinstance(record, dict) or not all(
+            isinstance(record.get(k), str) and record[k].strip() for k in fields):
+        raise ValueError('discussion_record requires project, summary, turn_id and answer')
+    root = Path(record['project']).resolve(strict=True)
+    path = (root / record['summary']).resolve(strict=True)
+    if not root.is_dir() or root not in path.parents or path.suffix.lower() != '.md' or not path.is_file():
+        raise ValueError('summary must be a Markdown file within the current project')
+    lines = path.read_text(encoding='utf-8').splitlines()
+    graphs, prose = [], []
+    fence = None
+    for line in lines:
+        if fence:
+            if re.fullmatch(r' {0,3}' + fence[0] + '{' + str(len(fence)) + r',}[ \t]*', line):
+                fence = None
+            elif in_graph:
+                graphs[-1].append(line)
+            continue
+        opener = re.fullmatch(r' {0,3}(`{3,}|~{3,})(.*)', line)
+        if opener:
+            fence, info = opener.groups()
+            in_graph = info.strip().lower() == 'mermaid'
+            if in_graph:
+                graphs.append([])
+            prose.append('')
+        else:
+            prose.append(line)
+    if fence or len(graphs) != 1:
+        raise ValueError('summary requires one complete Mermaid discussion tree')
+    graph = '\n'.join(line for line in graphs[0] if not line.lstrip().startswith('%%')).strip()
+    if (not re.match(r'^flowchart\s+TD\s*$', graph.split('\n')[0]) or not has_main_edge(graph)
+            or graph.count('当前位置') != 1 or not re.search(r'[\[({][^\]})\n]*当前位置[^\]})\n]*[\]})]', graph)):
+        raise ValueError('discussion tree requires flowchart TD, a main path and one current node')
+    headers = [i for i, line in enumerate(prose) if table_cells(line) == REQUIREMENT_COLUMNS]
+    if len(headers) != 1:
+        raise ValueError('summary requires one current four-column requirement table')
+    start = headers[0]
+    separator = table_cells(prose[start + 1]) if start + 1 < len(prose) else []
+    if len(separator) != 4 or not all(re.fullmatch(r':?-{3,}:?', cell) for cell in separator):
+        raise ValueError('invalid requirement table separator')
+    index = start + 2
+    while index < len(prose) and '|' in prose[index]:
+        cells = table_cells(prose[index])
+        if len(cells) != 4 or not all(cells):
+            raise ValueError('each requirement row needs four nonempty cells')
+        index += 1
+    if index == start + 2:
+        raise ValueError('requirement table needs a current row')
+    for label, field in [('本轮消息', 'turn_id'), ('本轮答复', 'answer')]:
+        values = [line[len(label) + 1:].strip() for line in prose if line.startswith(label + '：')]
+        if values != [record[field]]:
+            raise ValueError(f'missing, duplicate or stale {field} in summary')
+    return graph
+
+
+def check_archived_branches(graph, history):
+    """Check the recorded branch joins against the Markdown that will survive recovery."""
+    if not history:
+        return
+    node_label = re.compile(r'([\w-]+)\[("[^"]*"|[^\]]*)\]')
+    connection = re.compile(
+        r'(?<![\w-])(?=([\w-]+)\s*(?:-->|-\.->)\s*(?:\|([^|]*)\|\s*)?([\w-]+))')
+    nodes = set()
+    edges = {}
+    neighbors = {}
+    for line in graph.splitlines():
+        # Parse joins outside node captions, including chained joins on one line.
+        nodes.update(label[1] for label in node_label.finditer(line))
+        outline = node_label.sub(r'\1', line)
+        for source, caption, target in connection.findall(outline):
+            edges[source, target] = caption.strip('"')
+            neighbors.setdefault(source, set()).add(target)
+            neighbors.setdefault(target, set()).add(source)
+    for entry in history:
+        branch = entry['id']
+        origin = entry['origin']
+        if branch not in nodes or origin not in nodes:
+            raise ValueError('archived branch and its original discussion node must remain in the tree')
+        if entry['relation'] == 'related':
+            target = entry['target']
+            if ((origin, branch) not in edges or (branch, target) not in edges
+                    or edges[branch, target] not in (entry['impact'], mermaid_text(entry['impact']))):
+                raise ValueError('archived related branch requires its original fork, merge and impact')
+        else:
+            # A detached conversation can have several connected steps of its own.
+            reached = {branch}
+            frontier = [branch]
+            while frontier:
+                node = frontier.pop()
+                unvisited = neighbors.get(node, set()) - reached
+                reached.update(unvisited)
+                frontier.extend(unvisited)
+            if origin in reached:
+                raise ValueError('an unrelated branch must remain disconnected from the main path')
+
+
+def check_final_record(record, history=()):
+    if isinstance(record, dict) and set(record) == {'read_only_source'}:
+        source = record['read_only_source']
+        if isinstance(source, str) and source.strip():
+            return
+        raise ValueError('read_only_source requires an explicit user instruction')
+    graph = read_discussion_record(record)
+    check_archived_branches(graph, history)
+    return graph
+
+
 def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument('mode', choices=('check', 'next', 'begin', 'final'))
+    parser = argparse.ArgumentParser(description='Inspect workflow state or use record-check --help for a summary.')
+    modes = ('intake', 'check', 'next', 'begin', 'final')
+    if sys.argv[1:2] == ['record-check']:
+        parser.prog += ' record-check'
+        for flag in ('--project', '--summary', '--turn-id', '--answer'):
+            parser.add_argument(flag, required=True)
+        try:
+            read_discussion_record(vars(parser.parse_args(sys.argv[2:])))
+        except (OSError, RuntimeError, ValueError) as exc:
+            print(json.dumps({'ok': False, 'errors': [str(exc)]}, ensure_ascii=False))
+            return 1
+        print(json.dumps({'ok': True}))
+        return 0
+    parser.add_argument('mode', choices=modes)
     source = parser.add_mutually_exclusive_group(required=True)
     source.add_argument('--state')
     source.add_argument('--json', dest='inline_json')
@@ -2184,6 +2634,12 @@ def main():
         else:
             with open(args.state, encoding='utf-8') as f:
                 payload = json.load(f)
+
+        if args.mode == 'intake':
+            if args.previous_state or args.emit_state:
+                raise ValueError('intake does not consume or emit workflow checkpoints')
+            print(json.dumps(intake(payload), ensure_ascii=False))
+            return 0
 
         if (isinstance(payload, dict) and 'changes' in payload and
                 ('task_id' not in payload or 'state' in payload or 'previous' in payload)):
@@ -2242,7 +2698,11 @@ def main():
                 transition_errors.append('formal plan display requires the preceding discussion or presentation state')
         errors.extend(transition_errors)
         if args.mode == 'final':
-            errors.extend(validate_discussion_final(state, draft_reply, discussion_handoff))
+            if not errors:
+                recorded_graph = None
+                if state.get('phase') == 'discussion':
+                    recorded_graph = check_final_record(payload.get('discussion_record'), state.get('branch_history', []))
+                errors.extend(validate_discussion_final(state, draft_reply, discussion_handoff, recorded_graph))
             errors.extend(validate_plan_final(state, draft_reply, payload, routed))
             result = {'ok': not errors, 'errors': errors}
         elif args.mode == 'next':
@@ -2273,7 +2733,7 @@ def main():
         print(json.dumps(result, ensure_ascii=False))
         safe_actions = ('paused', 'handle_interruption', 'wait_interruption', 'reconcile_interruption')
         return bool(errors) and result.get('action') not in safe_actions
-    except (OSError, ValueError, TypeError) as exc:
+    except (OSError, RuntimeError, ValueError, TypeError) as exc:
         print(json.dumps({'ok': False, 'errors': [str(exc)]}, ensure_ascii=False))
         return 1
 

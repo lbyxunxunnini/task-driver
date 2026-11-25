@@ -1,12 +1,24 @@
 # 轻量状态检查
 
-主控必须在对话或[唯一任务摘要](state-recovery.md#何时建立记录)中维护原目标、当前环节、已决定事项及来源、未决事项、下一动作和授权。普通讨论必须在对话中维护状态。达到[记录条件](state-recovery.md#何时建立记录)时，必须按记录规则建立或复用同一任务摘要，增量维护问题和回答。禁止为状态检查重复询问已确定事项或制造新问题。
+主控必须在对话或[唯一任务摘要](state-recovery.md#何时建立记录)中维护原目标、当前环节、已决定事项及来源、未决事项、下一动作和授权。目标确认后，正常讨论必须在当前项目的唯一任务摘要中维护状态；用户明确只读时在上下文内维护。达到[记录条件](state-recovery.md#何时建立记录)时，必须按记录规则建立或复用同一任务摘要，增量维护问题和回答。禁止为状态检查重复询问已确定事项或制造新问题。
 
 ## 强制入口与失败关闭
 
 `workflow_control.py` 为主控提供只读结构检查，流程动作由主控决定。主控每完成一个阶段结果，以及准备提问、展示计划或目标、启动子代理或开始执行前，必须调用 `next` 并执行返回动作。讨论最终回复和正式计划正文必须调用 `final`。准备业务执行时还必须调用 `begin`，并取得 `ok:true` 与 `execution_receipt` 后再启动第一项。
 
-脚本只读标准输入或指定 JSON，不创建、覆盖或更新任务记录。`next --state -` 从标准输入读取状态。`begin` 只返回一次性结构回执。讨论阶段的 `final` 从 `{"state":{...},"draft_reply":"最终回复草稿","discussion_handoff":{...}}` 读取状态、正文和唯一交接对象。`check` 只检查结构。
+脚本读取标准输入或指定 JSON；讨论阶段的 `final` 还读取指定任务摘要。`next --state -` 从标准输入读取状态。`begin` 只返回一次性结构回执。讨论阶段的 `final` 从 `{"state":{...},"draft_reply":"最终回复草稿","discussion_handoff":{...},"discussion_record":{...}}` 读取状态、正文和唯一交接对象。`check` 只检查结构。
+
+### 新任务开场 intake
+
+主控收到新任务时先调用 `python3 /absolute/path/task-driver/scripts/workflow_control.py intake --state -`，从标准输入传入开场信息。此时还没有阶段状态。直接向用户发出返回的问题并等待，每次只处理当前一问。
+
+| 实际已知的信息 | 输入示例 | 主控下一动作 |
+| --- | --- | --- |
+| 尚未说明目标 | `{}` | 按 `ask_goal` 询问用户希望达成的结果 |
+| 已说明目标，尚待确认理解 | `{"goal":"每周导出一份可打印的报告"}` | 按 `confirm_understanding` 复述理解，请用户确认。用户纠正时更新目标再核对 |
+| 用户已确认这份理解 | `{"goal":"每周导出一份可打印的报告","confirmation_source":"用户第 3 条消息确认上述目标"}` | 按 `continue_analysis` 进入 `phase:analysis` 开展深度分析 |
+
+复用对话中实际发生的确认。开场无需填写决定、覆盖核对、讨论闭合、计划或授权。恢复已有任务继续用原快照和原入口。
 
 ### 调用与纠错
 
@@ -144,15 +156,52 @@ python3 /absolute/path/task-driver/scripts/workflow_control.py next \
 讨论阶段最终回复示例（`semantic_review` 只表示语义复核契约已填写，不证明复核者真的独立或判断正确）：
 
 ```json
-{"state":{"task_id":"当前任务","phase":"discussion","status":"continue","next_action":"询问当前必要事项","decisions":[{"id":"D1","subject":"当前取舍","status":"pending","question":"当前取舍上你希望采用方案 A，还是方案 B？"}],"plan":{"presented":false},"coverage_checked":true,"plan_requested":false,"gates":{"plan":null,"goals":null,"execution":null,"subagents":null}},"draft_reply":"分析结果如下。\n\n当前取舍上你希望采用方案 A，还是方案 B？","discussion_handoff":{"kind":"decision","decision_id":"D1","semantic_review":{"reviewer":"main","status":"pass","target":"decision","decision_id":"D1","source":"主控按当前对话复核","checks":{"target_is_current":true,"not_already_decided":true,"not_delegated":true,"answerable_now":true,"single_question":true,"no_trailing_content":true}}}}
+{"state":{"task_id":"当前任务","phase":"discussion","status":"continue","next_action":"询问当前必要事项","decisions":[{"id":"D1","subject":"当前取舍","status":"pending","question":"当前取舍上你希望采用方案 A，还是方案 B？"}],"plan":{"presented":false},"coverage_checked":true,"plan_requested":false,"gates":{"plan":null,"goals":null,"execution":null,"subagents":null}},"discussion_record":{"project":"/work/report","summary":".task-driver/周报-计划摘要.md","turn_id":"用户第 3 条","answer":"先导出 PDF。"},"draft_reply":"分析结果如下。\n\n当前取舍上你希望采用方案 A，还是方案 B？","discussion_handoff":{"kind":"decision","decision_id":"D1","semantic_review":{"reviewer":"main","status":"pass","target":"decision","decision_id":"D1","source":"主控按当前对话复核","checks":{"target_is_current":true,"not_already_decided":true,"not_delegated":true,"answerable_now":true,"single_question":true,"no_trailing_content":true}}}}
 ```
 
 `discussion_handoff.kind` 必须使用下列值之一。
 
 - `decision` 用于存在阻塞计划的 `pending` 决定时。该决定必须填写 `question`，`decision_id` 必须对应其中一项。必须通过 `semantic_review` 核对正文问题实际对应当前待决项，无需逐字复制 `question`。待决项缺少显式问题、语义复核目标不一致或复核未通过时，校验失败。`next` 返回 `present_incomplete_plan`，或计划请求仍有缺口时，正文还必须交付绑定当前 `plan_request_source` 的缺口草案，语义复核必须填写 `incomplete_plan_delivered:true`。只问问题时计划请求仍待交付。
-- `plan_transition` 用于已核对覆盖、没有阻塞计划的待决项，且本轮计划尚未展示时。`next` 必须已返回 `request_plan_transition`。重开讨论时必须保留旧展示来源。最后一个问题必须符合[收口要求](#首次从讨论转入计划)，语义复核必须核对过渡意图。可以使用“是否结束讨论并开始展示正式计划与目标？”，也可自然措辞。
+- 新任务首次收口前，逐项对照原始请求、用户答复和已有记录。在每条 `decided`、已落实的 `delegated` 和 `excluded` 决定上填写 `implementation`（实际怎么做）和 `verification`（用什么观察判定是否满足）。排除项说明如何守住边界及如何核对。保留原 `id`、`value` 和 `source`，排除项无原值时显示主题。两种复核方式都须在正文为每项单列一句，格式为“原值：做法，核验时验法。”，可加列表符。例如记录 `{"id":"format","subject":"报告格式","status":"decided","value":"交付 PDF","source":"用户第 2 条：交付 PDF","implementation":"导出定稿","verification":"打开文件比对页数","detail_source":"已确认的交付说明第 3 段：导出定稿，打开文件比对页数"}` 对应正文“交付 PDF：导出定稿，核验时打开文件比对页数。”。
+- 主控自检时，做法和验法须能在本项的原值、原来源或补充依据 `detail_source` 找到对应片段。补充依据引用真实方案、规则或调研记录的位置和原文。主控核对它是否支持该项，发现新取舍时回到讨论。阶段标记后逐项展示上述各句，最后另起一行写“是否结束讨论并开始展示正式计划和验收目标？”。`discussion_handoff.approach_basis` 仍须以 `decision_id` 指向实际做法，`source_quote` 摘录原决定来源；已定做法的原值须出现在引文中。简答确认须引用提案及答复，委托须引用授权对象和范围。只要求比较资料不能作为采用某方案的依据。
+- 有明确授权且独立只读复核可用时，逐项说明以外的正文可自然措辞。复核者须先读原始请求、答复、调研和完整待发正文，再比对决定及依据，漏项或新增实质选择须退回。等待已发出的同一收口问题时沿用原记录；旧执行恢复无需补写首次收口字段。
+- 首次提出收口时，`discussion_handoff.choice_basis` 必须覆盖原请求和待发方案中的实质选择。已决定、已落实委托及已排除的记录都须引用，每项以 `decision_id` 和以原值填写的 `choice` 对回记录。决定来源必须支持采用该做法，范围或调研指令只支持其自身。排除项缺少原值时引用其主题，来源只支持排除本项。没有已决记录且确无实质选择时，用只含 `no_material_choice_reason` 的对象说明理由，并按下文提供已确认要求和限制做法的证据。空记录和单独一句理由无法通过新任务首次收口。检查器只验证引用及结构，语义由主控核对。恢复等待同一收口答复时复用原核对。
+- `plan_transition` 用于已核对覆盖、没有阻塞计划的待决项，且本轮计划尚未展示时。`next` 必须已返回 `request_plan_transition`。重开讨论时必须保留旧展示来源。最后一个问题必须符合[收口要求](#首次从讨论转入计划)，语义复核必须核对过渡意图。独立复核的正文可自然措辞，主控自检采用上文的可校验摘要。
 - `waived` 仅用于用户明确暂停、明确限定本轮只交付指定内容、明确只做本轮局部且暂不追问并已完成局部交付，或任务结束。状态必须相应为 `paused`、`scope_limited:true`、`local_only:true` 且 `local_done:true`，或 `complete`，并填写对应来源和 `semantic_review`。用户明确只要有缺口的讨论稿时，`scope_limited_source` 和 `plan_request_source` 必须引用同一消息。必须按草案动作写正文并使用 `waived`，语义复核必须用 `draft_only_scope:true` 确认用户限定，用 `incomplete_plan_delivered:true` 核对待发正文包含草案。正式计划的限定交付必须在收口问答期间保持有效，交付完成并恢复原任务时必须清除旧限定。暂停或局部处理后恢复原任务时，必须清除旧豁免或重新取得来源。
 - `tool_wait` 仅用于当前状态及 `next` 路由均为 `wait_tool`，且没有阻塞讨论的待决事项、待交付计划草案、活动插问或可继续独立工作的情况。用户明确限定只交付查询完成后的正式计划和目标时，范围和请求必须引用同一实际消息，语义复核必须确认 `formal_plan_only_wait:true`。必须已完成覆盖检查，正文必须说明实际等待原因与续接点，禁止提问。可报告尚在运行或结果未知的原操作。阻塞操作明确失败时必须先分类。必须保留原阶段、授权及操作标识，结果返回后必须重新核对状态并续接。禁止把等待记为用户暂停或目标完成。
+
+### 已确认要求只有一种做法
+
+用户已经确认要什么，适用约束又唯一限定了怎么做时，把这一行放在 `state.confirmed_requirements`。每项沿用同一任务记录的稳定编号：`source` 摘录用户确认的要求（含 `value`），`constraint_source` 摘录用户指定或现行规则限定的唯一做法（含 `implementation`）。`verification` 须能对回本项的依据，可用 `detail_source` 补充。主控须核查原文确实只允许该做法。“参考文档提到某方案”本身不能证明唯一性。例如：
+
+```json
+{"id":"R1","value":"交付周报","source":"用户第 2 条：交付周报","implementation":"导出 PDF","constraint_source":"归档规范第 4 条：只能导出 PDF","verification":"打开文件核对页数","detail_source":"归档检查第 2 项：打开文件核对页数"}
+```
+
+当全部要求都走这条路径时，保持 `decisions:[]`，照常逐项说明并问收口，无需虚构 `approach_basis`。两种复核方式均检查正文；空决定不能用来附加建议。有实质取舍的行仍按决定记录和 `choice_basis` 核对，主控自检沿用已选做法的溯源要求。收口问答之间改变已确认要求需重新收口。
+
+### 讨论摘要读回与正文展示
+
+每次发出正常讨论回复前，主控更新同项目唯一任务摘要，将实际路径和本轮匹配字段交给 `final` 读回检查。独立诊断使用下列等价命令。相对摘要路径以项目目录为基准，绝对路径也须解析到项目内。摘要中维护一个 fenced Mermaid `flowchart TD`、一个标有“当前位置”的节点和一份有数据行的四列表（你确认的要求、当前做法或待决问题、怎么验、状态）。
+
+```bash
+python3 scripts/workflow_control.py record-check --project "$project" --summary "$summary" --turn-id "$turn_id" --answer "$answer"
+```
+
+从实际会话取得本轮消息定位和可安全保存的单行答复摘录，首次方案讨论取本轮目标确认。没有宿主消息 ID 时使用同一会话中的用户消息序号。摘要正文就地替换以下两行，历史答复留在决定记录。禁止从旧文件反推本轮期望值。
+
+```text
+本轮消息：用户第 3 条
+本轮答复：先导出 PDF。
+```
+
+在 `final` 的输入顶层（与 `state` 或 `changes` 同级）传入以下对象。每次调用直接读回磁盘，匹配当前两行；文件缺失、跨项目、结构无效或本轮不符时返回 `ok:false`。旧快照可继续恢复，首次新讨论回复必须补录实际摘要。若用户明确限制只读，改传 `"discussion_record":{"read_only_source":"用户只读指令原文"}`，主控在上下文内维护记录。写入失败不能使用只读例外。
+
+```json
+{"discussion_record":{"project":"/work/report","summary":".task-driver/周报-计划摘要.md","turn_id":"用户第 3 条","answer":"先导出 PDF。"}}
+```
+
+讨论正文默认只展示业务内容，逐项收口保留每条要求、做法和验法，最后单独询问是否结束讨论。用户明确要看图或表时，`discussion_handoff.overview_request_source` 摘录该请求，只展示对应部分。主控负责核实来源和语义，旧图表送达记录不参与判定。
 
 `final` 校验问题交接时，讨论阶段最后一条非空正文必须是一个问题。脚本同时核对 `next` 的当前动作和 `semantic_review`。禁止借最终问题或免问类型绕过活动插问、未完成覆盖检查、阻塞操作或其他尚未接回的事项。报告原操作仍在等待时，必须满足 `tool_wait` 的全部条件。问题之后出现选项、总结或其他内容时，校验失败。正文没有问号、最后一行不是问题或只在中途提问，也会失败。即使当前无需提问，也必须显式传入字符串 `draft_reply`。
 
@@ -164,7 +213,7 @@ python3 /absolute/path/task-driver/scripts/workflow_control.py next \
 
 插入请求必须用 `interruptions` 数组记录，原阶段和状态必须保留在原字段。必须先以原状态调用 `next`。临时事项必须填写 `id`、`request`、用户消息 `source`、`status:continue` 和 `next_action`。必须等待脚本返回，将 `resume_point` 原样放回该项并保存后，再调用临时事项的工具，禁止并行。恢复点只包含原环节、状态、下一动作及等待依据，禁止复制完整计划和目标。禁止仅因插问把原待答问题记为已答。嵌套插入必须按顺序追加，禁止覆盖未完成事项。
 
-临时事项受阻时必须填写 `blocked` 和 `wait_reason`，脚本返回 `wait_interruption`。等待用户时必须另填已实际展示问题的 `wait_evidence`。用户明确取消时必须记 `cancelled` 与实际用户来源。用户要求继续且权限允许时，必须记 `continue`。必须按实际意思判断，禁止按固定关键词匹配。完成或取消时，必须填实际结果或取消依据 `result_evidence`，连同已保存的 `resume_point` 再调用 `next`。脚本返回 `reconcile_interruption` 和恢复点。必须先核对结果、最新要求及原状态，在正文交付临时结果或说明取消，再接回原事项。新信息影响原决定时，必须只更新受影响部分，禁止预记正文已交付。恢复点缺失时必须从可用对话或摘要补查，禁止猜测。
+临时事项受阻时必须填写 `blocked` 和 `wait_reason`，脚本返回 `wait_interruption`。等待用户时必须另填已实际展示问题的 `wait_evidence`。用户明确取消时必须记 `cancelled` 与实际用户来源。用户要求继续且权限允许时，必须记 `continue`。必须按实际意思判断，禁止按固定关键词匹配。完成或取消时，必须填实际结果或取消依据 `result_evidence`，连同已保存的 `resume_point` 再调用 `next`。讨论插问在 `branch` 记录来源节点 `origin` 和 `relation`。有关联时用 `related`，补充受影响节点 `target` 和实际影响 `impact`。完全无关时用 `unrelated`；完成或取消后按 `ask_return_to_main` 交付结果并询问是否回到原待答点，发出后填写 `return_question_source`。明确答复才记 `return_answer:yes/no` 与 `return_answer_source`，只有同意后才能恢复。恢复时脚本返回 `reconcile_interruption` 和恢复点，移除该项时同步把分支记录追加到 `branch_history`。必须先核对结果、最新要求及原状态，在正文交付临时结果或说明取消，再接回原事项。新信息影响原决定时，必须只更新受影响部分，禁止预记正文已交付。恢复点缺失时必须从可用对话或摘要补查，禁止猜测。
 
 原任务明确暂停时，处理临时事项前必须确认用户另行要求该事项且未暂停全部工作，再填写 `allow_while_paused:true` 和实际用户消息 `allow_while_paused_source`。接回后原任务必须保持暂停。临时事项被用户暂停后恢复时必须提供 `resume_source`。原状态存在结构或执行门槛错误时，必须在恢复原任务前处理 `original_state_errors`。独立且获准的临时请求可继续。恢复时无需传两份完整状态，已有 `previous` 时仍可用于原有跨轮检查。脚本只读并返回结果。记录和授权必须取自实际来源。
 

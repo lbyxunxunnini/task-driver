@@ -49,7 +49,7 @@ check_patterns SKILL.md '^## 状态与主控职责' '^## 阶段转换' '^## 展�
   '^## 确认与授权' '^## 完成门槛' '必须复用有效且未变化的决定和完整授权' \
   '链接不是递归加载指令' '动作前必须核对条件' '动作后必须用实际结果更新步骤' \
   '同一场景必须先交付有依据的建议' \
-  '^## 接到任务后的第一步' '必须先调查和分析' '有待决项时，必须先核实可查事实' \
+  '^## 接到任务后的第一步' '先确认目标理解' '理解获认可后' '整体思路.*全部待决项' '按依赖与影响只问当前一项' \
   '必须实际询问用户是否结束讨论' '必须停在讨论阶段，等待用户答复' '必须取得用户对该收口问题的明确肯定答复' \
   '正式计划与验收目标必须同轮展示' '等待用户调整限定' \
   '讨论中的局部请求完成后' '仅有阶段标记、总结或继续的承诺不算续接' '必须调用\[轻量检查\]' \
@@ -66,7 +66,7 @@ check_patterns SKILL.md '^## 状态与主控职责' '^## 阶段转换' '^## 展�
   '用户明确限定本轮只交付指定内容' 'superseded' 'goals.included' 'evidence_map' \
   'completion_basis' 'unverified_goals' '^## 不可短路主控' 'plan.steps' 'execution begin' \
   '已确认的条件有记录来源且未变化时必须复用' '推进必须遵守\[固定链路\]'
-check_patterns references/analysis.md '用户目标 → 实际使用过程' '禁止把当前不运行支付视为删除支付覆盖' \
+check_patterns references/analysis.md '用户目标 → 实际使用过程' '必须先核实可查事实' '禁止把当前不运行支付视为删除支付覆盖' \
   '未知条件会改变' '禁止编造调查结果' '已核实的现状' '候选方案' 'subagents.md#选择执行方式'
 check_patterns references/discussion.md '^## 回答后的推进' '^## 讨论完成门禁' '^## 决策项与提问' '更新必须限于实际回答对象' \
   '禁止记作否定、不可用、取消或委托' '覆盖核对' '决定核对' '状态检查的最终回复契约' \
@@ -104,7 +104,7 @@ check_patterns references/review.md '无论是否开启独立复核' '主模型�
   '禁止提供执行者自评和前次审查结论' '无法判断：审查输入不合规' \
   '禁止删改原审查报告' '独立审查次数禁止超过 8 次' '未受影响的有效证据可复用' \
   '当前有效目标' '明确委托模型决定子代理设置'
-check_patterns references/state-recovery.md '同一任务必须维护唯一的' '10 次用户回答' \
+check_patterns references/state-recovery.md '同一任务必须维护唯一的' '目标理解确认前在上下文维护' '确认后默认在当前项目创建或续用唯一的任务摘要' \
   '必须先保存并核实成功' '必须先保存有效变更再提问' '长计划开始执行前' \
   '禁止以步骤全部打勾判定目标达成' '结果未知.*必须先核查原操作' '终端断开不代表进程停止' \
   '禁止盲目重试' '继续累计已用次数' '禁止保存凭据或秘密' '本轮必须记录“正文待交付、状态待同步”' \
@@ -142,6 +142,7 @@ check_patterns references/templates.md '进度锚点交接模板' '引用与展�
   '\| 编号（如 F1） \|' '\| 编号（如 D1） \|' '\| 编号（如 G1） \|' \
   'included' 'excluded' 'source' 'evidence_map' 'goal_scope_baseline' 'completion_basis' 'completion_report' 'unverified_goals' \
   'local_goal_id' 'execution_receipt' 'plan.steps' 'unverified_plan_steps'
+check_patterns tests/dialogue-contracts/discussion-continuity-dedup.md '首次方案讨论前创建或续用唯一任务摘要' '无权写入时在对话上下文维护同等状态'
 check_patterns tests/dialogue-contracts/progress-anchor.md '不触发' '阶段结果' '不恢复子代理授权'
 check_patterns tests/dialogue-contracts/discussion-transition.md '最终提问门禁' '回答后仍有影响方案的待决项' \
   '最后一条实质内容不再是问题' '明确限定本轮只交付指定内容' \
@@ -156,9 +157,9 @@ check_patterns tests/dialogue-contracts/deferred-goal-tools.md '用户变更目�
   '将旧目标标记为 `superseded`' '不因宿主限制把用户已接受的结果改写成受阻' 'local_goal_id' \
   '取得用户对计划/对话编号跟踪的明确确认' '不能把执行授权当成 Goal 创建授权'
 check_patterns tests/dialogue-contracts/research-and-questioning.md '明确委托模型决定调查代理'
-check_patterns references/quick-start.md '可以用其他等效表达' 'semantic_review' 'included' 'excluded' 'evidence_map' \
+check_patterns references/quick-start.md '主控自检' 'semantic_review' 'included' 'excluded' 'evidence_map' \
   'goal_scope_baseline' '来源：用户要求'
-check_patterns tests/dialogue-contracts/addressable-summary.md '记录编号' '用户选项'
+check_patterns tests/dialogue-contracts/addressable-summary.md '编号不能代替可辨认内容' '用户选项'
 check_patterns tests/dialogue-contracts/design-doc-is-not-plan.md '创建执行目标' '只更新该决定' \
   '文档存在不等于计划已展示' '不用给我看计划' '目标不用确认' '完成/做好/第一版' \
   '可直接判断的结果' '把执行意图或文档引用写进计划、目标证据' '越权执行'
@@ -167,6 +168,13 @@ check_patterns tests/dialogue-contracts/no-short-circuit-execution.md '条件式
   '创建条件不明确时直接降级' '目标当成计划步骤'
 check_patterns references/templates.md '用户原话或消息来源' '实际确认或委托的内容' '恢复后第一步' \
   '当前事项及未答部分' '产物版本' '第七步|独立复核要求' '末尾必须只询问缺失的内容'
+check_patterns references/templates.md '^## 讨论图表示例' '^\| 你确认的要求 \| 当前做法或待决问题 \| 怎么验 \| 状态 \|$'
+check_patterns tests/dialogue-contracts/addressable-summary.md '复述并等待认可' '全部待决项' '沿依赖' '怎么做、怎么验' '据图表同轮展示' \
+  '默认不展示图表、不附摘要链接' '用户明确要看图时' '同时限定只读时'
+check_patterns references/discussion.md '首轮方案讨论在正文说明整体思路' '列出全部待决项' '只问当前优先的一项' '每项怎么做、怎么验'
+check_patterns references/state-recovery.md '图与表供内部维护' '默认不附摘要链接' '用户明确只读时'
+forbid_match '首次方案讨论时展示同一摘要的图表|无权写入时在对话内展示图表|提供同一文档入口|展示同一摘要的Mermaid|展示Mermaid 讨论推进图' \
+  README.md references/*.md tests/dialogue-contracts/*.md
 check_patterns references/scenarios.md '多轮正反例' '环境恢复' '创作设计' '测试方案' \
   '执行中澄清后继续' '未知不等于取消'
 check_patterns README.md '## 30 秒选择器' '## 文档导航' '## 当前版本' '## 本版改进' \
