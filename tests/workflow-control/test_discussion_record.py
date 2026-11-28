@@ -197,6 +197,72 @@ flowchart TD
         self.assertEqual([row['id'] for row in data['state']['decisions']], ['D1', 'D2'])
         self.assertTrue(record.finalize(self.root, self.summary, self.review(second))['ok'])
 
+    def test_changes_readback_covers_replacement_and_its_dependents(self):
+        self.request['patch']['decisions'][0]['business_context'] = '只要一页'
+        self.request['patch']['decisions'].extend([
+            dict(id='D2', subject='读者', status='pending', question='读者是谁？'),
+            dict(id='D3', subject='排版', value='单页', status='decided', source_ref=self.ref,
+                 depends_on=['D1'], implementation='限制为一页', verification='检查页数'),
+            dict(id='D4', subject='分组', value='按类别', status='decided', source_ref=self.ref,
+                 depends_on=['D3'], implementation='按类别分组', verification='核对分组'),
+            dict(id='D5', subject='标题', value='本周工作总结', status='decided', source_ref=self.ref,
+                 implementation='保留指定标题', verification='检查标题'),
+        ])
+        first = self.prepare()
+        self.summary.write_bytes(self.summary.read_bytes().replace(b'\n', b'\r\n'))
+        answer = '改成 Markdown，读者待定。\n'
+        (self.root / 'next.txt').write_text(answer)
+        source_ref = dict(source_id='next', start=1, end=1)
+        self.request.update(expected_summary_sha256=record.digest(self.summary.read_bytes()),
+                            readback='changes', turn=dict(id='用户第6条', **source_ref),
+                            patch=dict(decisions=[dict(id='D1', value='Markdown', source_ref=source_ref,
+                                                       implementation='输出本地 Markdown', verification='检查格式',
+                                                       business_context='读者待定')]))
+        self.request['sources'].append(dict(id='next', path='next.txt', sha256=record.digest(answer)))
+        preview = self.prepare()
+        readback = preview['summary_readback']
+        self.assertEqual(first['decision_id'], preview['decision_id'])
+        self.assertEqual('changes', preview['readback'])
+        for snippet in ('改成 Markdown，读者待定。', '读者是谁？', '"value": "PDF"',
+                        '| D1 Markdown', 'D1 原依据 source_ref current 1–1',
+                        'D1 现依据 source_ref next 1–1',
+                        '"business_context": {"原": "只要一页", "现": "读者待定"}', '检查页数', '核对分组'):
+            self.assertIn(snippet, readback)
+        self.assertEqual(1, readback.count('改成 Markdown，读者待定。'))
+        self.assertEqual(1, readback.count('PDF。只要一页，标题写本周工作总结。排版仍由你决定。'))
+        self.assertNotIn('检查标题', readback)
+        self.assertNotIn('迁移时的历史记录', readback)
+        self.assertIn('检查标题', self.summary.read_text())
+        self.assertIn(b'\r\n', self.summary.read_bytes())
+
+        review = self.review(preview)
+        review['semantic_review'].update(
+            target='decision', decision_id='D2',
+            checks=dict.fromkeys(record.workflow.DECISION_REVIEW_CHECKS +
+                                 record.workflow.GENERATED_RECORD_REVIEW_CHECKS, True))
+        self.assertTrue(record.finalize(self.root, self.summary, review)['ok'])
+
+    def test_changes_readback_only_includes_turn_and_pending_question_when_rows_are_unchanged(self):
+        self.request.update(readback='changes', patch=dict(status='continue', next_action='确定周报交付格式'))
+        first = self.prepare()
+        self.assertEqual('full', first['readback'])
+        self.request['expected_summary_sha256'] = first['record_sha256']
+        second = self.prepare()
+        self.assertEqual('changes', second['readback'])
+        self.assertIn('交付 PDF 还是 Markdown？', second['summary_readback'])
+        self.assertIn('本轮答复：', second['summary_readback'])
+        self.assertNotIn('迁移时的历史记录', second['summary_readback'])
+        self.assertLess(len(second['summary_readback']), len(first['summary_readback']))
+
+        self.request['expected_summary_sha256'] = second['record_sha256']
+        self.request['patch']['decisions'] = [
+            dict(id='D1', status='decided', value='PDF', source_ref=self.ref,
+                 implementation='输出本地 PDF', verification='打开文件核对格式')]
+        closure = self.prepare()
+        self.assertEqual('plan_transition', closure['kind'])
+        self.assertEqual('full', closure['readback'])
+        self.assertIn('迁移时的历史记录', closure['summary_readback'])
+
     def test_source_id_cannot_be_rebound(self):
         preview = self.prepare()
         self.request['expected_summary_sha256'] = preview['record_sha256']

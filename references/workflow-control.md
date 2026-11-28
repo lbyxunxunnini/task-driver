@@ -12,6 +12,8 @@
 
 已有获准更新的任务摘要、原始消息/资料文件可访问、当前仍为正常讨论且无活动插问时，优先调用 `scripts/discussion_record.py`。其职责是生成记录视图，不是判断用户意思。模型只提交本轮变化和真实来源引用；图、表、来源摘录、收口摘要及检查输入由脚本派生，不再另写完整状态、正文和最终输入副本。其他情况继续下文既有入口。
 
+写 `request.json` 时必须先填写顶层 `readback`。上一轮记录已核对且仍在上下文中的普通接续，必须用 `"changes"`。首次建立或迁移、上下文缺失后恢复、暂停和恢复、收口或查看完整图表时，用 `"full"`。同一会话只要仍有已核对上下文，就按普通接续处理。省略字段时脚本沿用完整读回。
+
 先读取实际对话和原摘要，使用 Skill 的绝对路径调用（示例路径需替换）：
 
 ```bash
@@ -26,12 +28,13 @@ python3 /absolute/path/task-driver/scripts/discussion_record.py finalize --proje
 
 ```json
 {
+  "readback": "changes",
   "expected_summary_sha256": "实际摘要哈希",
   "legacy_state": {"path": "state.json", "sha256": "原状态哈希"},
   "sources": [{"id": "current", "path": "current-message.txt", "sha256": "原文哈希"}],
   "turn": {"id": "实际本轮消息标识", "source_id": "current", "start": 1, "end": 1},
   "patch": {
-    "status": "continue", "next_action": "核对后收口", "coverage_checked": true,
+    "status": "continue", "next_action": "明确下一个待答事项",
     "decisions": [{"id": "原编号", "status": "decided", "value": "实际选择",
       "source_ref": {"source_id": "current", "start": 1, "end": 1},
       "implementation": "拟采用做法", "verification": "如何核验"}]
@@ -46,7 +49,9 @@ python3 /absolute/path/task-driver/scripts/discussion_record.py finalize --proje
 
 同一条实际消息的归纳写错时，可以在请求顶层附 `"interpretation_corrections":[{"id":"原编号","reason":"具体误读及修正依据"}]`，同时提交对应 patch。该决定的冻结 `source_ref` 必须指向本轮同一来源文件、位于本轮消息行范围内，并保留原 subject/status。纠错限于尚未进入计划或执行的同一消息重试，原摘要保留前后值和理由。用户后来实际修订决定或已确认要求时，引用变更依据更新对应字段，摘要会记录被替换的内容和来源。修改已确认要求的现有验法时，可在该项用 `detail_source_ref` 引用新的验收指令、规则或可核查材料，保留原要求与做法的引用。如果新的 `source_ref` 或 `constraint_source_ref` 已包含变更依据，无需重复填写。须对照新引用核实验法变更的含义与权限；换字段引用旧行、改写待发草稿都不能提供新依据。首次迁移时，给既有要求和做法补绑旧文件仅补齐出处。确有新验收材料时可在同轮修订。首次拟订的验法随完整草稿复核。须撤回整项且现有生成入口无法表达时，按[已有记录的人工续接](state-recovery.md#单一记录与生成视图)保存撤回依据。
 
-`prepare` 检查旧新状态、原来源及实际路由，保留旧编号、流程节点和历史，只更新原摘要；并返回 `summary_readback`、`draft_reply`、`kind`、`record_sha256` 和 `draft_sha256`。必须审核实际读回与完整草稿：旧要求是否遗漏、原话限定是否保留、做法是否引入未授权取舍。失败须按实际原因修正同一请求，不能换案例、造原话或强行修改生成图表。当前版本只处理正常待决、收口和有明确依据的暂停；其他动作返回错误且不写入。
+`prepare` 检查旧新状态、原来源及实际路由，保留旧编号、流程节点和历史，只更新原摘要。返回的 `readback` 表示实际范围。增量的 `summary_readback` 来自保存后读回的摘要，包括本轮消息与答复、当前待问、变化的图节点或连线、变化或受影响的表行，以及变化的其他字段和来源。遇到迁移、暂停、恢复、收口或请求完整视图，脚本返回 `full`。
+
+用 `summary_readback` 和已核对的来源审核完整 `draft_reply`，确认旧要求、原话限定及取舍均正确。证据足够时直接使用返回片段和 `record_sha256`、`draft_sha256`，禁止重读同一摘要或重算同一哈希。缺少依据时按引用定向回查。失败须按实际原因修正同一请求，不能换案例、造原话或强行修改生成图表。当前生成路径只处理正常待决、收口和有明确依据的暂停；其他动作返回错误且不写入。
 
 当前动作、待决问题及图表统一从受控记录生成。迁移前摘要的其余文字保存在「迁移时的历史记录」，其中原有状态栏与决策表代表迁移时点。已有旧版受控摘要先核对原视图，再由下一次 `prepare` 刷新成当前格式，复核新草稿后继续。
 

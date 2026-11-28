@@ -7,6 +7,7 @@ by this program. The host must protect those files from the responding model.
 import argparse
 from contextlib import contextmanager
 from copy import deepcopy
+from difflib import unified_diff
 import hashlib
 import json
 import os
@@ -407,6 +408,75 @@ def render(record, state, kind, decision_id, sources):
     return text.rstrip() + '\n\n' + canonical + '\n', answer
 
 
+def changed_readback(original, saved, previous, current, target, turn, source_paths, sources):
+    """Return the current turn and affected fragments from the verified snapshots."""
+    original = original.split(START, 1)[0]
+    saved = saved.split(START, 1)[0]
+    old_graph, new_graph = GRAPH.search(original), GRAPH.search(saved)
+    before = {row['id']: row for row, _ in rows_for(previous)}
+    after = {row['id']: row for row, _ in rows_for(current)}
+    changed = {ident for ident in before.keys() | after.keys() if before.get(ident) != after.get(ident)}
+    affected = set(changed)
+    while True:
+        dependents = {ident for rows in (before, after) for ident, row in rows.items()
+                      if affected.intersection(row.get('depends_on', []))}
+        if dependents <= affected:
+            break
+        affected.update(dependents)
+    affected.add(target)
+
+    sections = [saved[:new_graph.start()].strip()]
+    graph_diff = list(unified_diff(old_graph[1].splitlines(), new_graph[1].splitlines(),
+                                   fromfile='原讨论图', tofile='已保存讨论图', n=0, lineterm=''))
+    if graph_diff:
+        sections.append('\n'.join(graph_diff))
+
+    old_lines = dict(zip(before, TABLE.search(original)[0].splitlines()[2:]))
+    new_lines = dict(zip(after, TABLE.search(saved)[0].splitlines()[2:]))
+    table_fields = {'value', 'status', 'implementation', 'verification'}
+    turn_span = source_span(turn, source_paths)
+    quotes = {}
+    for ident in dict.fromkeys((*before, *after)):
+        if ident not in affected:
+            continue
+        old = old_lines.get(ident)
+        new = new_lines.get(ident)
+        if new is not None:
+            sections.append(new)
+        if ident in changed:
+            old_row, new_row = before.get(ident, {}), after.get(ident, {})
+            old_values = {key: old_row[key] for key in sorted(table_fields & old_row.keys())
+                          if old_row[key] != new_row.get(key)}
+            if old_values:
+                sections.append(ident + ' 原值 ' + json.dumps(old_values, ensure_ascii=False))
+            shown_fields = {'id', 'depends_on', *table_fields, *REQUIREMENT_SOURCES}
+            if (old_row.get('question') or '') in (old or '') and (new_row.get('question') or '') in (new or ''):
+                if old_row.get('question') != new_row.get('question'):
+                    sections.append(ident + ' 原待问 ' + (old_row.get('question') or '无'))
+                shown_fields.add('question')
+            fields = {key: {'原': old_row.get(key), '现': new_row.get(key)}
+                      for key in sorted((old_row.keys() | new_row.keys()) - shown_fields)
+                      if old_row.get(key) != new_row.get(key)}
+            if fields:
+                sections.append(ident + ' 其他字段变化 ' + json.dumps(fields, ensure_ascii=False))
+            for label, row in (('原依据', old_row), ('现依据', new_row)):
+                refs = []
+                for key in REQUIREMENT_SOURCES:
+                    ref = row.get(key)
+                    if ref is None or (label == '原依据' and ref == new_row.get(key)):
+                        continue
+                    span = source_span(ref, source_paths)
+                    location = f"{ref['source_id']} {ref['start']}–{ref['end']}"
+                    if span != turn_span and span not in quotes:
+                        quotes[span] = (location, excerpt(ref, sources))
+                    source = '本轮答复' if span == turn_span else quotes[span][0]
+                    refs.append(f'{key} {location}' + (f'（见 {source}）' if source != location else ''))
+                if refs:
+                    sections.append(f"{ident} {label} " + '、'.join(refs))
+    sections.extend(f"{location}：{quote}" for location, quote in quotes.values())
+    return '\n\n'.join(sections)
+
+
 @contextmanager
 def summary_write_lock(directory):
     # Lock a stable object: replacing a summary changes the inode of the file itself.
@@ -557,6 +627,9 @@ def retain_replaced_decisions(record, previous, corrections):
 
 
 def prepare(project, summary, request):
+    readback = request.get('readback', 'full')
+    if readback not in ('full', 'changes'):
+        raise ValueError('readback must be full or changes')
     original_bytes = summary.read_bytes()
     original = original_bytes.decode('utf-8').replace('\r\n', '\n')
     expected = request.get('expected_summary_sha256')
@@ -564,6 +637,7 @@ def prepare(project, summary, request):
         raise ValueError('expected_summary_sha256 must match the current summary')
     record = parse_record(original)
     migrating = record is None
+    can_read_changes = False
     if record is None:
         legacy = request.get('legacy_state', {})
         path = local_path(project, legacy.get('path'))
@@ -581,6 +655,7 @@ def prepare(project, summary, request):
         old_kind, old_target, _ = saved_route(record, old_state)
         if render(record, old_state, old_kind, old_target, old_sources)[0] != original:
             raise ValueError('generated views changed outside the canonical record')
+        can_read_changes = record.get('view_version') == 2 and old_kind == 'decision'
     if record.get('view_version', 1) == 1:
         record['graph_template'], labels = separate_template_dependencies(record['graph_template'], record['state'])
         if labels:
@@ -646,9 +721,16 @@ def prepare(project, summary, request):
     if b'\r\n' in original_bytes and b'\n' not in original_bytes.replace(b'\r\n', b''):
         data = data.replace(b'\n', b'\r\n')
     saved = atomic_write(summary, data, expected)
+    saved_text = saved.decode('utf-8')
+    if readback == 'changes' and can_read_changes and kind == 'decision' and 'overview' not in record:
+        summary_readback = changed_readback(original, saved_text.replace('\r\n', '\n'), previous_raw,
+                                            record['state'], target, record['turn'], source_paths, sources)
+    else:
+        readback = 'full'
+        summary_readback = saved_text.split(START, 1)[0].rstrip()
     return {'ok': True, 'action': routed['action'], 'kind': kind, 'decision_id': target,
             'record_sha256': digest(saved), 'draft_sha256': digest(draft), 'draft_reply': draft,
-            'summary_readback': saved.decode('utf-8').split(START, 1)[0].rstrip(),
+            'summary_readback': summary_readback, 'readback': readback,
             'review_required': True, 'note': 'Source bytes matched; origin/meaning still require review. No delivery recorded.'}
 
 
